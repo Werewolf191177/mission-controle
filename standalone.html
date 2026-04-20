@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MISSION CONTRÔLE - Dashboard</title>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Icons (Lucide) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- React & Framer Motion -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'app-bg': '#0A0A0A',
+                        'card-bg': '#141414',
+                        'accent': '#00FF94',
+                        'accent-blue': '#00D1FF',
+                        'accent-purple': '#BD00FF',
+                        'accent-pink': '#FF007A',
+                        'accent-orange': '#FF9900',
+                        'accent-yellow': '#EBFF00',
+                        'border': '#333333',
+                        'text-dim': '#888888',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Space Grotesk', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        @keyframes srgb-text {
+            0% { color: #00FF94; }
+            20% { color: #00D1FF; }
+            40% { color: #BD00FF; }
+            60% { color: #FF007A; }
+            80% { color: #EBFF00; }
+            100% { color: #00FF94; }
+        }
+
+        .animate-srgb {
+            animation: srgb-text 8s infinite linear;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0A0A0A;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #333333;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #444444;
+        }
+
+        /* Prevent range input default styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #333;
+            border-radius: 2px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            background: #00FF94;
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -4px;
+            box-shadow: 0 0 10px rgba(0, 255, 148, 0.5);
+        }
+    </style>
+</head>
+<body class="bg-app-bg text-white font-sans overflow-hidden">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
+        const { motion, AnimatePresence } = FramerMotion;
+
+        // Simple Lucide wrapper for standalone
+        const Icon = ({ name, size = 16, className = "" }) => {
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [name]);
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const App = () => {
+            // States
+            const [missions, setMissions] = useState([]);
+            const [missionCounter, setMissionCounter] = useState(1);
+            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+            const [copied, setCopied] = useState(false);
+            const [toast, setToast] = useState({ show: false, message: '', type: 'calendar' });
+            
+            // Form States
+            const [product, setProduct] = useState('AT (black/clear/d.red)');
+            const [color, setColor] = useState('neutre');
+            const [argument, setArgument] = useState('lifestyle');
+            const [univers, setUnivers] = useState('PACKSHOT STUDIO');
+            const [format, setFormat] = useState('standard');
+            const [position, setPosition] = useState('CENTRE');
+            const [support, setSupport] = useState('photo');
+            const [status, setStatus] = useState('en attente');
+            const [date, setDate] = useState('');
+            const [info, setInfo] = useState('');
+
+            const addMission = () => {
+                const getInitialProgress = (s) => {
+                    if (s === 'livré') return 100;
+                    if (s === 'déja shooter') return 75;
+                    if (s === 'en cour de shoot') return 50;
+                    if (s === 'produit preparé') return 25;
+                    return 0;
+                };
+
+                const dateRegex = /(\d{2}[\/\-]\d{2}[\/\-]\d{4})|(\d{4}[\/\-]\d{2}[\/\-]\d{2})/;
+                const noteDate = info.match(dateRegex);
+                const finalDate = date || (noteDate ? noteDate[0] : '');
+
+                const newMission = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    missionNo: missionCounter,
+                    product,
+                    color,
+                    argumentType: argument,
+                    univers,
+                    format,
+                    position,
+                    support,
+                    status,
+                    progress: getInitialProgress(status),
+                    info,
+                    deadline: finalDate,
+                    createdAt: Date.now()
+                };
+
+                setMissions([newMission, ...missions]);
+                setMissionCounter(missionCounter + 1);
+                setInfo('');
+                setDate('');
+
+                // Slash command detection
+                if (info.includes('/calendar') || info.includes('/task')) {
+                    const isCalendar = info.includes('/calendar');
+                    const command = isCalendar ? 'Google Agenda' : 'Google Task';
+                    
+                    setToast({ 
+                        show: true, 
+                        message: `Planification ${command} envoyée !`, 
+                        type: isCalendar ? 'calendar' : 'task' 
+                    });
+
+                    // Sound effect
+                    try {
+                        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+                        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                        osc.start();
+                        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.5);
+                        osc.stop(audioCtx.currentTime + 0.5);
+                    } catch (e) {}
+
+                    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+                }
+            };
+
+            const updateMission = (id, updates) => {
+                setMissions(missions.map(m => {
+                    if (m.id === id) {
+                        const updated = { ...m, ...updates };
+                        if (updates.status) {
+                            if (updates.status === 'livré') updated.progress = 100;
+                            else if (updates.status === 'déja shooter') updated.progress = 75;
+                            else if (updates.status === 'en cour de shoot') updated.progress = 50;
+                            else if (updates.status === 'produit preparé') updated.progress = 25;
+                            else if (updates.status === 'en attente') updated.progress = 0;
+                        }
+                        return updated;
+                    }
+                    return m;
+                }));
+            };
+
+            const removeMission = (id) => setMissions(missions.filter(m => m.id !== id));
+
+            const globalProgress = missions.length > 0 
+                ? Math.round(missions.reduce((acc, m) => acc + m.progress, 0) / missions.length) 
+                : 0;
+
+            const copyToExcel = () => {
+                const headers = ['N°', 'Produit', 'Couleur', 'Argument', 'Univers', 'Format', 'Position', 'Support', 'Échéance', 'Statut', 'Pros', 'Infos'];
+                const rows = missions.map(m => [m.missionNo, m.product, m.color, m.argumentType, m.univers, m.format, m.position, m.support, m.deadline || '-', m.status, `${m.progress}%`, m.info]);
+                const tsv = [headers, ...rows].map(row => row.join('\t')).join('\n');
+                navigator.clipboard.writeText(tsv);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+
+            return (
+                <div className="h-screen w-full flex flex-col bg-app-bg text-white overflow-hidden">
+                    {/* Toast Notification */}
+                    <AnimatePresence>
+                        {toast.show && (
+                            <motion.div 
+                                initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                                className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-4 bg-black/95 border-2 border-accent px-6 py-4 rounded-xl shadow-[0_0_30px_rgba(0,255,148,0.3)] backdrop-blur-md"
+                            >
+                                <div className={`p-2 rounded-lg ${toast.type === 'calendar' ? 'bg-accent/20 text-accent' : 'bg-accent-blue/20 text-accent-blue'}`}>
+                                    <Icon name={toast.type === 'calendar' ? 'calendar' : 'bell'} size={20} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] uppercase font-black tracking-widest text-white/50">Planification</span>
+                                    <span className="text-sm font-bold text-white">{toast.message}</span>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Header */}
+                    <header className="px-10 py-6 border-b border-white/5 flex justify-between items-end relative group">
+                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-accent via-accent-purple to-accent-pink opacity-50"></div>
+                        <div>
+                            <h1 className="font-display text-4xl uppercase tracking-tighter group-hover:animate-srgb transition-colors">
+                                MISSION<br />CONTRÔLE
+                            </h1>
+                            <p className="text-[10px] text-accent font-bold mt-1 uppercase tracking-widest flex items-center gap-2">
+                                <Icon name="sparkles" size={10} className="animate-pulse" />
+                                Interactive Production Interface
+                            </p>
+                        </div>
+                        <button onClick={() => setIsSettingsOpen(true)} className="p-3 border border-border rounded hover:border-accent hover:text-accent transition-all">
+                            <Icon name="settings" size={18} />
+                        </button>
+                    </header>
+
+                    <div className="flex-1 flex overflow-hidden">
+                        {/* Sidebar */}
+                        <aside className="w-[400px] border-r border-border p-8 overflow-y-auto custom-scrollbar space-y-6">
+                            {/* Product Select */}
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold uppercase text-text-dim flex items-center gap-2">
+                                    <Icon name="package" size={12} className="text-accent" /> Produit
+                                </label>
+                                <select value={product} onChange={e => setProduct(e.target.value)} className="w-full bg-card-bg border border-border p-3 rounded text-sm outline-none focus:border-accent">
+                                    {['AT (black/clear/d.red)', 'HARD PRO', 'OCH', 'PWB-30', 'PWB-45', 'SBIN', 'SST', 'Portraits'].map(p => <option key={p} value={p}>{p}</option>)}
+                                </select>
+                            </div>
+
+                            {/* Argument Buttons */}
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold uppercase text-text-dim flex items-center gap-2">
+                                    <Icon name="target" size={12} className="text-accent-blue" /> Argument
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {['close up', 'lifestyle', 'packshot 45°', 'image principale'].map(btn => (
+                                        <button key={btn} onClick={() => setArgument(btn)} className={`p-2 text-[10px] border rounded transition-all lowercase ${argument === btn ? 'border-accent-blue bg-accent-blue/5 text-accent-blue' : 'border-border bg-card-bg text-text-dim'}`}>
+                                            {btn}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Univers Buttons */}
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold uppercase text-text-dim flex items-center gap-2">
+                                    <Icon name="map-pin" size={12} className="text-accent-purple" /> Univers
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {['BUREAU', 'GARAGE', 'STUDIO', 'SALON'].map(u => (
+                                        <button key={u} onClick={() => setUnivers(u)} className={`p-2 text-[10px] border rounded transition-all ${univers === u ? 'border-accent-purple bg-accent-purple/5 text-accent-purple' : 'border-border bg-card-bg text-text-dim'}`}>
+                                            {u}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                             {/* Support Buttons */}
+                             <div className="space-y-2">
+                                <label className="text-[10px] font-bold uppercase text-text-dim flex items-center gap-2">
+                                    <Icon name="film" size={12} className="text-accent-pink" /> Support
+                                </label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {['photo', 'video', 'graphisme'].map(s => (
+                                        <button key={s} onClick={() => setSupport(s)} className={`p-2 text-[10px] border rounded transition-all ${support === s ? 'border-accent-pink bg-accent-pink/5 text-accent-pink' : 'border-border bg-card-bg text-text-dim'}`}>
+                                            {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Notes */}
+                            <div className="space-y-4 pt-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold uppercase text-text-dim flex items-center gap-2">
+                                        <Icon name="calendar" size={12} className="text-accent-yellow" /> Date
+                                    </label>
+                                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-card-bg border border-border p-3 rounded text-sm outline-none focus:border-accent" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold uppercase text-text-dim flex items-center gap-2">
+                                        <Icon name="file-text" size={12} className="text-accent-blue" /> Notes
+                                    </label>
+                                    <textarea value={info} onChange={e => setInfo(e.target.value)} placeholder="Utilisez /calendar ou /task..." className="w-full bg-card-bg border border-border p-3 rounded text-sm outline-none focus:border-accent h-20 resize-none" />
+                                    {info.startsWith('/') && <p className="text-[9px] text-accent animate-pulse font-bold">{info.split(' ')[0]} détecté</p>}
+                                </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex flex-col gap-2">
+                                <button onClick={addMission} className="w-full py-4 bg-gradient-to-r from-accent to-accent-blue text-black font-black uppercase text-xs rounded hover:brightness-110 shadow-lg flex items-center justify-center gap-2">
+                                    <Icon name="rocket" size={16} /> Ajouter au tableau
+                                </button>
+                            </div>
+                        </aside>
+
+                        {/* Content */}
+                        <main className="flex-1 p-10 overflow-y-auto custom-scrollbar bg-[#0D0D0D]">
+                            <div className="flex flex-col gap-8 mb-10">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="font-display text-2xl uppercase animate-srgb">Rapport de Production</h2>
+                                    <div className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-[10px] font-bold text-text-dim uppercase tracking-widest">
+                                        {missions.length} Missions actives
+                                    </div>
+                                </div>
+
+                                {missions.length > 0 && (
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div className="bg-card-bg border border-border p-6 rounded relative overflow-hidden group">
+                                            <Icon name="bar-chart-3" size={48} className="absolute top-0 right-0 p-2 opacity-5" />
+                                            <p className="text-[9px] text-text-dim uppercase font-black tracking-widest mb-1">Avancement Global</p>
+                                            <h3 className="text-4xl font-display animate-srgb">{globalProgress}%</h3>
+                                            <div className="w-full h-1 bg-white/5 mt-4 rounded-full overflow-hidden">
+                                                <div className="h-full bg-accent transition-all" style={{ width: `${globalProgress}%` }}></div>
+                                            </div>
+                                        </div>
+                                        <div className="bg-card-bg border border-border p-6 rounded relative overflow-hidden group">
+                                            <Icon name="pie-chart" size={48} className="absolute top-0 right-0 p-2 opacity-5" />
+                                            <p className="text-[9px] text-text-dim uppercase font-black tracking-widest mb-2">Répartition Support</p>
+                                            <div className="flex gap-2 items-end">
+                                                {['photo', 'video', 'graphisme'].map(t => {
+                                                    const c = missions.filter(m => m.support === t).length;
+                                                    const h = missions.length ? (c / missions.length) * 100 : 0;
+                                                    return <div key={t} className="flex-1 bg-white/5 h-12 relative rounded-sm overflow-hidden" title={t}>
+                                                        <div className="absolute bottom-0 left-0 w-full bg-accent-blue" style={{ height: `${h}%`, opacity: t === 'video' ? 1 : 0.4 }}></div>
+                                                    </div>
+                                                })}
+                                            </div>
+                                        </div>
+                                        <div className="bg-card-bg border border-border p-6 rounded relative overflow-hidden group">
+                                            <Icon name="trending-up" size={48} className="absolute top-0 right-0 p-2 opacity-5" />
+                                            <p className="text-[9px] text-text-dim uppercase font-black tracking-widest mb-1">Statut Live</p>
+                                            <h3 className="text-xl font-display text-accent">Actif</h3>
+                                            <div className="flex gap-1 h-6 items-end mt-2">
+                                                {[1,2,3,4,5,6].map(i => <div key={i} className="flex-1 bg-accent/20 animate-pulse" style={{ height: Math.random() * 100 + '%' }}></div>)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="w-full overflow-x-auto">
+                                <table className="w-full border-collapse min-w-[1000px]">
+                                    <thead>
+                                        <tr className="border-b-2 border-border/50 text-left">
+                                            <th className="py-4 px-2 text-[10px] uppercase font-black text-accent">N°</th>
+                                            <th className="py-4 px-2 text-[10px] uppercase font-black text-text-dim">Produit</th>
+                                            <th className="py-4 px-2 text-[10px] uppercase font-black text-accent-blue">Argument</th>
+                                            <th className="py-4 px-2 text-[10px] uppercase font-black text-accent-pink w-32">Support</th>
+                                            <th className="py-4 px-2 text-[10px] uppercase font-black text-accent-yellow w-32">Échéance</th>
+                                            <th className="py-4 px-2 text-[10px] uppercase font-black text-text-dim max-w-[150px]">Notes</th>
+                                            <th className="py-4 px-2 text-[10px] uppercase font-black text-accent-blue w-40">Statut</th>
+                                            <th className="py-4 px-2 text-[10px] uppercase font-black text-accent-purple w-40">Progression</th>
+                                            <th className="py-4 px-2 text-right"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-white/5">
+                                        {missions.map(m => (
+                                            <tr key={m.id} className="hover:bg-white/[0.02] transition-colors group">
+                                                <td className="py-4 px-2 font-mono text-[10px] text-accent opacity-50">#{m.missionNo}</td>
+                                                <td className="py-4 px-2 font-bold text-xs">{m.product}</td>
+                                                <td className="py-4 px-2 text-[10px] text-text-dim uppercase">{m.argumentType}</td>
+                                                <td className="py-4 px-2">
+                                                    <span className={`text-[9px] px-2 py-0.5 border rounded-full uppercase font-black ${m.support === 'video' ? 'border-accent-pink text-accent-pink' : 'border-accent-blue text-accent-blue'}`}>
+                                                        {m.support}
+                                                    </span>
+                                                </td>
+                                                <td className="py-4 px-2 text-[10px] text-accent-yellow font-bold uppercase">
+                                                    {m.deadline || '-'}
+                                                    {(m.info.includes('/calendar') || m.info.includes('/task')) && <span className="block text-[8px] opacity-50 underline">planner</span>}
+                                                </td>
+                                                <td className="py-4 px-2 text-[10px] text-text-dim truncate max-w-[150px]" title={m.info}>
+                                                    {m.info || '-'}
+                                                </td>
+                                                <td className="py-4 px-2">
+                                                    <select value={m.status} onChange={e => updateMission(m.id, { status: e.target.value })} className="bg-transparent border border-white/10 rounded px-2 py-1 text-[10px] uppercase font-black outline-none focus:border-accent w-full cursor-pointer">
+                                                        {['en attente', 'produit preparé', 'en cour de shoot', 'déja shooter', 'livré'].map(s => <option key={s} value={s} className="bg-app-bg text-white">{s}</option>)}
+                                                    </select>
+                                                </td>
+                                                <td className="py-4 px-2">
+                                                    <div className="flex flex-col gap-1">
+                                                        <div className="flex justify-between text-[9px] font-mono text-text-dim">
+                                                            <span>{m.progress}%</span>
+                                                            {m.progress === 100 && <Icon name="check" size={10} className="text-accent" />}
+                                                        </div>
+                                                        <input type="range" min="0" max="100" value={m.progress} onChange={e => updateMission(m.id, { progress: parseInt(e.target.value) })} className="w-full" />
+                                                    </div>
+                                                </td>
+                                                <td className="py-4 px-2 text-right">
+                                                    <button onClick={() => removeMission(m.id)} className="text-text-dim hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                                                        <Icon name="trash-2" size={14} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </main>
+                    </div>
+
+                    {/* Settings Modal */}
+                    <AnimatePresence>
+                        {isSettingsOpen && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center p-8">
+                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsSettingsOpen(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                                <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="bg-card-bg border border-border w-full max-w-xl p-10 relative z-10">
+                                    <div className="flex justify-between items-center mb-8">
+                                        <h2 className="text-2xl font-display uppercase italic">System.Config</h2>
+                                        <button onClick={() => setIsSettingsOpen(false)}><Icon name="x" size={24} /></button>
+                                    </div>
+                                    <div className="space-y-6">
+                                    </div>
+                                    <button onClick={() => setIsSettingsOpen(false)} className="w-full py-4 bg-accent text-black font-black uppercase text-xs mt-10 rounded hover:brightness-110">Sauvegarder</button>
+                                </motion.div>
+                            </div>
+                        )}
+                    </AnimatePresence>
+
+                    {/* Footer / Excel */}
+                    <footer className="p-4 border-t border-border flex justify-end gap-4 bg-app-bg relative z-20">
+                        <button onClick={copyToExcel} className="px-6 py-2 border border-border rounded text-[10px] font-black uppercase tracking-widest hover:border-accent hover:text-accent flex items-center gap-2 transition-all">
+                            {copied ? <Icon name="check" size={14} className="text-accent" /> : <Icon name="copy" size={14} />}
+                            Copier pour Excel
+                        </button>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

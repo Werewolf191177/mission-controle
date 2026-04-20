@@ -1,0 +1,6 @@
+{
+  "name": "Mission Contrôle",
+  "description": "Interactive web interface for managing production missions with custom categories and Excel-friendly output.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
