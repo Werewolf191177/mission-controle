@@ -39,7 +39,6 @@ import {
   AlertTriangle,
   Upload,
   Save,
-  Download,
   Filter,
   Search,
   FilterX,
@@ -49,7 +48,6 @@ import {
   Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
-import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
 interface CategoryConfig {
@@ -202,9 +200,9 @@ export default function App() {
   // UI State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<{ show: boolean, message: string, type: 'calendar' | 'task' }>({ show: false, message: '', type: 'calendar' });
+  const [isCapturing, setIsCapturing] = useState(false);
   
   // Filter state
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -237,6 +235,68 @@ export default function App() {
       setCategories(restored);
     }
   }, []);
+
+
+  const captureAsJPEG = async () => {
+    const reportElement = document.getElementById('global-report-container');
+    if (!reportElement) return;
+
+    try {
+      setIsCapturing(true);
+      
+      // Force visibility for capture
+      const originalStyle = reportElement.style.display;
+      const originalPosition = reportElement.style.position;
+      const originalTop = reportElement.style.top;
+      const originalLeft = reportElement.style.left;
+      
+      reportElement.style.display = 'block';
+      reportElement.style.position = 'relative';
+      reportElement.style.top = '0';
+      reportElement.style.left = '0';
+      reportElement.style.width = '1200px'; 
+
+      // Wait for re-render
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const canvas = await html2canvas(reportElement, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#0A0A0A',
+        logging: false,
+        onclone: (clonedDoc) => {
+          // The template already uses hardcoded hex colors to avoid oklch issues.
+          // We just ensure the element is visible in the clone.
+          const el = clonedDoc.getElementById('global-report-container');
+          if (el) el.style.display = 'block';
+        }
+      });
+
+      const link = document.createElement('a');
+      link.download = `MissionControle_Export_${new Date().toISOString().split('T')[0]}.jpg`;
+      link.href = canvas.toDataURL('image/jpeg', 0.9);
+      link.click();
+
+      setToast({
+        show: true,
+        message: 'Image JPEG générée avec succès !',
+        type: 'task'
+      });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+      // Restore
+      reportElement.style.display = originalStyle;
+      reportElement.style.position = originalPosition;
+      reportElement.style.top = originalTop;
+      reportElement.style.left = originalLeft;
+      reportElement.style.width = '';
+    } catch (err) {
+      console.error('Capture error:', err);
+      alert('Erreur lors de la capture image.');
+    } finally {
+      setIsCapturing(false);
+    }
+  };
 
   const performSave = useCallback(() => {
     localStorage.setItem('missions', JSON.stringify(missions));
@@ -489,44 +549,6 @@ export default function App() {
     }
   };
 
-  const generateGlobalReportPDF = async () => {
-    const reportElement = document.getElementById('global-report-container');
-    if (!reportElement) return;
-
-    try {
-      setIsGeneratingReport(true);
-      // Temporarily set width for capture to ensure desktop-like layout
-      const originalStyle = reportElement.style.display;
-      reportElement.style.display = 'block';
-      reportElement.style.width = '1200px';
-
-      const canvas = await html2canvas(reportElement, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#0A0A0A',
-        logging: false
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'px',
-        format: [canvas.width, canvas.height]
-      });
-
-      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-      
-      const date = new Date().toISOString().split('T')[0];
-      pdf.save(`Rapport_Production_Global_${date}.pdf`);
-
-      reportElement.style.display = originalStyle;
-      reportElement.style.width = '';
-    } catch (error) {
-      console.error('Error generating report:', error);
-    } finally {
-      setIsGeneratingReport(false);
-    }
-  };
 
   const updateCategory = (catId: string, updates: Partial<CategoryConfig>) => {
     setCategories(prev => prev.map(c => c.id === catId ? { ...c, ...updates } : c));
@@ -775,8 +797,9 @@ export default function App() {
                <button 
                 onClick={saveToLocalStorage}
                 className="w-full flex items-center justify-between p-3 bg-accent/5 border border-accent/20 rounded-md text-accent hover:bg-accent/10 transition-colors"
+                title="Sauvegarder dans le navigateur"
               >
-                <span className="text-[11px] font-bold uppercase tracking-wider">Sauvegarder le rapport</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider">Auto-Sauvegarde (Browser)</span>
                 <Save size={14} />
               </button>
                <button 
@@ -843,19 +866,19 @@ export default function App() {
                       <button 
                         onClick={saveToLocalStorage}
                         className="flex items-center gap-2 px-3 py-1.5 bg-accent/10 border border-accent/30 rounded text-accent text-[10px] font-black uppercase tracking-widest hover:bg-accent/20 transition-all border-dashed"
-                        title="Sauvegarder le rapport localement"
+                        title="Sauvegarder dans le navigateur"
                       >
                         <Save size={12} />
                         Sauvegarder
                       </button>
                       <button 
-                        onClick={generateGlobalReportPDF}
-                        disabled={isGeneratingReport}
+                        onClick={captureAsJPEG}
+                        disabled={isCapturing}
                         className="flex items-center gap-2 px-3 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed disabled:opacity-50"
-                        title="Exporter le rapport complet en PDF"
+                        title="Sauvegarder toutes les données en JPEG"
                       >
-                        {isGeneratingReport ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                        {isGeneratingReport ? 'Export...' : 'Rapport PDF'}
+                        {isCapturing ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />}
+                        {isCapturing ? 'Capture...' : 'Export JPEG'}
                       </button>
                       <button 
                         onClick={() => setIsFilterVisible(!isFilterVisible)}
@@ -1023,9 +1046,6 @@ export default function App() {
                           {avgProgress > 80 ? 'Maximisée' : avgProgress > 40 ? 'Optimisée' : avgProgress > 0 ? 'En Progression' : 'En Attente'}
                         </h3>
                       </div>
-                      <div className="py-1 px-3 bg-accent/10 border border-accent/20 rounded text-accent text-[10px] font-black uppercase tracking-tighter">
-                        {avgProgress}% Power
-                      </div>
                     </div>
                     <div className="flex gap-1 h-8 items-end">
                       {[40, 70, 45, 90, 65, 80, 55, 100].map((v, i) => (
@@ -1140,6 +1160,8 @@ export default function App() {
                               <div className="relative flex-1">
                                 <select 
                                   value={m.priority}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onDoubleClick={(e) => e.stopPropagation()}
                                   onChange={(e) => updateMission(m.id, { priority: e.target.value })}
                                   className={`text-[9px] font-black px-2 py-1 rounded uppercase flex items-center gap-1 w-full border bg-transparent appearance-none cursor-pointer focus:ring-1 focus:ring-accent-red/30 outline-none transition-all ${
                                     m.priority === 'High priority' ? 'border-red-500/50 text-red-500 bg-red-500/5' :
@@ -1174,6 +1196,8 @@ export default function App() {
                             <div className="relative group/status">
                               <select 
                                 value={m.status}
+                                onClick={(e) => e.stopPropagation()}
+                                onDoubleClick={(e) => e.stopPropagation()}
                                 onChange={(e) => updateMission(m.id, { status: e.target.value })}
                                 className={`text-[10px] font-black px-2 py-1 rounded uppercase flex items-center gap-1.5 w-full border bg-transparent appearance-none cursor-pointer focus:ring-1 focus:ring-accent-blue/30 outline-none transition-all ${
                                   m.status === 'livré' ? 'border-accent/40 text-accent bg-accent/5' :
@@ -1209,6 +1233,8 @@ export default function App() {
                                 max="100"
                                 step="5"
                                 value={m.progress}
+                                onClick={(e) => e.stopPropagation()}
+                                onDoubleClick={(e) => e.stopPropagation()}
                                 onChange={(e) => updateMission(m.id, { progress: parseInt(e.target.value) })}
                                 className="w-full h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent transition-all hover:h-1.5 focus:h-1.5"
                               />
@@ -1329,138 +1355,61 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Hidden Global Report Template */}
-      <div id="global-report-container" className="fixed top-[-9999px] left-[-9999px] bg-app-bg text-white p-20 font-sans" style={{ display: 'none' }}>
-        {/* Header */}
-        <div className="flex justify-between items-start mb-16 border-b-2 border-white/10 pb-10">
+      {/* Export Template (Hidden) - Hardcoded colors for capture reliability */}
+      <div id="global-report-container" style={{ position: 'fixed', top: '-9999px', left: '-9999px', backgroundColor: '#0A0A0A', color: '#FFFFFF', padding: '80px', width: '1200px', display: 'none', fontFamily: 'sans-serif' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '64px', borderBottom: '2px solid rgba(255,255,255,0.1)', paddingBottom: '40px' }}>
           <div>
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-12 h-12 bg-accent/20 flex items-center justify-center border-2 border-accent/50 text-accent">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(0,255,148,0.2)', display: 'flex', alignItems: 'center', justifyItems: 'center', border: '2px solid rgba(0,255,148,0.5)', color: '#00FF94', justifyContent: 'center' }}>
                  <Box size={32} />
               </div>
-              <h1 className="text-6xl font-display uppercase tracking-[-3px] leading-tight">Production<br/>Report</h1>
+              <h1 style={{ fontSize: '60px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '-3px', margin: 0 }}>Production<br/>Export</h1>
             </div>
-            <p className="text-[12px] text-accent font-black tracking-[8px] uppercase">Advanced Production Suite V3.0</p>
+            <p style={{ fontSize: '12px', color: '#00FF94', fontWeight: '900', letterSpacing: '8px', textTransform: 'uppercase', margin: 0 }}>Mission Contrôle Suite V4.0</p>
           </div>
-          <div className="text-right">
-            <p className="text-[10px] font-black text-text-dim uppercase tracking-widest mb-1">Date d'Export</p>
-            <p className="text-xl font-mono text-white mb-4">{new Date().toLocaleString()}</p>
-            <div className="inline-block px-3 py-1 bg-white/5 border border-white/10 rounded uppercase text-[10px] font-black tracking-widest">
-              Rapport d'Activité Global
-            </div>
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ fontSize: '10px', fontWeight: '900', color: '#888888', textTransform: 'uppercase', letterSpacing: '2px', margin: '0 0 4px 0' }}>Date d'Export</p>
+            <p style={{ fontSize: '20px', color: '#FFFFFF', margin: '0 0 16px 0' }}>{new Date().toLocaleString()}</p>
           </div>
         </div>
 
-        {/* Stats Summary */}
-        <div className="grid grid-cols-4 gap-8 mb-20">
-          <div className="bg-white/5 border border-white/10 p-6">
-            <p className="text-[10px] text-text-dim uppercase font-black tracking-widest mb-2">Total Missions</p>
-            <p className="text-4xl font-display text-white">{missions.length}</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '32px', marginBottom: '80px' }}>
+          <div style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
+            <p style={{ fontSize: '10px', color: '#888888', textTransform: 'uppercase', fontWeight: '900', letterSpacing: '2px', margin: '0 0 8px 0' }}>Total Missions</p>
+            <p style={{ fontSize: '48px', margin: 0, fontWeight: 'bold' }}>{missions.length}</p>
           </div>
-          <div className="bg-white/5 border border-white/10 p-6">
-            <p className="text-[10px] text-text-dim uppercase font-black tracking-widest mb-2">Progression Moyenne</p>
-            <p className="text-4xl font-display text-accent">{avgProgress}%</p>
-          </div>
-          <div className="bg-white/5 border border-white/10 p-6">
-            <p className="text-[10px] text-text-dim uppercase font-black tracking-widest mb-2">Missions Terminées</p>
-            <p className="text-4xl font-display text-accent-blue">{missions.filter(m => m.status === 'livré').length}</p>
-          </div>
-          <div className="bg-white/5 border border-white/10 p-6">
-            <p className="text-[10px] text-text-dim uppercase font-black tracking-widest mb-2">Logs Enregistrés</p>
-            <p className="text-4xl font-display text-accent-purple">{globalLogs.length}</p>
+          <div style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
+            <p style={{ fontSize: '10px', color: '#888888', textTransform: 'uppercase', fontWeight: '900', letterSpacing: '2px', margin: '0 0 8px 0' }}>Progression</p>
+            <p style={{ fontSize: '48px', margin: 0, fontWeight: 'bold', color: '#00FF94' }}>{avgProgress}%</p>
           </div>
         </div>
 
-        {/* Missions Detailed List */}
-        <div className="mb-20">
-          <h2 className="text-2xl font-display uppercase tracking-tight text-accent-blue mb-8 border-l-4 border-accent-blue pl-4">Liste des Missions Détaillée</h2>
-          <div className="space-y-6">
-            {missions.map(m => (
-              <div key={m.id} className="bg-white/5 border border-white/10 overflow-hidden">
-                <div className="bg-white/10 px-6 py-4 flex justify-between items-center bg-gradient-to-r from-white/10 to-transparent">
-                  <span className="text-lg font-mono font-bold text-accent">#{m.missionNo} — {m.product}</span>
-                  <span className={`text-[10px] font-black px-3 py-1 rounded border ${
-                    m.status === 'livré' ? 'border-accent text-accent bg-accent/5' : 'border-white/20 text-white/50'
-                  } uppercase`}>{m.status}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {missions.map(m => (
+            <div key={m.id} style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+              <div style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#00FF94' }}>#{m.missionNo} — {m.product}</span>
+                <span style={{ fontSize: '10px', fontWeight: '900', padding: '4px 12px', borderRadius: '4px', border: m.status === 'livré' ? '1px solid #00FF94' : '1px solid rgba(255,255,255,0.2)', color: m.status === 'livré' ? '#00FF94' : '#FFFFFF', textTransform: 'uppercase' }}>{m.status}</span>
+              </div>
+              <div style={{ padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '11px', fontWeight: 'bold', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase' }}>
+                   <p style={{ margin: 0 }}>Couleur: <span style={{ color: '#FFFFFF' }}>{m.color}</span></p>
+                   <p style={{ margin: 0 }}>Argument: <span style={{ color: '#FFFFFF' }}>{m.argumentType}</span></p>
+                   <p style={{ margin: 0 }}>Univers: <span style={{ color: '#FFFFFF' }}>{m.univers}</span></p>
+                   <p style={{ margin: 0 }}>Support: <span style={{ color: '#FFFFFF' }}>{m.support}</span></p>
                 </div>
-                  <div className="p-6 grid grid-cols-2 gap-10">
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 text-[10px] uppercase font-bold text-text-dim tracking-wider">
-                        <span>Couleur: <span className="text-white ml-2">{m.color}</span></span>
-                        <span>Argument: <span className="text-white ml-2">{m.argumentType}</span></span>
-                        <span className="mt-2">Univers: <span className="text-white ml-2">{m.univers}</span></span>
-                        <span className="mt-2">Format: <span className="text-white ml-2">{m.format}</span></span>
-                        <span className="mt-2">Position: <span className="text-white ml-2">{m.position}</span></span>
-                        <span className="mt-2">Support: <span className="text-white ml-2">{m.support}</span></span>
-                        <span className="mt-2">Date: <span className="text-white ml-2">{m.date}</span></span>
-                        <span className="mt-2 text-red-500">Priorité: <span className="font-black ml-2">{m.priority}</span></span>
-                      </div>
-                      <div className="pt-4 mt-4 border-t border-white/5">
-                        <p className="text-[10px] font-black uppercase text-accent-blue tracking-widest mb-2">Observations & Instructions Détaillées</p>
-                        <p className="text-sm text-white/80 italic leading-relaxed bg-black/20 p-4 border-l-2 border-accent-blue/30 whitespace-pre-wrap">
-                          {m.info || 'Aucune observation spécifique.'}
-                        </p>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-[10px] uppercase font-black mb-1">
-                        <span className="text-text-dim">Avancement</span>
-                        <span className="text-accent">{m.progress}%</span>
-                      </div>
-                      <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mb-8">
-                         <div className="h-full bg-accent" style={{ width: `${m.progress}%` }} />
-                      </div>
-                      
-                      <p className="text-[10px] font-black uppercase text-accent-purple tracking-widest mb-3">Historique Complet</p>
-                      <div className="space-y-2">
-                         {m.history?.map((log, i) => (
-                           <div key={i} className="flex gap-4 text-[10px] border-l border-white/10 pl-3">
-                             <span className="text-text-dim font-mono">{new Date(log.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
-                             <span className="text-white/70">{log.message}</span>
-                           </div>
-                         )).reverse()}
-                      </div>
-                    </div>
+                <div>
+                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', marginBottom: '4px' }}>
+                    <span style={{ color: '#888888' }}>Avancement</span>
+                    <span style={{ color: '#00FF94' }}>{m.progress}%</span>
                   </div>
+                  <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '99px', overflow: 'hidden' }}>
+                     <div style={{ height: '100%', backgroundColor: '#00FF94', width: `${m.progress}%` }} />
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Production Log */}
-        <div>
-          <h2 className="text-2xl font-display uppercase tracking-tight text-accent-purple mb-8 border-l-4 border-accent-purple pl-4">Journal de Production (Logs Globaux)</h2>
-          <div className="space-y-2">
-            {globalLogs.map((log, i) => (
-              <div key={log.id} className="flex gap-10 py-3 border-b border-white/5 items-center group">
-                <span className="text-[10px] font-mono text-text-dim w-32 shrink-0">{new Date(log.timestamp).toLocaleString()}</span>
-                <div className={`w-2 h-2 rounded-full shrink-0 ${
-                  log.type === 'alert' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' :
-                  log.type === 'success' ? 'bg-accent' :
-                  log.type === 'manual' ? 'bg-accent-blue' : 'bg-accent-purple'
-                }`} />
-                <span className="text-[11px] text-white/90">
-                  {log.message}
-                </span>
-                {log.product && (
-                  <span className="ml-auto text-[9px] font-bold text-accent-blue uppercase tracking-tighter opacity-50">
-                    {log.product}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-40 border-t border-white/10 pt-10 text-center flex flex-col items-center gap-4">
-          <p className="text-[10px] text-text-dim uppercase font-black tracking-[10px] mb-2">Fin du Rapport Documentaire Officiel</p>
-          <div className="flex items-center gap-2">
-            <Box size={16} className="text-accent opacity-30" />
-            <div className="h-[1px] w-20 bg-white/10" />
-            <div className="text-[8px] font-mono text-white/20">Generated by MISSION CONTRÔLE SYSTEM</div>
-            <div className="h-[1px] w-20 bg-white/10" />
-            <Sparkles size={16} className="text-accent opacity-30" />
-          </div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -1516,33 +1465,6 @@ export default function App() {
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
           background: #444444;
         }
-
-        /* Fix for html2canvas oklab/oklch error - Force HEX/RGB inside export containers */
-        #global-report-container, #mission-detail-content,
-        #global-report-container *, #mission-detail-content * {
-          --tw-bg-opacity: 1 !important;
-          --tw-text-opacity: 1 !important;
-          --tw-border-opacity: 1 !important;
-        }
-
-        #global-report-container .bg-white\\/5, #mission-detail-content .bg-white\\/5 { background-color: rgba(255, 255, 255, 0.05) !important; }
-        #global-report-container .bg-white\\/10, #mission-detail-content .bg-white\\/10 { background-color: rgba(255, 255, 255, 0.1) !important; }
-        #global-report-container .bg-accent\\/20, #mission-detail-content .bg-accent\\/20 { background-color: rgba(0, 255, 148, 0.2) !important; }
-        #global-report-container .bg-accent\\/5, #mission-detail-content .bg-accent\\/5 { background-color: rgba(0, 255, 148, 0.05) !important; }
-        #global-report-container .bg-accent-blue\\/10, #mission-detail-content .bg-accent-blue\\/10 { background-color: rgba(0, 209, 255, 0.1) !important; }
-        #global-report-container .bg-black\\/20, #mission-detail-content .bg-black\\/20 { background-color: rgba(0, 0, 0, 0.2) !important; }
-        
-        #global-report-container .text-accent, #mission-detail-content .text-accent { color: #00FF94 !important; }
-        #global-report-container .text-accent-blue, #mission-detail-content .text-accent-blue { color: #00D1FF !important; }
-        #global-report-container .text-accent-purple, #mission-detail-content .text-accent-purple { color: #BD00FF !important; }
-        #global-report-container .text-accent-pink, #mission-detail-content .text-accent-pink { color: #FF007A !important; }
-        #global-report-container .text-red-500, #mission-detail-content .text-red-500 { color: #FF3B30 !important; }
-        #global-report-container .text-text-dim, #mission-detail-content .text-text-dim { color: #888888 !important; }
-        
-        #global-report-container .border-white\\/10, #mission-detail-content .border-white\\/10 { border-color: rgba(255, 255, 255, 0.1) !important; }
-        #global-report-container .border-white\\/5, #mission-detail-content .border-white\\/5 { border-color: rgba(255, 255, 255, 0.05) !important; }
-        #global-report-container .border-accent\\/50, #mission-detail-content .border-accent\\/50 { border-color: rgba(0, 255, 148, 0.5) !important; }
-        #global-report-container .border-accent-blue\\/30, #mission-detail-content .border-accent-blue\\/30 { border-color: rgba(0, 209, 255, 0.3) !important; }
       `}</style>
     </div>
   );
@@ -1550,45 +1472,6 @@ export default function App() {
 
 function MissionDetailModal({ mission, onClose }: { mission: Mission | null, onClose: () => void }) {
   if (!mission) return null;
-
-  const [isExporting, setIsExporting] = useState(false);
-
-  const generatePDF = async (download = true): Promise<string | null> => {
-    const element = document.getElementById('mission-detail-content');
-    if (!element) return null;
-
-    try {
-      setIsExporting(true);
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#1A1A1A',
-        logging: false
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'px',
-        format: [canvas.width, canvas.height]
-      });
-
-      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-      
-      const fileName = `Mission_${mission.missionNo}_${mission.product.replace(/\s+/g, '_')}.pdf`;
-      
-      if (download) {
-        pdf.save(fileName);
-      }
-      
-      return pdf.output('datauristring');
-    } catch (error) {
-      console.error('PDF generation error:', error);
-      return null;
-    } finally {
-      setIsExporting(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1631,15 +1514,6 @@ function MissionDetailModal({ mission, onClose }: { mission: Mission | null, onC
               </div>
             </div>
             <div className="flex items-center gap-2 print:hidden">
-              <button 
-                onClick={() => generatePDF()}
-                disabled={isExporting}
-                className="flex items-center gap-2 px-4 h-10 bg-accent/10 border border-accent/30 text-accent rounded text-[10px] font-black uppercase tracking-widest hover:bg-accent hover:text-black transition-all disabled:opacity-50"
-              >
-                {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                {isExporting ? 'Génération...' : 'Exporter PDF'}
-              </button>
-              
               <button 
                 onClick={() => window.print()}
                 className="w-10 h-10 border border-white/10 flex items-center justify-center text-text-dim hover:text-white hover:bg-white/5 transition-all"
