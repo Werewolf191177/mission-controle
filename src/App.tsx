@@ -352,7 +352,7 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
       if (customKey) {
         headers['x-gemini-api-key'] = customKey;
       }
-      const res = await fetch('/api/chat', {
+      const res = await fetch('https://mission-controle.onrender.com/api/chat', {
         method: 'POST',
         headers,
         body: JSON.stringify({ 
