@@ -5,6 +5,7 @@ import { Readable } from 'stream';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
 import { GoogleGenAI } from '@google/genai';
+import cors from 'cors';
 
 dotenv.config();
 
@@ -12,6 +13,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(cors());
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
