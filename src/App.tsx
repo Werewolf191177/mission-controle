@@ -666,17 +666,6 @@ export default function App() {
     );
   }, [missions]);
 
-  // Support-based dynamic logic
-  useEffect(() => {
-    if (selectedSupport.includes('vidéo')) {
-      if (selectedFormat !== '16/9' && selectedFormat !== '9/16') {
-        setSelectedFormat('16/9');
-      }
-    } else if (selectedSupport.includes('graphisme')) {
-      setSelectedFormat('standard');
-    }
-  }, [selectedSupport]);
-
   // Global Logs State
   const [globalLogs, setGlobalLogs] = useState<GlobalLogEntry[]>([]);
 
@@ -3687,13 +3676,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               >
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2">
                   {/* Main Status Velocity */}
-                  <ChartCard 
-                    id="chart-status"
-                    title="Distribution par État" 
-                    subtitle="Data Flow Analysis" 
-                    className="lg:col-span-2" 
-                    delay={0.1}
-                    rightElement={
+                  {ChartCard({ 
+                    id: "chart-status",
+                    title: "Distribution par État", 
+                    subtitle: "Data Flow Analysis", 
+                    className: "lg:col-span-2", 
+                    delay: 0.1,
+                    rightElement: (
                       <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-black uppercase tracking-widest text-text-dim hidden sm:inline">Progression Flux</span>
@@ -3707,59 +3696,60 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
                         </button>
                       </div>
-                    }
-                  >
-                    <div style={{ width: '100%', height: 260 }}>
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-1' : 'anim-2'}>
-                        <BarChart data={statusData} margin={{ top: 25, right: 10, left: 10, bottom: 0 }}>
-                        <XAxis 
-                          dataKey="name" 
-                          stroke="#444" 
-                          fontSize={8} 
-                          tickLine={false} 
-                          axisLine={false}
-                          tick={{ fill: '#888', fontWeight: 'bold' }}
-                          dy={10}
-                        />
-                        <YAxis hide domain={[0, 'dataMax + 1']} />
-                        <RechartsTooltip 
-                          contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
-                          itemStyle={{ color: '#00FF94' }}
-                          cursor={{ fill: 'rgba(255,255,255,0.02)' }}
-                        />
-                        <Bar 
-                          dataKey="value" 
-                          fill="#00FF94" 
-                          radius={[4, 4, 0, 0]} 
-                          barSize={40}
-                          animationDuration={1200}
-                          isAnimationActive={true}
-                        >
-                          <LabelList 
-                            dataKey="value" 
-                            position="top" 
-                            fill="#00FF94" 
-                            fontSize={11} 
-                            fontWeight="black"
-                            offset={8}
-                            formatter={(val: number) => val > 0 ? val : ''}
+                    ),
+                    children: (
+                      <div style={{ width: '100%', height: 260 }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-1' : 'anim-2'}>
+                          <BarChart data={statusData} margin={{ top: 25, right: 10, left: 10, bottom: 0 }}>
+                          <XAxis 
+                            dataKey="name" 
+                            stroke="#444" 
+                            fontSize={8} 
+                            tickLine={false} 
+                            axisLine={false}
+                            tick={{ fill: '#888', fontWeight: 'bold' }}
+                            dy={10}
                           />
-                          {statusData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} fillOpacity={0.8} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                    </div>
-                  </ChartCard>
+                          <YAxis hide domain={[0, 'dataMax + 1']} />
+                          <RechartsTooltip 
+                            contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                            itemStyle={{ color: '#00FF94' }}
+                            cursor={{ fill: 'rgba(255,255,255,0.02)' }}
+                          />
+                          <Bar 
+                            dataKey="value" 
+                            fill="#00FF94" 
+                            radius={[4, 4, 0, 0]} 
+                            barSize={40}
+                            animationDuration={1200}
+                            isAnimationActive={true}
+                          >
+                            <LabelList 
+                              dataKey="value" 
+                              position="top" 
+                              fill="#00FF94" 
+                              fontSize={11} 
+                              fontWeight="black"
+                              offset={8}
+                              formatter={(val: number) => val > 0 ? val : ''}
+                            />
+                            {statusData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} fillOpacity={0.8} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                      </div>
+                    )
+                  })}
 
                   {/* Support Split */}
-                  <ChartCard 
-                    id="chart-support"
-                    title="Répartition Supports" 
-                    subtitle="Asset Allocation" 
-                    delay={0.2}
-                    rightElement={
+                  {ChartCard({ 
+                    id: "chart-support",
+                    title: "Répartition Supports", 
+                    subtitle: "Asset Allocation", 
+                    delay: 0.2,
+                    rightElement: (
                       <button 
                         onClick={handleRefreshScore} 
                         className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
@@ -3767,54 +3757,57 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       >
                         <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
                       </button>
-                    }
-                  >
-                    <div style={{ width: '100%', height: 260 }}>
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-3' : 'anim-4'}>
-                        <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                        <Pie
-                          data={supportData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={55}
-                          outerRadius={75}
-                          paddingAngle={5}
-                          dataKey="value"
-                          animationBegin={0}
-                          animationDuration={1200}
-                          isAnimationActive={true}
-                          label={({ name, value }) => value > 0 ? `${value}` : ''}
-                          labelLine={false}
-                        >
-                          {supportData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip 
-                          contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
-                        />
-                      </RPieChart>
-                    </ResponsiveContainer>
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
-                      {supportData.map((s, i) => (
-                        <div key={s.name} className="flex items-center gap-1.5">
-                          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 2) % COLORS.length] }} />
-                          <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
+                    ),
+                    children: (
+                      <>
+                        <div style={{ width: '100%', height: 260 }}>
+                          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-3' : 'anim-4'}>
+                            <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                            <Pie
+                              data={supportData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={55}
+                              outerRadius={75}
+                              paddingAngle={5}
+                              dataKey="value"
+                              animationBegin={0}
+                              animationDuration={1200}
+                              isAnimationActive={true}
+                              label={({ name, value }) => value > 0 ? `${value}` : ''}
+                              labelLine={false}
+                            >
+                              {supportData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip 
+                              contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                            />
+                          </RPieChart>
+                        </ResponsiveContainer>
                         </div>
-                      ))}
-                    </div>
-                  </ChartCard>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
+                          {supportData.map((s, i) => (
+                            <div key={s.name} className="flex items-center gap-1.5">
+                              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 2) % COLORS.length] }} />
+                              <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )
+                  })}
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-6">
                   {/* Produit Split */}
-                  <ChartCard 
-                    id="chart-product"
-                    title="Produits" 
-                    subtitle="Répartition par Produit" 
-                    delay={0.3}
-                    rightElement={
+                  {ChartCard({ 
+                    id: "chart-product",
+                    title: "Produits", 
+                    subtitle: "Répartition par Produit", 
+                    delay: 0.3,
+                    rightElement: (
                       <button 
                         onClick={handleRefreshScore} 
                         className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
@@ -3822,35 +3815,36 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       >
                         <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
                       </button>
-                    }
-                  >
-                    <div style={{ width: '100%', height: 260 }}>
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-5' : 'anim-6'}>
-                        <BarChart data={productData} margin={{ top: 10, bottom: 20, left: -20, right: 10 }} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
-                        <XAxis type="number" fontSize={10} tick={{ fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} />
-                        <YAxis type="category" dataKey="name" fontSize={9} tick={{ fill: '#ccc' }} axisLine={{ stroke: '#333' }} tickLine={false} width={80} />
-                        <RechartsTooltip 
-                          contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
-                          cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                        />
-                        <Bar dataKey="value" radius={[0, 4, 4, 0]} animationBegin={0} animationDuration={1200} isAnimationActive={true}>
-                          {productData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                    </div>
-                  </ChartCard>
+                    ),
+                    children: (
+                      <div style={{ width: '100%', height: 260 }}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-5' : 'anim-6'}>
+                          <BarChart data={productData} margin={{ top: 10, bottom: 20, left: -20, right: 10 }} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
+                          <XAxis type="number" fontSize={10} tick={{ fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} />
+                          <YAxis type="category" dataKey="name" fontSize={9} tick={{ fill: '#ccc' }} axisLine={{ stroke: '#333' }} tickLine={false} width={80} />
+                          <RechartsTooltip 
+                            contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                            cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                          />
+                          <Bar dataKey="value" radius={[0, 4, 4, 0]} animationBegin={0} animationDuration={1200} isAnimationActive={true}>
+                            {productData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                      </div>
+                    )
+                  })}
 
                   {/* Univers Split */}
-                  <ChartCard 
-                    id="chart-univers"
-                    title="Univers" 
-                    subtitle="Répartition par Univers" 
-                    delay={0.4}
-                    rightElement={
+                  {ChartCard({ 
+                    id: "chart-univers",
+                    title: "Univers", 
+                    subtitle: "Répartition par Univers", 
+                    delay: 0.4,
+                    rightElement: (
                       <button 
                         onClick={handleRefreshScore} 
                         className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
@@ -3858,52 +3852,55 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       >
                         <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
                       </button>
-                    }
-                  >
-                    <div style={{ width: '100%', height: 260 }}>
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-7' : 'anim-8'}>
-                        <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                        <Pie
-                          data={universData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={45}
-                          outerRadius={75}
-                          paddingAngle={2}
-                          dataKey="value"
-                          animationBegin={0}
-                          animationDuration={1200}
-                          isAnimationActive={true}
-                          label={({ name, value }) => value > 0 ? `${value}` : ''}
-                          labelLine={false}
-                        >
-                          {universData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[(index + 4) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip 
-                          contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
-                        />
-                      </RPieChart>
-                    </ResponsiveContainer>
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
-                      {universData.map((s, i) => (
-                        <div key={s.name} className="flex items-center gap-1.5" title={s.name}>
-                          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 4) % COLORS.length] }} />
-                          <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
+                    ),
+                    children: (
+                      <>
+                        <div style={{ width: '100%', height: 260 }}>
+                          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-7' : 'anim-8'}>
+                            <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                            <Pie
+                              data={universData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={45}
+                              outerRadius={75}
+                              paddingAngle={2}
+                              dataKey="value"
+                              animationBegin={0}
+                              animationDuration={1200}
+                              isAnimationActive={true}
+                              label={({ name, value }) => value > 0 ? `${value}` : ''}
+                              labelLine={false}
+                            >
+                              {universData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[(index + 4) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip 
+                              contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                            />
+                          </RPieChart>
+                        </ResponsiveContainer>
                         </div>
-                      ))}
-                    </div>
-                  </ChartCard>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
+                          {universData.map((s, i) => (
+                            <div key={s.name} className="flex items-center gap-1.5" title={s.name}>
+                              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 4) % COLORS.length] }} />
+                              <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )
+                  })}
 
                   {/* Argument Split */}
-                  <ChartCard 
-                    id="chart-argument"
-                    title="Type d'Argument" 
-                    subtitle="Répartition par Argument" 
-                    delay={0.5}
-                    rightElement={
+                  {ChartCard({ 
+                    id: "chart-argument",
+                    title: "Type d'Argument", 
+                    subtitle: "Répartition par Argument", 
+                    delay: 0.5,
+                    rightElement: (
                       <button 
                         onClick={handleRefreshScore} 
                         className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
@@ -3911,52 +3908,55 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       >
                         <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
                       </button>
-                    }
-                  >
-                    <div style={{ width: '100%', height: 260 }}>
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-9' : 'anim-10'}>
-                        <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                        <Pie
-                          data={argumentData}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={45}
-                          outerRadius={75}
-                          paddingAngle={2}
-                          dataKey="value"
-                          animationBegin={0}
-                          animationDuration={1200}
-                          isAnimationActive={true}
-                          label={({ name, value }) => value > 0 ? `${value}` : ''}
-                          labelLine={false}
-                        >
-                          {argumentData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[(index + 5) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip 
-                          contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
-                        />
-                      </RPieChart>
-                    </ResponsiveContainer>
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
-                      {argumentData.map((s, i) => (
-                        <div key={s.name} className="flex items-center gap-1.5" title={s.name}>
-                          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 5) % COLORS.length] }} />
-                          <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
+                    ),
+                    children: (
+                      <>
+                        <div style={{ width: '100%', height: 260 }}>
+                          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-9' : 'anim-10'}>
+                            <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                            <Pie
+                              data={argumentData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={45}
+                              outerRadius={75}
+                              paddingAngle={2}
+                              dataKey="value"
+                              animationBegin={0}
+                              animationDuration={1200}
+                              isAnimationActive={true}
+                              label={({ name, value }) => value > 0 ? `${value}` : ''}
+                              labelLine={false}
+                            >
+                              {argumentData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[(index + 5) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip 
+                              contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                            />
+                          </RPieChart>
+                        </ResponsiveContainer>
                         </div>
-                      ))}
-                    </div>
-                  </ChartCard>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
+                          {argumentData.map((s, i) => (
+                            <div key={s.name} className="flex items-center gap-1.5" title={s.name}>
+                              <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 5) % COLORS.length] }} />
+                              <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )
+                  })}
 
                   {/* Poids Stratégique */}
-                  <ChartCard 
-                    id="chart-poids"
-                    title="Poids Stratégique" 
-                    subtitle="Production vs Secondaire" 
-                    delay={0.6}
-                    rightElement={
+                  {ChartCard({ 
+                    id: "chart-poids",
+                    title: "Poids Stratégique", 
+                    subtitle: "Production vs Secondaire", 
+                    delay: 0.6,
+                    rightElement: (
                       <button 
                         onClick={handleRefreshScore} 
                         className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
@@ -3964,60 +3964,61 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       >
                         <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
                       </button>
-                    }
-                  >
-                    <div className="flex flex-col items-center justify-center h-full">
-                       <div className="relative h-[160px] w-[160px]">
-                          {(() => {
-                            const prod = missions.length;
-                            const sec = secondaryMissions.length;
-                            const totalCount = prod + sec || 1;
-                            const prodP = (prod / totalCount) * 100;
-                            const secP = (sec / totalCount) * 100;
-                            return (
-                              <>
-                                <svg viewBox="0 0 100 100" className="transform -rotate-90 w-full h-full">
-                                  <circle cx="50" cy="50" r="40" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
-                                  <circle 
-                                    cx="50" cy="50" r="40" fill="transparent" stroke="#EBFF00" 
-                                    strokeWidth="10" 
-                                    strokeDasharray={`${prodP * 251.2 / 100} 251.2`} 
-                                    className="transition-all duration-1000"
-                                  />
-                                  <circle 
-                                    cx="50" cy="50" r="40" fill="transparent" stroke="#00D1FF" 
-                                    strokeWidth="10" 
-                                    strokeDasharray={`${secP * 251.2 / 100} 251.2`} 
-                                    strokeDashoffset={`${-prodP * 251.2 / 100}`}
-                                    className="transition-all duration-1000"
-                                  />
-                                </svg>
-                                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                   <span className="text-[8px] font-black text-white/20 uppercase tracking-[2px]">TOTAL</span>
-                                   <span className="text-xl font-black text-white">{prod + sec}</span>
-                                </div>
-                              </>
-                            );
-                          })()}
-                       </div>
-                       <div className="w-full space-y-2 mt-4">
-                          <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-wider">
-                             <div className="flex items-center gap-2">
-                                <div className="w-1.5 h-1.5 rounded-full bg-[#EBFF00]" />
-                                <span className="text-text-dim">Production</span>
-                             </div>
-                             <span className="text-white">{missions.length} units</span>
-                          </div>
-                          <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-wider">
-                             <div className="flex items-center gap-2">
-                                <div className="w-1.5 h-1.5 rounded-full bg-[#00D1FF]" />
-                                <span className="text-text-dim">Secondaire</span>
-                             </div>
-                             <span className="text-white">{secondaryMissions.length} units</span>
-                          </div>
-                       </div>
-                    </div>
-                  </ChartCard>
+                    ),
+                    children: (
+                      <div className="flex flex-col items-center justify-center h-full">
+                         <div className="relative h-[160px] w-[160px]">
+                            {(() => {
+                              const prod = missions.length;
+                              const sec = secondaryMissions.length;
+                              const totalCount = prod + sec || 1;
+                              const prodP = (prod / totalCount) * 100;
+                              const secP = (sec / totalCount) * 100;
+                              return (
+                                <>
+                                  <svg viewBox="0 0 100 100" className="transform -rotate-90 w-full h-full">
+                                    <circle cx="50" cy="50" r="40" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
+                                    <circle 
+                                      cx="50" cy="50" r="40" fill="transparent" stroke="#EBFF00" 
+                                      strokeWidth="10" 
+                                      strokeDasharray={`${prodP * 251.2 / 100} 251.2`} 
+                                      className="transition-all duration-1000"
+                                    />
+                                    <circle 
+                                      cx="50" cy="50" r="40" fill="transparent" stroke="#00D1FF" 
+                                      strokeWidth="10" 
+                                      strokeDasharray={`${secP * 251.2 / 100} 251.2`} 
+                                      strokeDashoffset={`${-prodP * 251.2 / 100}`}
+                                      className="transition-all duration-1000"
+                                    />
+                                  </svg>
+                                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                     <span className="text-[8px] font-black text-white/20 uppercase tracking-[2px]">TOTAL</span>
+                                     <span className="text-xl font-black text-white">{prod + sec}</span>
+                                  </div>
+                                </>
+                              );
+                            })()}
+                         </div>
+                         <div className="w-full space-y-2 mt-4">
+                            <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-wider">
+                               <div className="flex items-center gap-2">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-[#EBFF00]" />
+                                  <span className="text-text-dim">Production</span>
+                               </div>
+                               <span className="text-white">{missions.length} units</span>
+                            </div>
+                            <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-wider">
+                               <div className="flex items-center gap-2">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-[#00D1FF]" />
+                                  <span className="text-text-dim">Secondaire</span>
+                               </div>
+                               <span className="text-white">{secondaryMissions.length} units</span>
+                            </div>
+                         </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </motion.div>
             )}
@@ -4027,12 +4028,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         {/* Tableaux de Synthèse Opérationnelle */}
         <div className="grid grid-cols-1 gap-6 pt-10">
           {/* Tableau de Production */}
-          <ChartCard 
-            title="Aperçu du Flux de Production" 
-            subtitle="Top 15 Missions Actives"
-            className="w-full overflow-hidden"
-            delay={0.6}
-            rightElement={
+          {ChartCard({ 
+            title: "Aperçu du Flux de Production", 
+            subtitle: "Top 15 Missions Actives",
+            className: "w-full overflow-hidden",
+            delay: 0.6,
+            rightElement: (
               <div className="flex items-center gap-3">
                 <span className="text-[10px] font-mono text-white/40">{activeMissions.length} Missions</span>
                 <button 
@@ -4043,64 +4044,65 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
                 </button>
               </div>
-            }
-          >
-            <div className={`overflow-x-auto custom-scrollbar ${isRefreshingScore ? 'animate-pulse opacity-50' : ''}`}>
-              <table className="w-full text-left border-collapse min-w-[600px]">
-                <thead>
-                  <tr className="border-b border-white/5">
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">ID</th>
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Produit</th>
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Support</th>
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Priorité</th>
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim font-mono text-right">Progrès</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dashboardProductionMissions.map(m => (
-                    <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group">
-                      <td className="py-3 px-4 text-[10px] font-mono font-bold text-accent-blue">{m.refId}</td>
-                      <td className="py-3 px-4 text-[10px] font-bold text-white/80">{m.product}</td>
-                      <td className="py-3 px-4 text-[10px] text-text-dim">{m.support}</td>
-                      <td className="py-3 px-4">
-                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
-                          m.priority === 'High priority' ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 
-                          m.priority === 'Medium priority' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30' : 
-                          'bg-blue-500/20 text-blue-500 border border-blue-500/30'
-                        }`}>
-                          {m.priority.split(' ')[0]}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex flex-col items-end gap-1">
-                          <span className="text-[10px] font-mono font-black text-accent">{m.progress}%</span>
-                          <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
-                            <motion.div 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${m.progress}%` }}
-                              className="h-full bg-accent" 
-                            />
+            ),
+            children: (
+              <div className={`overflow-x-auto custom-scrollbar ${isRefreshingScore ? 'animate-pulse opacity-50' : ''}`}>
+                <table className="w-full text-left border-collapse min-w-[600px]">
+                  <thead>
+                    <tr className="border-b border-white/5">
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">ID</th>
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Produit</th>
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Support</th>
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Priorité</th>
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim font-mono text-right">Progrès</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboardProductionMissions.map(m => (
+                      <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group">
+                        <td className="py-3 px-4 text-[10px] font-mono font-bold text-accent-blue">{m.refId}</td>
+                        <td className="py-3 px-4 text-[10px] font-bold text-white/80">{m.product}</td>
+                        <td className="py-3 px-4 text-[10px] text-text-dim">{m.support}</td>
+                        <td className="py-3 px-4">
+                          <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
+                            m.priority === 'High priority' ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 
+                            m.priority === 'Medium priority' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30' : 
+                            'bg-blue-500/20 text-blue-500 border border-blue-500/30'
+                          }`}>
+                            {m.priority.split(' ')[0]}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="text-[10px] font-mono font-black text-accent">{m.progress}%</span>
+                            <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${m.progress}%` }}
+                                className="h-full bg-accent" 
+                              />
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {activeMissions.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="py-10 text-center text-text-dim text-[10px] font-mono uppercase italic tracking-widest">Aucune mission active détectée</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </ChartCard>
+                        </td>
+                      </tr>
+                    ))}
+                    {activeMissions.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="py-10 text-center text-text-dim text-[10px] font-mono uppercase italic tracking-widest">Aucune mission active détectée</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })}
 
           {/* Tableau de Mission Secondaire */}
-          <ChartCard 
-            title="Statut des Missions Secondaires" 
-            subtitle="Gestion Plateau & Studio"
-            delay={0.7}
-            rightElement={
+          {ChartCard({ 
+            title: "Statut des Missions Secondaires", 
+            subtitle: "Gestion Plateau & Studio",
+            delay: 0.7,
+            rightElement: (
               <div className="flex items-center gap-3">
                 <span className="text-[10px] font-mono text-white/40">{secondaryMissions.filter(m => m.enabled).length} Items</span>
                 <button 
@@ -4111,60 +4113,61 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
                 </button>
               </div>
-            }
-          >
-            <div className={`overflow-x-auto custom-scrollbar ${isRefreshingScore ? 'animate-pulse opacity-50' : ''}`}>
-              <table className="w-full text-left border-collapse min-w-[600px]">
-                <thead>
-                  <tr className="border-b border-white/5">
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Titre de la Mission</th>
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Priorité</th>
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Note</th>
-                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim text-right">Progrès</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dashboardSecondaryMissions.map(m => (
-                    <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
-                      <td className="py-3 px-4 text-[10px] font-bold text-white/80">
-                        {m.title} 
-                        <span className="ml-2 text-[8px] opacity-40 font-mono tracking-widest uppercase">{m.status}</span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
-                          m.priority === 'high' ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 
-                          m.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30' : 
-                          'bg-blue-500/20 text-blue-500 border border-blue-500/30'
-                        }`}>
-                          {m.priority}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <StarRatingStatic rating={m.rating} size={8} />
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex flex-col items-end gap-1">
-                          <span className="text-[10px] font-mono font-black text-accent-blue">{m.progress}%</span>
-                          <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
-                            <motion.div 
-                              initial={{ width: 0 }}
-                              animate={{ width: `${m.progress}%` }}
-                              className="h-full bg-accent-blue shadow-[0_0_10px_rgba(0,209,255,0.3)]" 
-                            />
+            ),
+            children: (
+              <div className={`overflow-x-auto custom-scrollbar ${isRefreshingScore ? 'animate-pulse opacity-50' : ''}`}>
+                <table className="w-full text-left border-collapse min-w-[600px]">
+                  <thead>
+                    <tr className="border-b border-white/5">
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Titre de la Mission</th>
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Priorité</th>
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Note</th>
+                      <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim text-right">Progrès</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboardSecondaryMissions.map(m => (
+                      <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
+                        <td className="py-3 px-4 text-[10px] font-bold text-white/80">
+                          {m.title} 
+                          <span className="ml-2 text-[8px] opacity-40 font-mono tracking-widest uppercase">{m.status}</span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
+                            m.priority === 'high' ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 
+                            m.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30' : 
+                            'bg-blue-500/20 text-blue-500 border border-blue-500/30'
+                          }`}>
+                            {m.priority}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <StarRatingStatic rating={m.rating} size={8} />
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="text-[10px] font-mono font-black text-accent-blue">{m.progress}%</span>
+                            <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${m.progress}%` }}
+                                className="h-full bg-accent-blue shadow-[0_0_10px_rgba(0,209,255,0.3)]" 
+                              />
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {dashboardSecondaryMissions.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="py-10 text-center text-text-dim text-[10px] font-mono uppercase italic tracking-widest">Aucune mission secondaire active</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </ChartCard>
+                        </td>
+                      </tr>
+                    ))}
+                    {dashboardSecondaryMissions.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-10 text-center text-text-dim text-[10px] font-mono uppercase italic tracking-widest">Aucune mission secondaire active</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })}
         </div>
       </div>
     );
@@ -5740,7 +5743,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               }} 
             />
           )}
-          <WaveEffect progress={avgProgress} color={waveColor} type={waveType} opacity={waveOpacity} />
+          {WaveEffect({ progress: avgProgress, color: waveColor, type: waveType, opacity: waveOpacity })}
           <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-accent/30 to-transparent z-10"></div>
           <div className="absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/5 to-transparent z-10"></div>
           
@@ -5986,6 +5989,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   <AnimatePresence initial={false}>
                     {!isCollapsed && (
                       <motion.div
+                        key={`${cat.id}-form-content`}
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
@@ -6015,7 +6019,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             
                             <AnimatePresence>
                               {isProductDropdownOpen && (
-                                <>
+                                <motion.div
+                                  key="product-dropdown"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                >
                                   <div 
                                     className="fixed inset-0 z-[140] bg-black/20 backdrop-blur-[1px]" 
                                     onClick={(e) => {
@@ -6048,7 +6057,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     <div className="px-4 py-3 text-[10px] text-white/30 italic">Aucun résultat</div>
                                   )}
                                 </motion.div>
-                              </>
+                              </motion.div>
                             )}
                           </AnimatePresence>
                           </div>
@@ -6093,7 +6102,23 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                 if (cat.id === 'univers') setSelectedUnivers(item);
                                 if (cat.id === 'format') setSelectedFormat(item);
                                 if (cat.id === 'position') setSelectedPosition(item);
-                                if (cat.id === 'support') setSelectedSupport(prev => (prev || []).includes(item) ? (prev || []).filter(x => x !== item) : [...(prev || []), item]);
+                                if (cat.id === 'support') {
+                                  setSelectedSupport(prev => {
+                                    const isIncluded = (prev || []).includes(item);
+                                    const next = isIncluded ? (prev || []).filter(x => x !== item) : [...(prev || []), item];
+                                    
+                                    // Dynamic secondary logic when video is selected
+                                    if (!isIncluded && item === 'vidéo') {
+                                      if (selectedFormat !== '16/9' && selectedFormat !== '9/16') {
+                                        setSelectedFormat('16/9');
+                                      }
+                                    } else if (!isIncluded && item === 'graphisme') {
+                                      setSelectedFormat('standard');
+                                    }
+                                    
+                                    return next;
+                                  });
+                                }
                                 if (cat.id === 'priority') setSelectedPriority(item);
                                 if (cat.id === 'status') setSelectedStatus(item);
                               }}
@@ -7705,7 +7730,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               </table>
             </div>
             ) : (
-              <MosaicView />
+              MosaicView()
             )
           )}
         </div>
