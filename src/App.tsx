@@ -278,20 +278,26 @@ function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen,
 
       <AnimatePresence>
         {isOpen && (
-          <>
-            <div 
-              className="fixed inset-0 z-[60] bg-transparent cursor-default" 
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }} 
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="absolute top-full left-0 right-0 mt-1 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-2xl z-[70] py-1 max-h-60 overflow-y-auto custom-scrollbar"
-            >
+          <motion.div
+            key="filter-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-transparent cursor-default" 
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsOpen(false);
+            }} 
+          />
+        )}
+        {isOpen && (
+          <motion.div
+            key="filter-menu"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="absolute top-full left-0 right-0 mt-1 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-2xl z-[70] py-1 max-h-60 overflow-y-auto custom-scrollbar"
+          >
               <div 
                 onClick={() => setSelected([])}
                 className={`px-4 py-2 text-[10px] cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors ${selected.length === 0 ? 'text-accent font-bold' : 'text-text-dim'}`}
@@ -318,7 +324,6 @@ function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen,
                 );
               })}
             </motion.div>
-          </>
         )}
       </AnimatePresence>
     </div>
@@ -6486,14 +6491,23 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     
                     <AnimatePresence>
                       {isNavDropdownOpen && (
-                        <>
-                          <div className="fixed inset-0 z-[100]" onClick={() => setIsNavDropdownOpen(false)} />
-                          <motion.div
-                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute top-full left-0 mt-2 w-48 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-2xl z-[101] overflow-hidden backdrop-blur-xl"
-                          >
+                        <motion.div 
+                          key="nav-backdrop"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="fixed inset-0 z-[100]" 
+                          onClick={() => setIsNavDropdownOpen(false)} 
+                        />
+                      )}
+                      {isNavDropdownOpen && (
+                        <motion.div
+                          key="nav-menu"
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          className="absolute top-full left-0 mt-2 w-48 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-2xl z-[101] overflow-hidden backdrop-blur-xl"
+                        >
                             {tabs.map((tab) => (
                               <button
                                 key={tab.id}
@@ -6509,7 +6523,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               </button>
                             ))}
                           </motion.div>
-                        </>
                       )}
                     </AnimatePresence>
                   </div>
@@ -6698,17 +6711,23 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                       <AnimatePresence>
                         {isViewDropdownOpen && (
-                          <>
-                            <div 
-                              className="fixed inset-0 z-[60]" 
-                              onClick={() => setIsViewDropdownOpen(false)} 
-                            />
-                            <motion.div
-                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                              animate={{ opacity: 1, y: 0, scale: 1 }}
-                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                              className="absolute top-full left-0 mt-2 w-56 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-2xl z-[70] py-1 overflow-hidden"
-                            >
+                          <motion.div 
+                            key="view-backdrop"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="fixed inset-0 z-[60]" 
+                            onClick={() => setIsViewDropdownOpen(false)} 
+                          />
+                        )}
+                        {isViewDropdownOpen && (
+                          <motion.div
+                            key="view-menu"
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute top-full left-0 mt-2 w-56 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-2xl z-[70] py-1 overflow-hidden"
+                          >
                               <div className="px-4 py-2 border-b border-white/5">
                                 <p className="text-[7px] font-black text-text-dim uppercase tracking-widest">Configuration de vue</p>
                               </div>
@@ -6796,7 +6815,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                 </button>
                               </div>
                             </motion.div>
-                          </>
                         )}
                       </AnimatePresence>
                     </div>
@@ -7303,7 +7321,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <tbody className="divide-y divide-white/5">
                   <AnimatePresence initial={false}>
                     {filteredMissions.length === 0 ? (
-                      <tr>
+                      <motion.tr
+                        key="empty-missions"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 0.2 }}
+                        exit={{ opacity: 0 }}
+                      >
                         <td colSpan={21 - hiddenColumns.length} className="py-24 text-center">
                           <div className="flex flex-col items-center gap-4 opacity-20">
                             <Layers size={48} className="text-text-dim" />
@@ -7312,7 +7335,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             </p>
                           </div>
                         </td>
-                      </tr>
+                      </motion.tr>
                     ) : (
                       filteredMissions.map((m) => (
                         <motion.tr 
@@ -7755,10 +7778,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           <AnimatePresence initial={false}>
             {secondaryMissions.length === 0 ? (
-              <div className="col-span-full py-12 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-4 opacity-30">
+              <motion.div 
+                key="empty-secondary-missions"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="col-span-full py-12 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-4 opacity-30">
                 <PackageSearch size={40} className="text-text-dim" />
                 <p className="text-[10px] uppercase font-black tracking-widest">Aucune mission secondaire</p>
-              </div>
+              </motion.div>
             ) : (
               secondaryMissions.map((sm) => (
                 <motion.div
@@ -7956,20 +7984,23 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       {/* Bulk Status Modal */}
       <AnimatePresence>
         {bulkStatusModalOpen && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setBulkStatusModalOpen(false)}
-              className="fixed inset-0 bg-black/80 backdrop-blur-md z-[400]"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-card-bg border border-white/10 rounded-2xl p-8 z-[401] shadow-2xl"
-            >
+          <motion.div 
+            key="bulk-status-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setBulkStatusModalOpen(false)}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[400]"
+          />
+        )}
+        {bulkStatusModalOpen && (
+          <motion.div 
+            key="bulk-status-modal"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-card-bg border border-white/10 rounded-2xl p-8 z-[401] shadow-2xl"
+          >
               <h3 className="text-sm font-black uppercase tracking-wider text-white mb-6">Mise à jour groupée</h3>
               <p className="text-[10px] text-text-dim uppercase font-bold mb-4 tracking-widest">Appliquer le statut aux {selectedMissionIds.length} éléments :</p>
               
@@ -7992,7 +8023,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 Annuler
               </button>
             </motion.div>
-          </>
         )}
       </AnimatePresence>
 
@@ -8370,20 +8400,23 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       {/* Import Configuration Modal */}
       <AnimatePresence>
         {showImportModal && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => { setShowImportModal(false); setPendingImports([]); }}
-              className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[600]"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 30 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 30 }}
-              className="fixed inset-4 md:inset-10 lg:inset-20 bg-card-bg border border-white/10 rounded-3xl overflow-hidden z-[601] shadow-2xl flex flex-col"
-            >
+          <motion.div 
+            key="import-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => { setShowImportModal(false); setPendingImports([]); }}
+            className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[600]"
+          />
+        )}
+        {showImportModal && (
+          <motion.div 
+            key="import-modal"
+            initial={{ opacity: 0, scale: 0.95, y: 30 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 30 }}
+            className="fixed inset-4 md:inset-10 lg:inset-20 bg-card-bg border border-white/10 rounded-3xl overflow-hidden z-[601] shadow-2xl flex flex-col"
+          >
               <div className="p-8 border-b border-white/5 flex items-center justify-between shrink-0 bg-black/40">
                 <div className="flex items-center gap-4">
                   <div className="p-3 bg-accent/20 rounded-2xl text-accent border border-accent/30">
@@ -8517,27 +8550,29 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </button>
               </div>
             </motion.div>
-          </>
         )}
       </AnimatePresence>
 
       {/* Feedback Modal */}
       <AnimatePresence>
         {isFeedbackOpen && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsFeedbackOpen(false)}
-              className="fixed inset-0 bg-black/90 backdrop-blur-md z-[650]"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 40 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 40 }}
-              className="fixed inset-4 md:inset-auto md:right-10 md:bottom-24 md:w-[400px] bg-card-bg border border-white/10 rounded-2xl overflow-hidden z-[651] shadow-2xl flex flex-col"
-            >
+          <motion.div 
+            key="feedback-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsFeedbackOpen(false)}
+            className="fixed inset-0 bg-black/90 backdrop-blur-md z-[650]"
+          />
+        )}
+        {isFeedbackOpen && (
+          <motion.div 
+            key="feedback-modal"
+            initial={{ opacity: 0, scale: 0.9, y: 40 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 40 }}
+            className="fixed inset-4 md:inset-auto md:right-10 md:bottom-24 md:w-[400px] bg-card-bg border border-white/10 rounded-2xl overflow-hidden z-[651] shadow-2xl flex flex-col"
+          >
               <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/40">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-accent/20 rounded-lg text-accent">
@@ -8653,7 +8688,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 )}
               </div>
             </motion.div>
-          </>
         )}
       </AnimatePresence>
 
