@@ -402,6 +402,11 @@ ${JSON.stringify(req.body.missions || [])}
     }
   });
 
+  // Gestion des routes API non trouvées
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: 'Route API introuvable' });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

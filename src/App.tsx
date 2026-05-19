@@ -150,6 +150,7 @@ interface Mission {
   imagePosition?: string;
   deadline?: string;
   createdAt: number;
+  updatedAt?: number;
   history: MissionLog[];
   enabled: boolean;
 }
@@ -696,7 +697,7 @@ export default function App() {
   const [toast, setToast] = useState<{ show: boolean, message: string, type: string }>({ show: false, message: '', type: 'calendar' });
   const [isCapturing, setIsCapturing] = useState(false);
   const [activeTab, setActiveTab] = useState<'table' | 'dashboard' | 'journal' | 'system'>('table');
-  const [viewMode, setViewMode] = useState<'table' | 'mosaic'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'mosaic' | 'grid'>('table');
   const [isAdvancedSortOpen, setIsAdvancedSortOpen] = useState(false);
   
   // Selection & Bulk Actions
