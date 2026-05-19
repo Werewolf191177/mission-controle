@@ -4,7 +4,7 @@
  */
 
 import * as XLSX from 'xlsx';
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -21,14 +21,17 @@ import {
   Palette,
   Activity,
   Package,
+  PackageSearch,
   Target,
   Maximize,
   Minimize,
   ChevronsLeft,
   Layers,
   Film,
+  Camera,
   Zap,
   Rocket,
+  LayoutGrid,
   ClipboardCheck,
   Sparkles,
   Monitor,
@@ -51,6 +54,8 @@ import {
   Download,
   FileSpreadsheet,
   Filter,
+  Eye,
+  EyeOff,
   Search,
   FilterX,
   Printer,
@@ -59,26 +64,35 @@ import {
   Loader2,
   ZapOff,
   Globe,
-  LayoutGrid,
   List,
+  BookOpen,
   RefreshCw,
   ArrowRight,
   Power,
+  PowerOff,
   MessageSquare,
   Bug,
   MessageCircle,
   Megaphone,
   Database,
-  Activity,
-  Box,
-  Cpu
+  Cpu,
+  Layout,
+  Columns,
+  Info,
+  FileJson,
+  Bot,
+  Send
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
-import html2canvas from 'html2canvas';
+import { toJpeg } from 'html-to-image';
+import JSZip from 'jszip';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
-  PieChart as RPieChart, Pie, Cell, AreaChart, Area, LabelList 
+  PieChart as RPieChart, Pie, Cell, AreaChart, Area, LabelList, ComposedChart, Line, Legend, CartesianGrid
 } from 'recharts';
+
+import { initAuth, googleSignIn, logout, getAccessToken } from './services/firebaseAuth';
+import type { User } from 'firebase/auth';
 
 interface CategoryConfig {
   id: string;
@@ -101,6 +115,19 @@ interface GlobalLogEntry {
   type: 'system' | 'manual' | 'mission' | 'instruction';
 }
 
+interface SecondaryMission {
+  id: string;
+  title: string;
+  note: string;
+  rating: number;
+  progress: number;
+  priority: 'low' | 'medium' | 'high';
+  status: string;
+  createdAt: number;
+  deadline?: string;
+  enabled: boolean;
+}
+
 interface Mission {
   id: string;
   missionNo: number;
@@ -120,6 +147,7 @@ interface Mission {
   rating?: number;
   info: string;
   imageUrl?: string;
+  imagePosition?: string;
   deadline?: string;
   createdAt: number;
   history: MissionLog[];
@@ -139,6 +167,94 @@ const Toggle = ({ enabled, onToggle }: { enabled: boolean, onToggle: (e: React.M
     />
   </div>
 );
+
+const StarRatingStatic = ({ rating = 0, size = 8 }: { rating?: number, size?: number }) => (
+  <div className="flex gap-0.5">
+    {[1, 2, 3, 4, 5].map((starValue) => {
+      const isFull = rating >= starValue;
+      const isHalf = rating >= starValue - 0.5 && !isFull;
+      return (
+        <div key={starValue} className="relative" style={{ width: size, height: size }}>
+          <Sparkles size={size} className="text-white/10 absolute inset-0" />
+          {isFull && (
+            <Sparkles size={size} className="text-accent-yellow fill-accent-yellow absolute inset-0" />
+          )}
+          {isHalf && (
+            <div className="absolute inset-0 overflow-hidden" style={{ width: '50%' }}>
+              <Sparkles size={size} className="text-accent-yellow fill-accent-yellow" style={{ width: size }} />
+            </div>
+          )}
+        </div>
+      );
+    })}
+  </div>
+);
+
+const InteractiveStarRating = ({ rating = 0, onRatingChange, size = 12, className = "" }: { rating?: number, onRatingChange: (val: number) => void, size?: number, className?: string }) => {
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLButtonElement>, starValue: number) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const isHalf = x < rect.width / 2;
+    setHoverRating(isHalf ? starValue - 0.5 : starValue);
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>, starValue: number) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const isHalf = x < rect.width / 2;
+    const finalVal = isHalf ? starValue - 0.5 : starValue;
+    onRatingChange(finalVal);
+  };
+
+  const currentDisplay = hoverRating !== null ? hoverRating : rating;
+
+  return (
+    <div className={`flex items-center gap-0.5 ${className}`} onMouseLeave={() => setHoverRating(null)}>
+      {[1, 2, 3, 4, 5].map((starValue) => {
+        const isFull = currentDisplay >= starValue;
+        const isHalf = currentDisplay >= starValue - 0.5 && !isFull;
+
+        return (
+          <button
+            key={starValue}
+            onMouseMove={(e) => handleMouseMove(e, starValue)}
+            onClick={(e) => handleClick(e, starValue)}
+            className="group/star transition-all duration-200 hover:scale-125 active:scale-90 cursor-pointer p-0.5 relative"
+            title={`Noter ${starValue}/5`}
+          >
+             <div className="relative" style={{ width: size, height: size }}>
+                <Sparkles size={size} className="text-white/10 absolute inset-0 group-hover/star:text-white/20 transition-colors" />
+                {isFull && (
+                   <Sparkles 
+                     size={size} 
+                     className="text-accent-yellow fill-accent-yellow absolute inset-0 drop-shadow-[0_0_8px_rgba(255,190,0,0.5)] transition-all duration-300" 
+                   />
+                )}
+                {isHalf && (
+                   <div className="absolute inset-0 overflow-hidden" style={{ width: '50%' }}>
+                      <Sparkles 
+                        size={size} 
+                        className="text-accent-yellow fill-accent-yellow transition-all duration-300" 
+                        style={{ width: size }} 
+                      />
+                   </div>
+                )}
+             </div>
+             {hoverRating !== null && Math.ceil(hoverRating) === starValue && (
+               <motion.div 
+                 layoutId="star-glow"
+                 className="absolute inset-0 bg-accent-yellow/10 rounded-full blur-md -z-10"
+               />
+             )}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen, setIsOpen, accentColor = "text-accent" }: any) {
   return (
@@ -208,14 +324,210 @@ function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen,
   );
 }
 
+const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToken: string | null }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState<{ role: 'model' | 'user', text: string }[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const sendMessage = async () => {
+    if (!input.trim()) return;
+    const currentInput = input;
+    const currentHistory = [...messages];
+    
+    setMessages([...currentHistory, { role: 'user', text: currentInput }]);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      const customKey = localStorage.getItem('gemini_custom_api_key');
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (customKey) {
+        headers['x-gemini-api-key'] = customKey;
+      }
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ 
+          message: currentInput, 
+          history: currentHistory,
+          missions: missions,
+          googleToken: googleToken
+        })
+      });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || 'Erreur API');
+      }
+      
+      setMessages([...currentHistory, { role: 'user', text: currentInput }, { role: 'model', text: data.text }]);
+    } catch (err: any) {
+      setMessages([...currentHistory, { role: 'user', text: currentInput }, { role: 'model', text: 'Erreur: ' + err.message }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <motion.div 
+      drag
+      dragMomentum={false}
+      style={{ position: 'fixed', bottom: 24, left: 24, zIndex: 99999 }}
+      className="flex flex-col items-start gap-4"
+    >
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="w-[350px] bg-card-bg border border-white/10 shadow-2xl flex flex-col rounded-2xl overflow-hidden cursor-auto"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div className="bg-white/5 border-b border-white/10 p-4 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent">
+                <Bot size={18} />
+              </div>
+              <div>
+                <h3 className="text-white text-sm font-bold leading-tight">Agent IA Studio</h3>
+                <span className="text-[10px] text-accent font-mono">En ligne</span>
+              </div>
+            </div>
+            
+            <div className="flex-1 p-4 overflow-y-auto custom-scrollbar flex flex-col gap-3 min-h-[300px] max-h-[400px]" ref={scrollRef}>
+              {messages.length === 0 && (
+                <div className="text-center text-text-dim text-xs mt-10">
+                  <Bot size={24} className="mx-auto mb-2 opacity-50" />
+                  <p>Bonjour ! Je suis l'Agent IA.</p>
+                  <p>Comment puis-je vous aider ?</p>
+                </div>
+              )}
+              {messages.map((msg, i) => (
+                <div key={i} className={`max-w-[85%] rounded-xl p-3 text-sm flex flex-col ${msg.role === 'user' ? 'bg-accent/20 text-white ml-auto border border-accent/20' : 'bg-white/5 text-white/90 mr-auto border border-white/10'}`}>
+                  {msg.text}
+                </div>
+              ))}
+              {isLoading && (
+                <div className="bg-white/5 text-white/90 mr-auto border border-white/10 rounded-xl p-3 text-sm flex gap-1 items-center h-10 w-16 justify-center">
+                  <span className="w-1.5 h-1.5 bg-text-dim rounded-full animate-bounce"></span>
+                  <span className="w-1.5 h-1.5 bg-text-dim rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></span>
+                  <span className="w-1.5 h-1.5 bg-text-dim rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 border-t border-white/10 bg-black/20 flex gap-2">
+              <input 
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+                placeholder="Posez votre question..."
+                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-accent transition-colors"
+                autoFocus
+              />
+              <button 
+                onClick={sendMessage}
+                disabled={isLoading || !input.trim()}
+                className="w-10 h-10 bg-accent text-black rounded-lg flex items-center justify-center hover:bg-accent/80 disabled:opacity-50 transition-colors shrink-0"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-14 h-14 bg-gradient-to-tr from-accent to-accent-blue rounded-full flex items-center justify-center text-black shadow-[0_0_20px_rgba(0,255,148,0.3)] hover:scale-110 active:scale-95 transition-all cursor-move"
+        title="Discuter avec l'Agent IA (Déplaçable)"
+      >
+        <Bot size={24} />
+      </button>
+    </motion.div>
+  );
+};
+
 export default function App() {
+  const [googleUser, setGoogleUser] = useState<User | null>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setGoogleUser(user);
+        setGoogleToken(token);
+      },
+      () => {
+        setGoogleUser(null);
+        setGoogleToken(null);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingIn(true);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setGoogleUser(result.user);
+        setGoogleToken(result.accessToken);
+        setToast({ show: true, message: 'Google Auth connecté !', type: 'task' });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      }
+    } catch (err) {
+      console.error('Login failed:', err);
+      setToast({ show: true, message: 'Erreur connexion Google Auth', type: 'system' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    await logout();
+    setGoogleUser(null);
+    setGoogleToken(null);
+  };
+
   const [isRefreshingScore, setIsRefreshingScore] = useState(false);
+  const [deadlineAlertThreshold, setDeadlineAlertThreshold] = useState(3);
+  const [globalDeadline, setGlobalDeadline] = useState('');
 
   const [isMiddleTierVisible, setIsMiddleTierVisible] = useState(true);
 
+  const toggleAllMissions = (enabled: boolean) => {
+    setMissions(prev => prev.map(m => ({ ...m, enabled })));
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `SYSTÈME : ${enabled ? 'ACTIVATION' : 'DÉSACTIVATION'} de toutes les missions (${missions.length} items).`,
+      type: 'manual'
+    }]);
+    setToast({ show: true, message: `Toutes les missions ${enabled ? 'activées' : 'désactivées'} !`, type: 'task' });
+    setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+  };
+
   const handleRefreshScore = () => {
     setIsRefreshingScore(true);
-    setTimeout(() => setIsRefreshingScore(false), 1000);
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `SYSTÈME : Recalcul global des tableaux de production et missions secondaires effectué.`,
+      type: 'system'
+    }]);
+    setTimeout(() => setIsRefreshingScore(false), 1500);
   };
 
   // State for categories
@@ -280,7 +592,7 @@ export default function App() {
     { 
       id: 'support', 
       name: 'Support', 
-      items: ['photo', 'video', 'graphisme'],
+      items: ['photo', 'vidéo', 'graphisme'],
       icon: Film,
       displayType: 'buttons',
       colorRef: 'accent-pink'
@@ -296,7 +608,7 @@ export default function App() {
     { 
       id: 'status', 
       name: 'État d\'avancement', 
-      items: ['en attente', 'produit preparé', 'en cour de shoot', 'déja shooter', 'livré', 'annuler'],
+      items: ['en attente', 'produit preparé', 'en cour de shoot', 'déja shooter', 'En post-production', 'livré', 'annuler'],
       icon: ClipboardCheck,
       displayType: 'buttons',
       colorRef: 'accent'
@@ -305,6 +617,11 @@ export default function App() {
 
   // State for missions
   const [missions, setMissions] = useState<Mission[]>([]);
+  const [secondaryMissions, setSecondaryMissions] = useState<SecondaryMission[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<'production' | 'secondary'>('production');
+  const [filterDuplicates, setFilterDuplicates] = useState(false);
+  const [showDuplicateIndicators, setShowDuplicateIndicators] = useState(true);
+  const [showCleanDuplicatesModal, setShowCleanDuplicatesModal] = useState(false);
   const [missionCounter, setMissionCounter] = useState(1);
   const [refPrefix, setRefPrefix] = useState('NK');
   const [refCounter, setRefCounter] = useState(882);
@@ -316,13 +633,16 @@ export default function App() {
   const [selectedUnivers, setSelectedUnivers] = useState('');
   const [selectedFormat, setSelectedFormat] = useState('');
   const [selectedPosition, setSelectedPosition] = useState('');
-  const [selectedSupport, setSelectedSupport] = useState('');
+  const [selectedSupport, setSelectedSupport] = useState<string[]>([]);
   const [selectedPriority, setSelectedPriority] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedRating, setSelectedRating] = useState(0);
+  const [selectedSecondaryPriority, setSelectedSecondaryPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [showSecondaryInReport, setShowSecondaryInReport] = useState(true);
   const [photoRequested, setPhotoRequested] = useState(1);
+  const [secondaryTitle, setSecondaryTitle] = useState('');
   const [info, setInfo] = useState('');
   
   // Pending Imports State for Modal
@@ -333,32 +653,47 @@ export default function App() {
   const isDuplicate = useCallback((m: Mission) => {
     return missions.some(other => 
       other.id !== m.id && 
-      other.refId === m.refId && 
       other.product === m.product &&
       other.color === m.color &&
-      other.univers === m.univers
+      other.univers === m.univers &&
+      other.support === m.support &&
+      other.format === m.format &&
+      other.position === m.position &&
+      other.argumentType === m.argumentType &&
+      other.info === m.info &&
+      (other.createdAt > m.createdAt || (other.createdAt === m.createdAt && other.id > m.id))
     );
   }, [missions]);
 
   // Support-based dynamic logic
   useEffect(() => {
-    if (selectedSupport === 'video') {
+    if (selectedSupport.includes('vidéo')) {
       if (selectedFormat !== '16/9' && selectedFormat !== '9/16') {
         setSelectedFormat('16/9');
       }
-    } else if (selectedSupport === 'graphisme') {
+    } else if (selectedSupport.includes('graphisme')) {
       setSelectedFormat('standard');
     }
   }, [selectedSupport]);
 
   // Global Logs State
   const [globalLogs, setGlobalLogs] = useState<GlobalLogEntry[]>([]);
+
+  const deleteLog = (id: string) => {
+    setGlobalLogs(prev => prev.filter(log => log.id !== id));
+  };
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [manualLog, setManualLog] = useState('');
+
+  const handleLiveRefresh = () => {
+    setIsRefreshing(true);
+    setTimeout(() => setIsRefreshing(false), 800);
+  };
 
   // UI State
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [toast, setToast] = useState<{ show: boolean, message: string, type: 'calendar' | 'task' }>({ show: false, message: '', type: 'calendar' });
+  const [toast, setToast] = useState<{ show: boolean, message: string, type: string }>({ show: false, message: '', type: 'calendar' });
   const [isCapturing, setIsCapturing] = useState(false);
   const [activeTab, setActiveTab] = useState<'table' | 'dashboard' | 'journal' | 'system'>('table');
   const [viewMode, setViewMode] = useState<'table' | 'mosaic'>('table');
@@ -372,7 +707,9 @@ export default function App() {
   
   // Header Style State
   const [headerBgImage, setHeaderBgImage] = useState<string | null>(null);
-  const [headerBgOpacity, setHeaderBgOpacity] = useState(0.2);
+  const [appLogo, setAppLogo] = useState<string | null>(null);
+  const [headerBgColor, setHeaderBgColor] = useState('#000000');
+  const [headerBgOpacity, setHeaderBgOpacity] = useState(0.4);
   const [waveColor, setWaveColor] = useState('text-accent');
   const [waveOpacity, setWaveOpacity] = useState(0.3);
   const [waveType, setWaveType] = useState<'liquid' | 'organic' | 'tech'>('liquid');
@@ -388,10 +725,60 @@ export default function App() {
   const [saveBtnColor, setSaveBtnColor] = useState('#00FF94');
   const [missionTitleColor, setMissionTitleColor] = useState('#BF7AF0');
   const [refIdColor, setRefIdColor] = useState('#00D1FF');
+
+  // Core Accent Colors
+  const [accentColor, setAccentColor] = useState('#00FF94');
+  const [accentBlueColor, setAccentBlueColor] = useState('#00D1FF');
+  const [accentPurpleColor, setAccentPurpleColor] = useState('#BD00FF');
+  const [accentOrangeColor, setAccentOrangeColor] = useState('#FF9900');
+  const [accentPinkColor, setAccentPinkColor] = useState('#FF007A');
+  const [accentRedColor, setAccentRedColor] = useState('#FF3B30');
+  const [accentYellowColor, setAccentYellowColor] = useState('#EBFF00');
+
+  // Inject CSS Variables
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--color-accent', accentColor);
+    root.style.setProperty('--color-accent-blue', accentBlueColor);
+    root.style.setProperty('--color-accent-purple', accentPurpleColor);
+    root.style.setProperty('--color-accent-orange', accentOrangeColor);
+    root.style.setProperty('--color-accent-pink', accentPinkColor);
+    root.style.setProperty('--color-accent-red', accentRedColor);
+    root.style.setProperty('--color-accent-yellow', accentYellowColor);
+  }, [accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor]);
   
   // Advanced Sort State
   const [sortConfigs, setSortConfigs] = useState<{ key: string; order: 'asc' | 'desc' }[]>([]);
-  const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
+  const logDebounceTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
+  const [tableViewState, setTableViewState] = useState<'full' | 'compact' | 'minimal'>('full');
+  
+  const [compactHiddenColumns, setCompactHiddenColumns] = useState<string[]>(['imageUrl', 'color', 'argumentType', 'format', 'position', 'support', 'priority']);
+  const [minimalHiddenColumns, setMinimalHiddenColumns] = useState<string[]>(['missionNo', 'imageUrl', 'color', 'argumentType', 'univers', 'format', 'position', 'support', 'priority', 'deadline', 'info', 'rating', 'progress', 'photoCountRequested', 'photoCountDelivered', 'status', 'product']);
+  
+  const [manualHiddenColumns, setManualHiddenColumns] = useState<string[]>([]);
+  
+  const hiddenColumns = useMemo(() => {
+    if (tableViewState === 'compact') return compactHiddenColumns;
+    if (tableViewState === 'minimal') return minimalHiddenColumns;
+    return manualHiddenColumns;
+  }, [tableViewState, manualHiddenColumns, compactHiddenColumns, minimalHiddenColumns]);
+
+  const toggleColumnVisibility = useCallback((columnId: string) => {
+    const updateFn = (prev: string[]) => 
+      prev.includes(columnId) ? prev.filter(id => id !== columnId) : [...prev, columnId];
+    
+    if (tableViewState === 'compact') {
+      setCompactHiddenColumns(updateFn);
+    } else if (tableViewState === 'minimal') {
+      setMinimalHiddenColumns(updateFn);
+    } else {
+      setManualHiddenColumns(updateFn);
+    }
+  }, [tableViewState]);
+
+  const applyViewPreset = (mode: 'full' | 'compact' | 'minimal') => {
+    setTableViewState(mode);
+  };
   
   // Filter state
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -404,6 +791,7 @@ export default function App() {
   const [filterArguments, setFilterArguments] = useState<string[]>([]);
   const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
   const [filterEnabled, setFilterEnabled] = useState<string[]>([]);
+  const [filterDeadlineAlert, setFilterDeadlineAlert] = useState(false);
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
   const [filterDateType, setFilterDateType] = useState<'createdAt' | 'deadline'>('createdAt');
@@ -415,17 +803,166 @@ export default function App() {
   const [isArgumentFilterOpen, setIsArgumentFilterOpen] = useState(false);
   const [isPriorityFilterOpen, setIsPriorityFilterOpen] = useState(false);
   const [isEnabledFilterOpen, setIsEnabledFilterOpen] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [collapsedCategories, setCollapsedCategories] = useState<string[]>([]);
   const [collapsedSettingsSections, setCollapsedSettingsSections] = useState<string[]>([]);
+  const [collapsedMosaicGroups, setCollapsedMosaicGroups] = useState<string[]>([]);
   
   // Journal State
   const [systemDataJson, setSystemDataJson] = useState('');
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [isNavDropdownOpen, setIsNavDropdownOpen] = useState(false);
+  const [isViewDropdownOpen, setIsViewDropdownOpen] = useState(false);
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto Export state
+  const [autoExportEnabled, setAutoExportEnabled] = useState(false);
+  const [autoExportInterval, setAutoExportInterval] = useState(60); // minutes
+  const [scheduledExportEnabled, setScheduledExportEnabled] = useState(false);
+  const [scheduledExportDays, setScheduledExportDays] = useState<string[]>(['1', '2', '3', '4', '5']);
+  const [scheduledExportTime, setScheduledExportTime] = useState('18:00');
+  const lastExportTimeRef = useRef<number>(Date.now());
+  const lastScheduledExportDateRef = useRef<string>('');
+  const downloadFullExportRef = useRef<() => void>(() => {});
+
+  // Background interval for auto-export
+  useEffect(() => {
+    const handleSilenceExport = () => {
+       const now = new Date();
+       let shouldExport = false;
+
+       // 1. Scheduled Export
+       if (scheduledExportEnabled) {
+          const currentDayStr = now.getDay().toString();
+          const currentHour = now.getHours().toString().padStart(2, '0');
+          const currentMinute = now.getMinutes().toString().padStart(2, '0');
+          const currentTimeStr = `${currentHour}:${currentMinute}`;
+          const todayDateStr = now.toLocaleDateString();
+          
+          if (scheduledExportDays.includes(currentDayStr) && currentTimeStr === scheduledExportTime && lastScheduledExportDateRef.current !== todayDateStr) {
+             lastScheduledExportDateRef.current = todayDateStr;
+             shouldExport = true;
+          }
+       }
+
+       // 2. Periodic Export (only if not already exporting from scheduled)
+       if (autoExportEnabled && !shouldExport) {
+           const intervalMs = autoExportInterval * 60 * 1000;
+           const nowMs = now.getTime();
+           if (nowMs - lastExportTimeRef.current >= intervalMs) {
+               lastExportTimeRef.current = nowMs;
+               shouldExport = true;
+           }
+       }
+
+       if (shouldExport) {
+           if (typeof downloadFullExportRef.current === 'function') {
+               downloadFullExportRef.current();
+           }
+       }
+    };
+    // Check every 30 seconds
+    const timer = setInterval(handleSilenceExport, 30000);
+    return () => clearInterval(timer);
+  }, [autoExportEnabled, autoExportInterval, scheduledExportEnabled, scheduledExportDays, scheduledExportTime]);
+
+  const generateFullDataJson = useCallback(() => {
+    const data = {
+      missions,
+      secondaryMissions,
+      missionCounter,
+      refPrefix,
+      refCounter,
+      headerBgColor,
+      refIdColor,
+      accentColor,
+      accentBlueColor,
+      accentPurpleColor,
+      accentOrangeColor,
+      accentPinkColor,
+      accentRedColor,
+      accentYellowColor,
+      waveOpacity,
+      headerBgImage,
+      headerBgOpacity,
+      globalLogs,
+      categories: categories.map(({ icon, ...rest }) => rest)
+    };
+    return JSON.stringify(data, null, 2);
+  }, [missions, secondaryMissions, missionCounter, refPrefix, refCounter, headerBgColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, waveOpacity, headerBgImage, headerBgOpacity, globalLogs, categories]);
+
+  const copySystemJson = () => {
+    const json = generateFullDataJson();
+    setSystemDataJson(json);
+    navigator.clipboard.writeText(json);
+    setToast({
+      show: true,
+      message: 'Flux JSON copié dans le presse-papier !',
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const downloadSystemJson = () => {
+    const json = generateFullDataJson();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = `${now.getHours()}h${now.getMinutes().toString().padStart(2, '0')}`;
+    link.href = url;
+    link.download = `Mission_Controle_Backup_${dateStr}_${timeStr}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    setToast({
+      show: true,
+      message: 'Fichier de sauvegarde .json exporté !',
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const handleJsonFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      setSystemDataJson(content);
+      setToast({
+        show: true,
+        message: 'Fichier chargé dans l\'éditeur. Cliquez sur IMPORTER pour restaurer.',
+        type: 'task'
+      });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    };
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
+  };
   
   // AI Agent Config State
-  const [aiInstructions, setAiInstructions] = useState('Analyse mon flux de production, détecte les goulots d\'étranglement et propose des optimisations basées sur les priorités et les délais.');
-  const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai'>('branding');
+  const defaultAiInstructions = `Analyse mon flux de production, détecte les goulots d'étranglement et propose des optimisations basées sur les priorités et les délais.
+
+LISTE DES COMMANDES :
+/matrice : Vue globale du tableau.
+/load : Charge par univers (Flux).
+/enchawer : Séquençage optimisé plateau.
+/inv : Picking dédupliqué.
+/scan : Transcription OCR.
+/% : Score de progression.
+/eod : Bilan soir trié par date.
+@Google Agenda : Sync Calendrier.
+@Google Tasks : Sync Tâches.
+/help : Aide efficace.`;
+  const [aiInstructions, setAiInstructions] = useState(defaultAiInstructions);
+  const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display'>('branding');
+  const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('gemini_custom_api_key') || '');
   
   // Feedback State
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
@@ -449,6 +986,30 @@ export default function App() {
       latency: recentLogs.length > 0 ? '0.002ms' : '0.000ms'
     };
   }, [globalLogs]);
+
+  const isDeadlineApproaching = (deadlineStr?: string) => {
+    if (!deadlineStr || deadlineStr === '-') return false;
+    
+    let date: Date;
+    if (deadlineStr.includes('/')) {
+      const [d, m, y] = deadlineStr.split('/').map(Number);
+      date = new Date(y, m - 1, d);
+    } else {
+      date = new Date(deadlineStr);
+    }
+    
+    if (isNaN(date.getTime())) return false;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const deadlineDate = new Date(date);
+    deadlineDate.setHours(0, 0, 0, 0);
+    
+    const diffTime = deadlineDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return diffDays >= 0 && diffDays <= deadlineAlertThreshold;
+  };
 
   // Persistence logic
   useEffect(() => {
@@ -476,8 +1037,18 @@ export default function App() {
         const savedSaveBtnColor = localStorage.getItem('saveBtnColor');
         const savedMissionTitleColor = localStorage.getItem('missionTitleColor');
         const savedRefIdColor = localStorage.getItem('refIdColor');
+        const savedAccentColor = localStorage.getItem('accentColor');
+        const savedAccentBlueColor = localStorage.getItem('accentBlueColor');
+        const savedAccentPurpleColor = localStorage.getItem('accentPurpleColor');
+        const savedAccentOrangeColor = localStorage.getItem('accentOrangeColor');
+        const savedAccentPinkColor = localStorage.getItem('accentPinkColor');
+        const savedAccentRedColor = localStorage.getItem('accentRedColor');
+        const savedAccentYellowColor = localStorage.getItem('accentYellowColor');
+
         const savedSortConfigs = localStorage.getItem('sortConfigs');
         const savedViewMode = localStorage.getItem('viewMode');
+        const savedTableViewState = localStorage.getItem('tableViewState');
+        const savedManualHiddenColumns = localStorage.getItem('manualHiddenColumns');
         const savedAiInstructions = localStorage.getItem('aiInstructions');
         
         const safeParse = (str: string | null) => {
@@ -511,6 +1082,45 @@ export default function App() {
             setMissions(migrated);
           }
         }
+        
+        const savedSecondaryMissions = localStorage.getItem('secondaryMissions');
+        const savedThreshold = localStorage.getItem('deadlineAlertThreshold');
+        if (savedThreshold) setDeadlineAlertThreshold(parseInt(savedThreshold));
+
+        const savedGlobalDeadline = localStorage.getItem('globalDeadline');
+        if (savedGlobalDeadline) setGlobalDeadline(savedGlobalDeadline);
+
+        const savedAutoExportEnabled = localStorage.getItem('autoExportEnabled');
+        if (savedAutoExportEnabled !== null) setAutoExportEnabled(savedAutoExportEnabled === 'true');
+        
+        const savedAutoExportInterval = localStorage.getItem('autoExportInterval');
+        if (savedAutoExportInterval) setAutoExportInterval(parseInt(savedAutoExportInterval, 10));
+
+        const savedScheduledExportEnabled = localStorage.getItem('scheduledExportEnabled');
+        if (savedScheduledExportEnabled !== null) setScheduledExportEnabled(savedScheduledExportEnabled === 'true');
+        
+        const savedScheduledExportDays = localStorage.getItem('scheduledExportDays');
+        if (savedScheduledExportDays) {
+           try {
+              setScheduledExportDays(JSON.parse(savedScheduledExportDays));
+           } catch {
+              // fallback
+           }
+        } else {
+           const savedScheduledExportDay = localStorage.getItem('scheduledExportDay');
+           if (savedScheduledExportDay) setScheduledExportDays([savedScheduledExportDay]);
+        }
+        
+        const savedScheduledExportTime = localStorage.getItem('scheduledExportTime');
+        if (savedScheduledExportTime) setScheduledExportTime(savedScheduledExportTime);
+
+        if (savedSecondaryMissions) {
+          const parsed = safeParse(savedSecondaryMissions);
+          if (parsed && Array.isArray(parsed)) {
+            setSecondaryMissions(parsed);
+          }
+        }
+
         if (savedCounter) {
           const val = safeParse(savedCounter);
           if (val !== null) setMissionCounter(val);
@@ -520,6 +1130,9 @@ export default function App() {
           const val = safeParse(savedRefCounter);
           if (val !== null) setRefCounter(val);
         }
+        const savedHeaderBgColor = localStorage.getItem('headerBgColor');
+        if (savedHeaderBgColor) setHeaderBgColor(savedHeaderBgColor);
+        
         if (savedHeaderBg) setHeaderBgImage(savedHeaderBg);
         if (savedHeaderOpacity) setHeaderBgOpacity(parseFloat(savedHeaderOpacity));
         if (savedLogs) {
@@ -540,12 +1153,44 @@ export default function App() {
         if (savedSaveBtnColor) setSaveBtnColor(savedSaveBtnColor);
         if (savedMissionTitleColor) setMissionTitleColor(savedMissionTitleColor);
         if (savedRefIdColor) setRefIdColor(savedRefIdColor);
-        if (savedAiInstructions) setAiInstructions(savedAiInstructions);
+        if (savedAccentColor) setAccentColor(savedAccentColor);
+        if (savedAccentBlueColor) setAccentBlueColor(savedAccentBlueColor);
+        if (savedAccentPurpleColor) setAccentPurpleColor(savedAccentPurpleColor);
+        if (savedAccentOrangeColor) setAccentOrangeColor(savedAccentOrangeColor);
+        if (savedAccentPinkColor) setAccentPinkColor(savedAccentPinkColor);
+        if (savedAccentRedColor) setAccentRedColor(savedAccentRedColor);
+        if (savedAccentYellowColor) setAccentYellowColor(savedAccentYellowColor);
+        
+        if (savedAiInstructions) {
+          if (savedAiInstructions === 'Analyse mon flux de production, détecte les goulots d\'étranglement et propose des optimisations basées sur les priorités et les délais.') {
+            setAiInstructions(defaultAiInstructions);
+          } else {
+            setAiInstructions(savedAiInstructions);
+          }
+        }
         if (savedSortConfigs) {
           const val = safeParse(savedSortConfigs);
           if (val !== null) setSortConfigs(val);
         }
         if (savedViewMode) setViewMode(savedViewMode as any);
+        if (savedTableViewState) setTableViewState(savedTableViewState as any);
+        
+        if (savedManualHiddenColumns) {
+          const val = safeParse(savedManualHiddenColumns);
+          if (val !== null) setManualHiddenColumns(val);
+        }
+        
+        const savedCompactPreset = localStorage.getItem('compactHiddenColumns');
+        if (savedCompactPreset) {
+          const val = safeParse(savedCompactPreset);
+          if (val !== null) setCompactHiddenColumns(val);
+        }
+
+        const savedMinimalPreset = localStorage.getItem('minimalHiddenColumns');
+        if (savedMinimalPreset) {
+          const val = safeParse(savedMinimalPreset);
+          if (val !== null) setMinimalHiddenColumns(val);
+        }
         
         const savedCollapsed = localStorage.getItem('collapsedCategories');
         if (savedCollapsed) {
@@ -559,11 +1204,28 @@ export default function App() {
           if (val !== null) setCollapsedSettingsSections(val);
         }
         
+        const savedCollapsedMosaicGroups = localStorage.getItem('collapsedMosaicGroups');
+        if (savedCollapsedMosaicGroups) {
+          const val = safeParse(savedCollapsedMosaicGroups);
+          if (val !== null) setCollapsedMosaicGroups(val);
+        }
+        
         if (savedCategories) {
           const parsed = safeParse(savedCategories);
           if (parsed && Array.isArray(parsed)) {
             const restored = parsed.map((cat: any) => {
               const original = categories.find(c => c.id === cat.id);
+              // Migration: ensures "En post-production" is present in the status items if missing
+              if (cat.id === 'status' && !cat.items.includes('En post-production')) {
+                const newItems = [...cat.items];
+                const index = newItems.indexOf('livré');
+                if (index !== -1) {
+                  newItems.splice(index, 0, 'En post-production');
+                } else {
+                  newItems.push('En post-production');
+                }
+                return { ...cat, items: newItems, icon: original?.icon || ClipboardCheck };
+              }
               return { ...cat, icon: original?.icon || Package };
             });
             setCategories(restored);
@@ -590,6 +1252,7 @@ export default function App() {
       const originalPosition = reportElement.style.position;
       const originalTop = reportElement.style.top;
       const originalLeft = reportElement.style.left;
+      const originalWidth = reportElement.style.width;
       
       reportElement.style.display = 'block';
       reportElement.style.position = 'relative';
@@ -598,18 +1261,14 @@ export default function App() {
       reportElement.style.width = '1200px'; 
 
       // Wait for re-render
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      const canvas = await html2canvas(reportElement, {
-        scale: 2,
-        useCORS: true,
+      const dataUrl = await toJpeg(reportElement, {
+        quality: 0.9,
         backgroundColor: '#0A0A0A',
-        logging: false,
-        onclone: (clonedDoc) => {
-          // The template already uses hardcoded hex colors to avoid oklch issues.
-          // We just ensure the element is visible in the clone.
-          const el = clonedDoc.getElementById('global-report-container');
-          if (el) el.style.display = 'block';
+        style: {
+          display: 'block',
+          visibility: 'visible',
         }
       });
 
@@ -619,12 +1278,12 @@ export default function App() {
       
       const link = document.createElement('a');
       link.download = `MissionControle_Rapport_Global_${dateStr}_${timeStr}.jpg`;
-      link.href = canvas.toDataURL('image/jpeg', 0.9);
+      link.href = dataUrl;
       link.click();
 
       setToast({
         show: true,
-        message: 'Rapport Global JPEG généré ! (Production + Performance)',
+        message: 'Rapport Global JPEG généré !',
         type: 'task'
       });
       setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
@@ -634,10 +1293,203 @@ export default function App() {
       reportElement.style.position = originalPosition;
       reportElement.style.top = originalTop;
       reportElement.style.left = originalLeft;
-      reportElement.style.width = '';
+      reportElement.style.width = originalWidth;
     } catch (err) {
       console.error('Capture error:', err);
-      alert('Erreur lors de la capture image.');
+      setToast({ show: true, message: 'Erreur lors de la capture JPEG.', type: 'alert' });
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  // Helper function for capturing an element to JPEG
+  const captureElementToJpeg = async (id: string, fileName: string, options: { pixelRatio?: number; quality?: number; skipDownload?: boolean } = {}) => {
+    const element = document.getElementById(id);
+    if (!element) {
+      console.warn(`Element with ID ${id} not found for export.`);
+      return null;
+    }
+
+    try {
+      // Increase delay to ensure SVG/Recharts stability
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      const { width, height } = element.getBoundingClientRect();
+      
+      if (width === 0 || height === 0) {
+        throw new Error('Element has no visible dimensions');
+      }
+
+      const dataUrl = await toJpeg(element, {
+        quality: options.quality || 0.95,
+        backgroundColor: '#0A0A0A',
+        pixelRatio: options.pixelRatio || 2,
+        width: width,
+        height: height,
+        style: {
+          transform: 'none',
+          transition: 'none'
+        }
+      });
+
+      if (!dataUrl || dataUrl === 'data:,' || dataUrl.length < 500) {
+        throw new Error('Generated image is empty');
+      }
+
+      if (options.skipDownload) {
+        return dataUrl;
+      }
+
+      // Try to use File System Access API if available for "Choose Location"
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: `${fileName.replace(/\s+/g, '_')}_${new Date().getTime()}.jpg`,
+            types: [{
+              description: 'Image JPEG',
+              accept: { 'image/jpeg': ['.jpg'] },
+            }],
+          });
+          const writable = await handle.createWritable();
+          // Convert dataUrl to blob
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
+          await writable.write(blob);
+          await writable.close();
+          return true;
+        } catch (pickerErr) {
+          // If user cancels or permission denied, fallback to standard download
+          console.log('Save picker canceled or failed, using fallback anchor download', pickerErr);
+        }
+      }
+
+      // Fallback: standard download anchor
+      const link = document.createElement('a');
+      link.download = `${fileName.replace(/\s+/g, '_')}_${new Date().getTime()}.jpg`;
+      link.href = dataUrl;
+      link.click();
+      return true;
+    } catch (err) {
+      console.error(`Capture failed for ${id}:`, err);
+      return null;
+    }
+  };
+
+  const exportChartAsJPEG = async (id: string, fileName: string) => {
+    try {
+      setIsCapturing(true);
+      const result = await captureElementToJpeg(id, fileName);
+      
+      if (result) {
+        setToast({
+          show: true,
+          message: `Graphique "${fileName}" exporté !`,
+          type: 'task'
+        });
+      } else {
+        setToast({ show: true, message: 'Erreur lors de l\'export du graphique.', type: 'alert' });
+      }
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const exportAllCharts = async () => {
+    const reportElement = document.getElementById('global-report-container');
+    if (!reportElement) {
+      setToast({ show: true, message: 'Erreur: Template de rapport non trouvé.', type: 'alert' });
+      return;
+    }
+
+    const charts = [
+      { id: 'report-chart-timeline', name: 'Evolution Hebdomadaire' },
+      { id: 'report-chart-status', name: 'Distribution par État' },
+      { id: 'report-chart-support', name: 'Répartition Supports' },
+      { id: 'report-chart-product', name: 'Répartition Produits' },
+      { id: 'report-chart-univers', name: 'Répartition Univers' },
+      { id: 'report-chart-argument', name: 'Type d\'Argument' },
+      { id: 'report-chart-poids', name: 'Poids Stratégique' }
+    ];
+
+    setToast({ show: true, message: 'Génération du pack de graphiques (ZIP)...', type: 'task' });
+    
+    const originalDisplay = reportElement.style.display;
+    
+    try {
+      setIsCapturing(true);
+      
+      // Force display for measurement
+      reportElement.style.display = 'block';
+      
+      const zip = new JSZip();
+      let successCount = 0;
+
+      for (let i = 0; i < charts.length; i++) {
+        const chart = charts[i];
+        setToast({ 
+          show: true, 
+          message: `Capture : ${chart.name} (${i + 1}/${charts.length})`, 
+          type: 'task' 
+        });
+        
+        const dataUrl = await captureElementToJpeg(chart.id, chart.name, { skipDownload: true });
+        if (dataUrl && typeof dataUrl === 'string') {
+          const imgData = dataUrl.split(',')[1];
+          zip.file(`${chart.name.replace(/\s+/g, '_')}.jpg`, imgData, { base64: true });
+          successCount++;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 400));
+      }
+
+      reportElement.style.display = originalDisplay;
+
+      if (successCount > 0) {
+        setToast({ show: true, message: 'Création du fichier ZIP...', type: 'task' });
+        const content = await zip.generateAsync({ type: 'blob' });
+        const zipFileName = `Graphiques_MissionControle_${new Date().getTime()}.zip`;
+
+        // Try to use File System Access API for ZIP as well
+        if ('showSaveFilePicker' in window) {
+            try {
+                const handle = await (window as any).showSaveFilePicker({
+                    suggestedName: zipFileName,
+                    types: [{
+                        description: 'Fichier ZIP',
+                        accept: { 'application/zip': ['.zip'] },
+                    }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(content);
+                await writable.close();
+            } catch (pickerErr) {
+                // Fallback
+                const link = document.createElement('a');
+                link.download = zipFileName;
+                link.href = URL.createObjectURL(content);
+                link.click();
+            }
+        } else {
+            const link = document.createElement('a');
+            link.download = zipFileName;
+            link.href = URL.createObjectURL(content);
+            link.click();
+        }
+
+        setToast({
+          show: true,
+          message: `${successCount} graphiques regroupés dans le ZIP !`,
+          type: 'task'
+        });
+      } else {
+        setToast({ show: true, message: 'Aucun graphique n\'a pu être capturé.', type: 'alert' });
+      }
+
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+    } catch (err) {
+      console.error('Batch export error:', err);
+      setToast({ show: true, message: 'Erreur critique lors de l\'export ZIP.', type: 'alert' });
     } finally {
       setIsCapturing(false);
     }
@@ -669,10 +1521,19 @@ export default function App() {
       
       // Update states
       if (data.missions) setMissions(data.missions);
+      if (data.secondaryMissions) setSecondaryMissions(data.secondaryMissions);
       if (data.missionCounter) setMissionCounter(data.missionCounter);
       if (data.refPrefix) setRefPrefix(data.refPrefix);
       if (data.refCounter) setRefCounter(data.refCounter);
+      if (data.headerBgColor) setHeaderBgColor(data.headerBgColor);
       if (data.refIdColor) setRefIdColor(data.refIdColor);
+      if (data.accentColor) setAccentColor(data.accentColor);
+      if (data.accentBlueColor) setAccentBlueColor(data.accentBlueColor);
+      if (data.accentPurpleColor) setAccentPurpleColor(data.accentPurpleColor);
+      if (data.accentOrangeColor) setAccentOrangeColor(data.accentOrangeColor);
+      if (data.accentPinkColor) setAccentPinkColor(data.accentPinkColor);
+      if (data.accentRedColor) setAccentRedColor(data.accentRedColor);
+      if (data.accentYellowColor) setAccentYellowColor(data.accentYellowColor);
       if (data.waveOpacity !== undefined) setWaveOpacity(data.waveOpacity);
       if (data.headerBgImage) setHeaderBgImage(data.headerBgImage);
       if (data.headerBgOpacity !== undefined) setHeaderBgOpacity(data.headerBgOpacity);
@@ -687,10 +1548,19 @@ export default function App() {
 
       // Force save to localStorage
       localStorage.setItem('missions', JSON.stringify(data.missions || []));
+      localStorage.setItem('secondaryMissions', JSON.stringify(data.secondaryMissions || []));
       localStorage.setItem('missionCounter', JSON.stringify(data.missionCounter || 1));
       if (data.refPrefix) localStorage.setItem('refPrefix', data.refPrefix);
       if (data.refCounter) localStorage.setItem('refCounter', data.refCounter.toString());
+      if (data.headerBgColor) localStorage.setItem('headerBgColor', data.headerBgColor);
       if (data.refIdColor) localStorage.setItem('refIdColor', data.refIdColor);
+      if (data.accentColor) localStorage.setItem('accentColor', data.accentColor);
+      if (data.accentBlueColor) localStorage.setItem('accentBlueColor', data.accentBlueColor);
+      if (data.accentPurpleColor) localStorage.setItem('accentPurpleColor', data.accentPurpleColor);
+      if (data.accentOrangeColor) localStorage.setItem('accentOrangeColor', data.accentOrangeColor);
+      if (data.accentPinkColor) localStorage.setItem('accentPinkColor', data.accentPinkColor);
+      if (data.accentRedColor) localStorage.setItem('accentRedColor', data.accentRedColor);
+      if (data.accentYellowColor) localStorage.setItem('accentYellowColor', data.accentYellowColor);
       if (data.waveOpacity !== undefined) localStorage.setItem('waveOpacity', data.waveOpacity.toString());
       if (data.headerBgImage) localStorage.setItem('headerBgImage', data.headerBgImage);
       if (data.headerBgOpacity !== undefined) localStorage.setItem('headerBgOpacity', data.headerBgOpacity.toString());
@@ -708,7 +1578,11 @@ export default function App() {
       return true;
     } catch (err) {
       console.error('Import error:', err);
-      alert('Erreur : Format de données invalide. Assurez-vous de coller le JSON complet fourni par le bouton COPIER.');
+      if (err instanceof Error && err.name === 'QuotaExceededError') {
+        alert('ERREUR DE STOCKAGE : Les données sont trop volumineuses pour le navigateur (Quota LocalStorage dépassé). Essayez d\'importer moins de missions avec des images.');
+      } else {
+        alert('Erreur : Format de données invalide. Assurez-vous de coller le JSON complet fourni par le bouton COPIER.');
+      }
       return false;
     }
   };
@@ -718,59 +1592,83 @@ export default function App() {
   };
 
   const exportSystemData = () => {
-    const data = {
-      missions,
-      missionCounter,
-      refPrefix,
-      refCounter,
-      refIdColor,
-      waveOpacity,
-      headerBgImage,
-      headerBgOpacity,
-      globalLogs,
-      categories: categories.map(({ icon, ...rest }) => rest)
-    };
-    const json = JSON.stringify(data, null, 2);
-    setSystemDataJson(json);
-    navigator.clipboard.writeText(json);
-    setToast({
-      show: true,
-      message: 'Données copiées. Prêtes à être injectées ailleurs.',
-      type: 'task'
-    });
-    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    copySystemJson();
+    downloadSystemJson();
   };
 
   const performSave = useCallback(() => {
-    localStorage.setItem('missions', JSON.stringify(missions));
-    localStorage.setItem('missionCounter', JSON.stringify(missionCounter));
-    localStorage.setItem('refPrefix', refPrefix);
-    localStorage.setItem('refCounter', JSON.stringify(refCounter));
-    if (headerBgImage) localStorage.setItem('headerBgImage', headerBgImage);
-    localStorage.setItem('headerBgOpacity', headerBgOpacity.toString());
-    localStorage.setItem('globalLogs', JSON.stringify(globalLogs));
-    localStorage.setItem('waveColor', waveColor);
-    localStorage.setItem('waveOpacity', waveOpacity.toString());
-    localStorage.setItem('waveType', waveType);
-    localStorage.setItem('appFont', appFont);
-    localStorage.setItem('appFontSize', appFontSize.toString());
-    localStorage.setItem('appTextColor', appTextColor);
-    localStorage.setItem('appTextCase', appTextCase);
-    localStorage.setItem('appFontWeight', appFontWeight);
-    localStorage.setItem('navActiveColor', navActiveColor);
-    localStorage.setItem('suiteSubtitleColor', suiteSubtitleColor);
-    localStorage.setItem('copyBtnColor', copyBtnColor);
-    localStorage.setItem('saveBtnColor', saveBtnColor);
-    localStorage.setItem('missionTitleColor', missionTitleColor);
-    localStorage.setItem('refIdColor', refIdColor);
-    localStorage.setItem('aiInstructions', aiInstructions);
-    localStorage.setItem('sortConfigs', JSON.stringify(sortConfigs));
-    localStorage.setItem('viewMode', viewMode);
-    localStorage.setItem('collapsedCategories', JSON.stringify(collapsedCategories));
-    localStorage.setItem('collapsedSettingsSections', JSON.stringify(collapsedSettingsSections));
-    const categoriesToSave = categories.map(({ icon, ...rest }) => rest);
-    localStorage.setItem('categories', JSON.stringify(categoriesToSave));
-  }, [missions, missionCounter, refPrefix, refCounter, categories, headerBgImage, headerBgOpacity, globalLogs, waveColor, waveOpacity, waveType, appFont, appFontSize, appTextColor, appTextCase, appFontWeight, navActiveColor, suiteSubtitleColor, copyBtnColor, saveBtnColor, missionTitleColor, refIdColor, sortConfigs, viewMode, collapsedCategories, collapsedSettingsSections, aiInstructions]);
+    try {
+      localStorage.setItem('missions', JSON.stringify(missions));
+      localStorage.setItem('secondaryMissions', JSON.stringify(secondaryMissions));
+      localStorage.setItem('missionCounter', JSON.stringify(missionCounter));
+      localStorage.setItem('refPrefix', refPrefix);
+      localStorage.setItem('refCounter', JSON.stringify(refCounter));
+      localStorage.setItem('headerBgColor', headerBgColor);
+      if (headerBgImage) localStorage.setItem('headerBgImage', headerBgImage);
+      localStorage.setItem('headerBgOpacity', headerBgOpacity.toString());
+      localStorage.setItem('globalLogs', JSON.stringify(globalLogs));
+      localStorage.setItem('waveColor', waveColor);
+      localStorage.setItem('waveOpacity', waveOpacity.toString());
+      localStorage.setItem('waveType', waveType);
+      localStorage.setItem('appFont', appFont);
+      localStorage.setItem('appFontSize', appFontSize.toString());
+      localStorage.setItem('appTextColor', appTextColor);
+      localStorage.setItem('appTextCase', appTextCase);
+      localStorage.setItem('appFontWeight', appFontWeight);
+      localStorage.setItem('navActiveColor', navActiveColor);
+      localStorage.setItem('suiteSubtitleColor', suiteSubtitleColor);
+      localStorage.setItem('copyBtnColor', copyBtnColor);
+      localStorage.setItem('saveBtnColor', saveBtnColor);
+      localStorage.setItem('missionTitleColor', missionTitleColor);
+      localStorage.setItem('refIdColor', refIdColor);
+      localStorage.setItem('accentColor', accentColor);
+      localStorage.setItem('accentBlueColor', accentBlueColor);
+      localStorage.setItem('accentPurpleColor', accentPurpleColor);
+      localStorage.setItem('accentOrangeColor', accentOrangeColor);
+      localStorage.setItem('accentPinkColor', accentPinkColor);
+      localStorage.setItem('accentRedColor', accentRedColor);
+      localStorage.setItem('accentYellowColor', accentYellowColor);
+      localStorage.setItem('aiInstructions', aiInstructions);
+      localStorage.setItem('sortConfigs', JSON.stringify(sortConfigs));
+      localStorage.setItem('viewMode', viewMode);
+      localStorage.setItem('tableViewState', tableViewState);
+      localStorage.setItem('manualHiddenColumns', JSON.stringify(manualHiddenColumns));
+      localStorage.setItem('collapsedCategories', JSON.stringify(collapsedCategories));
+      localStorage.setItem('collapsedSettingsSections', JSON.stringify(collapsedSettingsSections));
+      localStorage.setItem('collapsedMosaicGroups', JSON.stringify(collapsedMosaicGroups));
+      localStorage.setItem('compactHiddenColumns', JSON.stringify(compactHiddenColumns));
+      localStorage.setItem('minimalHiddenColumns', JSON.stringify(minimalHiddenColumns));
+      localStorage.setItem('deadlineAlertThreshold', deadlineAlertThreshold.toString());
+      localStorage.setItem('globalDeadline', globalDeadline);
+      localStorage.setItem('autoExportEnabled', autoExportEnabled.toString());
+      localStorage.setItem('autoExportInterval', autoExportInterval.toString());
+      localStorage.setItem('scheduledExportEnabled', scheduledExportEnabled.toString());
+      localStorage.setItem('scheduledExportDays', JSON.stringify(scheduledExportDays));
+      localStorage.setItem('scheduledExportTime', scheduledExportTime);
+      const categoriesToSave = categories.map(({ icon, ...rest }) => rest);
+      localStorage.setItem('categories', JSON.stringify(categoriesToSave));
+    } catch (e) {
+      if (e instanceof Error && e.name === 'QuotaExceededError') {
+        console.error('[STORAGE] Quota exceeded. Attempting to prune logs...');
+        
+        // Strategy 1: Prune logs if they are large
+        if (globalLogs.length > 50) {
+          const prunedLogs = globalLogs.slice(-50);
+          setGlobalLogs(prunedLogs);
+          localStorage.setItem('globalLogs', JSON.stringify(prunedLogs));
+          
+          // Re-attempt save missions
+          try {
+            localStorage.setItem('missions', JSON.stringify(missions));
+          } catch (e2) {
+            console.error('[STORAGE] Still over quota after pruning logs.');
+          }
+        }
+      } else {
+        console.error('[STORAGE] Save failed:', e);
+      }
+    }
+  }, [missions, secondaryMissions, headerBgColor, autoExportEnabled, autoExportInterval, scheduledExportEnabled, scheduledExportDays, scheduledExportTime, missionCounter, refPrefix, refCounter, categories, headerBgImage, headerBgOpacity, globalLogs, waveColor, waveOpacity, waveType, appFont, appFontSize, appTextColor, appTextCase, appFontWeight, navActiveColor, suiteSubtitleColor, copyBtnColor, saveBtnColor, missionTitleColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, sortConfigs, viewMode, tableViewState, manualHiddenColumns, compactHiddenColumns, minimalHiddenColumns, collapsedCategories, collapsedSettingsSections, collapsedMosaicGroups, aiInstructions, deadlineAlertThreshold, globalDeadline]);
 
   const saveToLocalStorage = () => {
     performSave();
@@ -847,7 +1745,7 @@ export default function App() {
     
     const globalEfficiency = (Math.max(0, (missions.reduce((acc, m) => acc + m.progress, 0) / (missions.length || 1)) - (missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
 
-    const missionData = filteredMissions.map(m => {
+    const missionData = missions.map(m => {
       const individualEfficiency = (Math.max(0, m.progress - (m.priority === 'High priority' ? 10 : 0))).toFixed(1);
       const createdDate = new Date(m.createdAt);
       return [
@@ -871,6 +1769,16 @@ export default function App() {
       ];
     });
 
+    // 3. Secondary Mission Data Sheet
+    const secondaryHeaders = ['ID', 'Titre', 'Priorité', 'Status', 'Avancement %', 'Notation', 'Date Création', 'Deadline', 'Note/Info'];
+    const secondaryData = secondaryMissions.map(sm => {
+      const createdDate = new Date(sm.createdAt);
+      return [
+        sm.id, sm.title, sm.priority, sm.status, sm.progress, sm.rating,
+        createdDate.toLocaleDateString(), sm.deadline || '-', sm.note || '-'
+      ];
+    });
+
     const workbook = XLSX.utils.book_new();
     
     // Add Mission Sheet
@@ -880,6 +1788,10 @@ export default function App() {
     // Add Journal Sheet
     const journalSheet = XLSX.utils.aoa_to_sheet([journalHeaders, ...journalData]);
     XLSX.utils.book_append_sheet(workbook, journalSheet, "Performance (Journal)");
+
+    // Add Secondary Mission Sheet
+    const secondarySheet = XLSX.utils.aoa_to_sheet([secondaryHeaders, ...secondaryData]);
+    XLSX.utils.book_append_sheet(workbook, secondarySheet, "Missions Secondaires");
     
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
@@ -889,33 +1801,188 @@ export default function App() {
     setToast({ show: true, message: 'Rapport Global généré ! (Production + Performance)', type: 'task' });
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
   };
+  
+  downloadFullExportRef.current = downloadFullExport;
+
+  const pushToGoogleSheets = async () => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Connectez Workspace d\'abord !', type: 'alert' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      return;
+    }
+    
+    // 1. Mission Data Sheet
+    const missionHeaders = [
+      'Mission #', 'Ref ID', 'Date Entrée', 'Heure Entrée', 'Activé', 'Produit', 'Couleur', 'Argument', 
+      'Univers', 'Format', 'Position', 'Support', 'Photos Demandées', 'Photos Délivrées', 'Priorité', 
+      'Deadline', 'Statut', 'Progression %', 'Notation', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle', 'Notes / Infos'
+    ];
+    const globalEfficiency = (Math.max(0, (missions.reduce((acc, m) => acc + m.progress, 0) / (missions.length || 1)) - (missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
+    const missionData = missions.map(m => {
+      const individualEfficiency = (Math.max(0, m.progress - (m.priority === 'High priority' ? 10 : 0))).toFixed(1);
+      const createdDate = new Date(m.createdAt);
+      return [
+        m.missionNo, m.refId, createdDate.toLocaleDateString(), createdDate.toLocaleTimeString(), m.enabled ? 'OUI' : 'NON', m.product, m.color, m.argumentType,
+        m.univers, m.format, m.position, m.support, m.photoCountRequested,
+        m.photoCountDelivered, m.priority, m.deadline || '-', m.status,
+        m.progress, m.rating || 0, individualEfficiency, globalEfficiency, m.info || '-'
+      ];
+    });
+
+    // 2. Journal Data Sheet
+    const journalHeaders = ['Date', 'Heure', 'Type', 'Message', 'ID Log'];
+    const journalData = globalLogs.map(log => {
+      const date = new Date(log.timestamp);
+      return [
+        date.toLocaleDateString(),
+        date.toLocaleTimeString([], { hour12: false }),
+        log.type.toUpperCase(),
+        log.message,
+        log.id
+      ];
+    });
+
+    // 3. Secondary Mission Data Sheet
+    const secondaryHeaders = ['ID', 'Titre', 'Priorité', 'Status', 'Avancement %', 'Notation', 'Date Création', 'Deadline', 'Note/Info'];
+    const secondaryData = secondaryMissions.map(sm => {
+      const createdDate = new Date(sm.createdAt);
+      return [
+        sm.id, sm.title, sm.priority, sm.status, sm.progress, sm.rating,
+        createdDate.toLocaleDateString(), sm.deadline || '-', sm.note || '-'
+      ];
+    });
+
+    try {
+      setToast({ show: true, message: 'Export vers Google Sheets...', type: 'task' });
+      const now = new Date();
+      const title = `Mission_Controle_Rapport_Global_${now.toISOString().split('T')[0]}_${now.getHours()}h${now.getMinutes().toString().padStart(2, '0')}`;
+      
+      const res = await fetch('/api/sheets/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokens: googleToken,
+          title,
+          sheets: [
+            { title: 'Production (Missions)', data: [missionHeaders, ...missionData] },
+            { title: 'Performance (Journal)', data: [journalHeaders, ...journalData] },
+            { title: 'Missions Secondaires',  data: [secondaryHeaders, ...secondaryData] }
+          ]
+        })
+      });
+      const data = await res.json();
+      if (data.url) {
+        setToast({ show: true, message: 'Rapport exporté vers Sheets !', type: 'task' });
+        window.open(data.url, '_blank');
+      } else {
+        throw new Error(data.error || 'Erreur API');
+      }
+    } catch (err: any) {
+      setToast({ show: true, message: err.message, type: 'alert' });
+    }
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+  };
+
+  const pushToGoogleCalendar = async (mission: Mission | SecondaryMission) => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Connectez Workspace d\'abord !', type: 'alert' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      return;
+    }
+    if (!mission.deadline) {
+      setToast({ show: true, message: 'Pas de deadline définie !', type: 'alert' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      return;
+    }
+    try {
+      setToast({ show: true, message: 'Création de l\'évent...', type: 'task' });
+      const summary = 'missionNo' in mission ? `[Mission] ${mission.refId} - ${mission.product}` : `[Secondaire] ${mission.title}`;
+      const description = 'info' in mission ? (mission.info || '') : ('note' in mission ? (mission.note || '') : '');
+      const res = await fetch('/api/calendar/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokens: googleToken,
+          summary,
+          description,
+          dueDate: mission.deadline
+        })
+      });
+      const data = await res.json();
+      if (data.eventLink) {
+         setToast({ show: true, message: 'Ajouté au calendrier !', type: 'task' });
+         window.open(data.eventLink, '_blank');
+      }
+    } catch (err: any) {
+      setToast({ show: true, message: err.message, type: 'alert' });
+    }
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+  };
+
+  const pushToGoogleTasks = async (mission: Mission | SecondaryMission) => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Connectez Workspace d\'abord !', type: 'alert' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      return;
+    }
+    try {
+      setToast({ show: true, message: 'Création de la tâche...', type: 'task' });
+      const title = 'missionNo' in mission ? `Mission: ${mission.refId} - ${mission.product}` : `Secondaire: ${mission.title}`;
+      const notes = 'info' in mission ? (mission.info || '') : ('note' in mission ? (mission.note || '') : '');
+      const res = await fetch('/api/tasks/task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokens: googleToken,
+          title,
+          notes,
+          due: mission.deadline || undefined
+        })
+      });
+      const data = await res.json();
+      if (data.task) {
+         setToast({ show: true, message: 'Ajouté à Google Tasks !', type: 'task' });
+      }
+    } catch (err: any) {
+      setToast({ show: true, message: err.message, type: 'alert' });
+    }
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+  };
+
+  const performSaveRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    performSaveRef.current = performSave;
+  }, [performSave]);
 
   // Auto-save logic
   useEffect(() => {
     const interval = setInterval(() => {
-      performSave();
+      performSaveRef.current();
       console.log('[SYSTEM] Auto-save completed at ' + new Date().toLocaleTimeString());
     }, 60000); // Every 60 seconds
     
     return () => clearInterval(interval);
-  }, [performSave]);
+  }, []);
 
   // Initialize selections with first items if available
   useEffect(() => {
-    if (!selectedProduct && categories[0].items.length > 0) setSelectedProduct(categories[0].items[0]);
-    if (!selectedColor && categories[1].items.length > 0) setSelectedColor(categories[1].items[0]);
-    if (!selectedArgument && categories[2].items.length > 0) setSelectedArgument(categories[2].items[0]);
-    if (!selectedUnivers && categories[3].items.length > 0) setSelectedUnivers(categories[3].items[0]);
-    if (!selectedFormat && categories[4].items.length > 0) setSelectedFormat(categories[4].items[0]);
-    if (!selectedPosition && categories[5].items.length > 0) setSelectedPosition(categories[5].items[0]);
-    if (!selectedSupport && categories[6].items.length > 0) setSelectedSupport(categories[6].items[0]);
-    if (!selectedPriority && categories[7].items.length > 0) setSelectedPriority(categories[7].items[0]);
-    if (!selectedStatus && categories[8].items.length > 0) setSelectedStatus(categories[8].items[0]);
+    if (categories.length === 0) return;
+    
+    if (!selectedProduct && categories[0]?.items?.length > 0) setSelectedProduct(categories[0].items[0]);
+    if (!selectedColor && categories[1]?.items?.length > 0) setSelectedColor(categories[1].items[0]);
+    if (!selectedArgument && categories[2]?.items?.length > 0) setSelectedArgument(categories[2].items[0]);
+    if (!selectedUnivers && categories[3]?.items?.length > 0) setSelectedUnivers(categories[3].items[0]);
+    if (!selectedFormat && categories[4]?.items?.length > 0) setSelectedFormat(categories[4].items[0]);
+    if (!selectedPosition && categories[5]?.items?.length > 0) setSelectedPosition(categories[5].items[0]);
+    if (selectedSupport.length === 0 && categories[6]?.items?.length > 0) setSelectedSupport([categories[6].items[0]]);
+    if (!selectedPriority && categories[7]?.items?.length > 0) setSelectedPriority(categories[7].items[0]);
+    if (!selectedStatus && categories[8]?.items?.length > 0) setSelectedStatus(categories[8].items[0]);
   }, [categories]);
 
   const getInitialProgress = (status: string) => {
     switch (status) {
       case 'livré': return 100;
+      case 'En post-production': return 85;
       case 'déja shooter': return 75;
       case 'en cour de shoot': return 50;
       case 'produit preparé': return 25;
@@ -924,11 +1991,29 @@ export default function App() {
   };
 
   const addMission = useCallback(() => {
-    if (!selectedProduct) return;
+    const errors: string[] = [];
 
-    const dateRegex = /(\d{2}[\/\-]\d{2}[\/\-]\d{4})|(\d{4}[\/\-]\d{2}[\/\-]\d{2})/;
-    const noteDate = info.match(dateRegex);
+    if (!selectedProduct) errors.push("Produit manquant.");
+    if (!selectedStatus) errors.push("Statut manquant.");
+    if (!refPrefix || refCounter === undefined || refCounter === null) errors.push("Référence ou compteur manquant.");
+
+    if (!Number.isInteger(photoRequested) || photoRequested <= 0) {
+      errors.push("Photos requises doit être un entier positif (suppérieur à 0).");
+    }
+
+    const dateRegex = /^(\d{2}[\/\-]\d{2}[\/\-]\d{4})|(\d{4}[\/\-]\d{2}[\/\-]\d{2})$/;
+    const noteDate = (info || '').match(/(\d{2}[\/\-]\d{2}[\/\-]\d{4})|(\d{4}[\/\-]\d{2}[\/\-]\d{2})/);
     const finalDate = selectedDate || (noteDate ? noteDate[0] : '');
+
+    if (finalDate && !dateRegex.test(finalDate)) {
+      errors.push("Le format de la date d'échéance est invalide.");
+    }
+
+    if (errors.length > 0) {
+      setToast({ show: true, message: errors.join(" "), type: 'error' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 5000);
+      return;
+    }
 
     const newMission: Mission = {
       id: Math.random().toString(36).substring(2, 9),
@@ -940,7 +2025,7 @@ export default function App() {
       univers: selectedUnivers,
       format: selectedFormat,
       position: selectedPosition,
-      support: selectedSupport,
+      support: (selectedSupport || []).join(', '),
       priority: selectedPriority,
       status: selectedStatus,
       progress: getInitialProgress(selectedStatus),
@@ -949,6 +2034,7 @@ export default function App() {
       rating: selectedRating,
       info,
       imageUrl: selectedImage || undefined,
+      imagePosition: '50% 50%',
       deadline: finalDate,
       createdAt: Date.now(),
       history: [
@@ -1015,23 +2101,163 @@ export default function App() {
     setSelectedImage(null);
   }, [missionCounter, refCounter, refPrefix, selectedProduct, selectedColor, selectedArgument, selectedUnivers, selectedFormat, selectedPosition, selectedSupport, selectedPriority, selectedStatus, selectedRating, info, selectedDate, selectedImage, photoRequested]);
 
+  const addSecondaryMission = (title: string) => {
+    const newMission: SecondaryMission = {
+      id: Math.random().toString(36).substring(2, 9),
+      title,
+      note: info,
+      rating: selectedRating,
+      progress: 0,
+      priority: selectedSecondaryPriority,
+      status: 'A faire',
+      createdAt: Date.now(),
+      deadline: selectedDate,
+      enabled: true
+    };
+    setSecondaryMissions(prev => [newMission, ...prev]);
+    
+    // Journal Logging
+    const logEntry: GlobalLogEntry = {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `[MISSION SECONDAIRE] Ajout: ${title} (Priorité: ${selectedSecondaryPriority.toUpperCase()}${selectedRating > 0 ? `, Note: ${selectedRating}/5` : ''}${selectedDate ? `, Deadline: ${selectedDate}` : ''})`,
+      type: 'mission'
+    };
+    setGlobalLogs(prev => [...prev, logEntry]);
+
+    setInfo('');
+    setSelectedRating(0);
+    setSelectedSecondaryPriority('medium');
+    setSelectedDate('');
+    setToast({ show: true, message: 'Mission secondaire ajoutée !', type: 'task' });
+    setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+  };
+
+  const updateSecondaryMission = (id: string, updates: Partial<SecondaryMission>) => {
+    const target = secondaryMissions.find(m => m.id === id);
+    if (!target) return;
+
+    let logMessage = '';
+    const isProgressUpdate = updates.progress !== undefined && updates.progress !== target.progress;
+
+    if (isProgressUpdate) {
+      logMessage = `[MISSION SECONDAIRE] ${target.title} - Progression: ${updates.progress}%`;
+      if (updates.progress === 100) logMessage = `[MISSION SECONDAIRE] ${target.title} - TERMINEE (100%)`;
+    } else if (updates.rating !== undefined && updates.rating !== target.rating) {
+      logMessage = `[MISSION SECONDAIRE] ${target.title} - Note: ${updates.rating}/5`;
+    } else if (updates.enabled !== undefined && updates.enabled !== target.enabled) {
+      logMessage = `[MISSION SECONDAIRE] ${target.title} - ${updates.enabled ? 'Activée' : 'Désactivée'}`;
+    } else if (updates.priority !== undefined && updates.priority !== target.priority) {
+      logMessage = `[MISSION SECONDAIRE] ${target.title} - Priorité: ${updates.priority.toUpperCase()}`;
+    }
+
+    if (logMessage) {
+      const timerKey = `secondary-progress-${id}`;
+      if (isProgressUpdate) {
+        if (logDebounceTimers.current[timerKey]) clearTimeout(logDebounceTimers.current[timerKey]);
+        logDebounceTimers.current[timerKey] = setTimeout(() => {
+          const logEntry: GlobalLogEntry = {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: Date.now(),
+            message: logMessage,
+            type: 'mission'
+          };
+          setGlobalLogs(prev => [...prev, logEntry]);
+          delete logDebounceTimers.current[timerKey];
+        }, 30000); // 30 seconds delay
+      } else {
+        const logEntry: GlobalLogEntry = {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: Date.now(),
+          message: logMessage,
+          type: 'mission'
+        };
+        setGlobalLogs(prev => [...prev, logEntry]);
+      }
+    }
+
+    setSecondaryMissions(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
+  };
+
+  const removeSecondaryMission = (id: string) => {
+    setSecondaryMissions(prev => prev.filter(m => m.id !== id));
+  };
+
   const cleanupDuplicates = () => {
-    const seen = new Set();
-    const cleanMissions = missions.filter(m => {
+    const groups = new Map<string, Mission[]>();
+    missions.forEach(m => {
       // Comparison key excluding refId and missionNo
       const key = `${m.product}-${m.color}-${m.univers}-${m.support}-${m.format}-${m.position}-${m.argumentType}-${m.info}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key)!.push(m);
     });
-    const removedCount = missions.length - cleanMissions.length;
+
+    const cleanMissions: Mission[] = [];
+    let removedCount = 0;
+    const removedList: string[] = [];
+
+    groups.forEach((group) => {
+      if (group.length === 1) {
+        cleanMissions.push(group[0]);
+      } else {
+        removedCount += (group.length - 1);
+        
+        const statusValue = (s: string) => {
+          const lower = s.toLowerCase();
+          if (lower.includes('livr')) return 5;
+          if (lower.includes('déja') || lower.includes('deja')) return 4;
+          if (lower.includes('cour')) return 3;
+          if (lower.includes('preparé')) return 2;
+          if (lower.includes('attente')) return 1;
+          return 0; 
+        };
+
+        group.sort((a, b) => {
+          const valA = statusValue(a.status);
+          const valB = statusValue(b.status);
+          if (valA !== valB) return valB - valA; 
+          if (b.photoCountDelivered !== a.photoCountDelivered) return b.photoCountDelivered - a.photoCountDelivered;
+          if (b.progress !== a.progress) return b.progress - a.progress;
+          return b.createdAt - a.createdAt; 
+        });
+
+        const best = { ...group[0] };
+        
+        // Track the indices of duplicates removed
+        group.slice(1).forEach(m => {
+          removedList.push(`#${m.missionNo} ${m.product}`);
+        });
+
+        if (!best.imageUrl) {
+          const withImage = group.find(m => m.imageUrl);
+          if (withImage) best.imageUrl = withImage.imageUrl;
+        }
+
+        cleanMissions.push(best);
+      }
+    });
+
+    cleanMissions.sort((a, b) => b.missionNo - a.missionNo);
+
     if (removedCount > 0) {
       setMissions(cleanMissions);
-      setToast({ show: true, message: `${removedCount} doublons supprimés !`, type: 'task' });
+      const detailMessage = removedList.length <= 8 
+        ? removedList.join(', ') 
+        : `${removedList.slice(0, 8).join(', ')} et ${removedList.length - 8} autres`;
+
+      setGlobalLogs(prev => [...prev, {
+        id: Date.now().toString(),
+        timestamp: Date.now(),
+        type: 'system',
+        message: `NETTOYAGE : ${removedCount} missions en doublon ont été fusionnées/supprimées (${detailMessage}).`
+      }]);
+      setToast({ show: true, message: `${removedCount} doublons fusionnés (${detailMessage}) !`, type: 'task' });
     } else {
       setToast({ show: true, message: "Aucun doublon trouvé.", type: 'task' });
     }
-    setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+    setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 5000);
   };
 
   const handleBulkImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1094,6 +2320,7 @@ export default function App() {
       photoCountDelivered: 0,
       info: item.info,
       imageUrl: item.imageUrl,
+      imagePosition: '50% 50%',
       history: [
         { timestamp: Date.now(), message: 'Mission créée via import groupé' }
       ]
@@ -1154,13 +2381,42 @@ export default function App() {
     const logsToAdd: GlobalLogEntry[] = [];
 
     if (technicalChanges.length > 0) {
-      const changeDescriptions = technicalChanges.map(f => `${String(f).toUpperCase()} ("${missionBefore[f] || 'Ø'}" → "${updates[f]}")`);
-      logsToAdd.push({ 
-        id: logId + '-edit', 
-        timestamp, 
-        message: `ÉDITION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - Modif : ${changeDescriptions.join(' | ')}`, 
-        type: 'mission' 
-      });
+      // Split technical changes into typing fields (product) and immediate fields
+      const typingFields = ['product'];
+      const immediateChanges = technicalChanges.filter(f => !typingFields.includes(f));
+      const textChanges = technicalChanges.filter(f => typingFields.includes(f));
+
+      if (immediateChanges.length > 0) {
+        const changeDescriptions = immediateChanges.map(f => `${String(f).toUpperCase()} ("${missionBefore[f] || 'Ø'}" → "${updates[f]}")`);
+        logsToAdd.push({ 
+          id: logId + '-edit', 
+          timestamp, 
+          message: `ÉDITION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - Modif : ${changeDescriptions.join(' | ')}`, 
+          type: 'mission' 
+        });
+      }
+
+      // Handle product name debounced
+      if (textChanges.length > 0) {
+        const pName = updates.product || missionBefore.product;
+        const timerKey = `mission-product-${id}`;
+        if (logDebounceTimers.current[timerKey]) clearTimeout(logDebounceTimers.current[timerKey]);
+        
+        logDebounceTimers.current[timerKey] = setTimeout(() => {
+          setGlobalLogs(prev => {
+            const msg = `ÉDITION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - PRODUIT -> "${pName}"`;
+            const last = prev[prev.length - 1];
+            // If last log is for same mission and product edit, replace it if it's within 30s
+            if (last && last.message.includes(`Mission #${missionBefore.missionNo}`) && last.message.includes('PRODUIT ->') && Date.now() - last.timestamp < 30000) {
+              const newLogs = [...prev];
+              newLogs[newLogs.length - 1] = { ...last, message: msg, timestamp: Date.now() };
+              return newLogs;
+            }
+            return [...prev, { id: Math.random().toString(36).substring(2, 9), timestamp: Date.now(), message: msg, type: 'mission' }];
+          });
+          delete logDebounceTimers.current[timerKey];
+        }, 30000);
+      }
     }
 
     if (updates.status && updates.status !== missionBefore.status) {
@@ -1172,23 +2428,74 @@ export default function App() {
       });
     }
 
-    if (updates.info !== undefined && updates.info !== missionBefore.info) {
+    if (updates.progress !== undefined && updates.progress !== missionBefore.progress) {
+      const timerKey = `prod-progress-${id}`;
+      if (logDebounceTimers.current[timerKey]) clearTimeout(logDebounceTimers.current[timerKey]);
+      
+      const pMessage = `PROGRESSION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] -> ${updates.progress}%.`;
+      
+      logDebounceTimers.current[timerKey] = setTimeout(() => {
+        setGlobalLogs(prev => {
+          const last = prev[prev.length - 1];
+          if (last && last.message.includes(`Mission #${missionBefore.missionNo}`) && last.message.includes('PROGRESSION') && Date.now() - last.timestamp < 30000) {
+            const newLogs = [...prev];
+            newLogs[newLogs.length - 1] = { ...last, message: pMessage, timestamp: Date.now() };
+            return newLogs;
+          }
+          return [...prev, { 
+            id: Math.random().toString(36).substring(2, 9), 
+            timestamp: Date.now(), 
+            message: pMessage, 
+            type: 'mission' 
+          }];
+        });
+        delete logDebounceTimers.current[timerKey];
+      }, 30000);
+    }
+
+    if (updates.rating !== undefined && updates.rating !== missionBefore.rating) {
       logsToAdd.push({ 
-        id: logId + '-instr', 
+        id: logId + '-rating', 
         timestamp, 
-        message: `INSTRUCTION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - Notes : "${updates.info}"`, 
-        type: 'instruction' 
+        message: `ÉVALUATION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] -> ${updates.rating}/5 stars.`, 
+        type: 'mission' 
       });
     }
 
+    if (updates.info !== undefined && updates.info !== missionBefore.info) {
+      const timerKey = `mission-info-${id}`;
+      if (logDebounceTimers.current[timerKey]) clearTimeout(logDebounceTimers.current[timerKey]);
+      
+      const infoMsg = `INSTRUCTION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - Notes : "${updates.info}"`;
+      
+      logDebounceTimers.current[timerKey] = setTimeout(() => {
+        setGlobalLogs(prev => {
+          const last = prev[prev.length - 1];
+          // Replace last instruction log for same mission if within 30s to avoid typing spam
+          if (last && last.type === 'instruction' && last.message.includes(`Mission #${missionBefore.missionNo}`) && Date.now() - last.timestamp < 30000) {
+            const newLogs = [...prev];
+            newLogs[newLogs.length - 1] = { ...last, message: infoMsg, timestamp: Date.now() };
+            return newLogs;
+          }
+          return [...prev, { 
+            id: Math.random().toString(36).substring(2, 9), 
+            timestamp: Date.now(), 
+            message: infoMsg, 
+            type: 'instruction' 
+          }];
+        });
+        delete logDebounceTimers.current[timerKey];
+      }, 30000);
+    }
+
     if (logsToAdd.length > 0) {
-      // Combine all changes into a single combined log message for "no combined writings" rule
+      // Combine multiple fast changes (status, colors, etc.)
       const combinedMsg = logsToAdd.map(l => l.message).join(' | ');
       const mainType = logsToAdd.some(l => l.type === 'instruction') ? 'instruction' : 'mission';
       
       setGlobalLogs(prev => {
         const lastLog = prev[prev.length - 1];
-        if (lastLog && lastLog.message === combinedMsg && timestamp - lastLog.timestamp < 500) return prev;
+        if (lastLog && lastLog.message === combinedMsg && timestamp - lastLog.timestamp < 2000) return prev;
         return [...prev, { id: logId + '-combined', timestamp, message: combinedMsg, type: mainType }];
       });
     }
@@ -1196,35 +2503,54 @@ export default function App() {
     setMissions(prev => prev.map(m => {
       if (m.id === id) {
         let history = m.history ? [...m.history] : [];
+        const now = Date.now();
+        
+        // Helper to update or push history to avoid bloat
+        const addHistoryEntry = (msg: string) => {
+          const lastH = history.length > 0 ? history[history.length - 1] : null;
+          // If the last entry has the same start (like 'Notes :') and is recent, replace it
+          const msgPrefix = msg.split(':')[0];
+          if (lastH && lastH.message.startsWith(msgPrefix) && now - lastH.timestamp < 30000) {
+            history[history.length - 1] = { timestamp: now, message: msg };
+          } else {
+            history.push({ timestamp: now, message: msg });
+          }
+        };
+
         if (updates.status && updates.status !== m.status) {
-          history.push({ timestamp: Date.now(), message: `STATUT : ${m.status} -> ${updates.status}` });
+          addHistoryEntry(`STATUT : ${m.status} -> ${updates.status}`);
         }
         if (updates.progress !== undefined && updates.progress !== m.progress) {
-           // We only log significant progress changes or the first one to avoid spam
-           if (Math.abs(updates.progress - m.progress) >= 25 || updates.progress === 100 || updates.progress === 0) {
-             history.push({ timestamp: Date.now(), message: `Progression mise à jour à ${updates.progress}%` });
-           }
+          addHistoryEntry(`Progression mise à jour à ${updates.progress}%`);
+        }
+        if (updates.rating !== undefined && updates.rating !== m.rating) {
+          addHistoryEntry(`Note mise à jour à ${updates.rating}/5`);
         }
         if (updates.priority && updates.priority !== m.priority) {
-          history.push({ timestamp: Date.now(), message: `Priorité changée à "${updates.priority}"` });
+          addHistoryEntry(`Priorité changée à "${updates.priority}"`);
+        }
+        if (updates.product && updates.product !== m.product) {
+          addHistoryEntry(`Produit : "${updates.product}"`);
         }
         if (updates.info !== undefined && updates.info !== m.info) {
-          history.push({ timestamp: Date.now(), message: `Notes : "${updates.info}"` });
+           addHistoryEntry(`Notes : "${updates.info}"`);
         }
 
-        const updated = { ...m, ...updates, history };
+        const updated = { ...m, ...updates, history, updatedAt: now };
         
-        // Photos drive progress
+        // Photos drive progress (1 ph = 100%, 3 ph = 300%)
         if (updates.photoCountRequested !== undefined || updates.photoCountDelivered !== undefined) {
-          const req = updated.photoCountRequested || 1;
           const del = updated.photoCountDelivered || 0;
-          updated.progress = Math.round((del / req) * 100);
+          updated.progress = del * 100;
         }
         
         // Sync progress if status changes manually
         if (updates.status) {
           switch (updates.status) {
-            case 'livré': updated.progress = 100; break;
+            case 'livré': 
+              updated.progress = Math.max(100, (updated.photoCountDelivered || 0) * 100); 
+              break;
+            case 'En post-production': updated.progress = 85; break;
             case 'déja shooter': updated.progress = 75; break;
             case 'en cour de shoot': updated.progress = 50; break;
             case 'produit preparé': updated.progress = 25; break;
@@ -1275,10 +2601,14 @@ export default function App() {
     const logEntry: GlobalLogEntry = {
       id: Math.random().toString(36).substring(2, 9),
       timestamp: Date.now(),
-      message: manualLog,
+      message: manualLog.trim(),
       type: 'manual'
     };
-    setGlobalLogs(prev => [...prev, logEntry]);
+    setGlobalLogs(prev => {
+      const last = prev[prev.length - 1];
+      if (last && last.message === logEntry.message && (logEntry.timestamp - last.timestamp < 2000)) return prev;
+      return [...prev, logEntry];
+    });
     setManualLog('');
     setToast({ show: true, message: 'Note ajoutée au journal de bord', type: 'task' });
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
@@ -1311,6 +2641,7 @@ export default function App() {
   };
 
   const copyAiPrompt = () => {
+    const analysis = getMovementAnalysis();
     const prompt = `
 [MISSION CONTROL OPERATIONAL TELEMETRY]
 CONTEXTE : Application de gestion de missions tactiques.
@@ -1319,19 +2650,28 @@ AGENT CIBLE : Gemini Surveillance Agent
 
 INSTRUCTION : ${aiInstructions}
 
+--- ANALYSE OPÉRATIONNELLE ---
+Bilan : Actuellement ${missions.length} missions suivies. Taux de progression : ${avgProgress}%. ${missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length > 0 ? `ALERTE : ${missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length} missions critiques prioritaires.` : 'Flux opérationnel nominal.'}
+Actions récentes (60m) : ${analysis.totalActions} [C:${analysis.creations} / U:${analysis.updates} / D:${analysis.deletions}]
+Latence système : ${analysis.latency}
+
 --- DONNÉES DE CONFIGURATION ---
 Séquenceur : ${refPrefix}-${refCounter}
 Identité Visuelle : Font=${appFont}, Color=${appTextColor}, HeaderAsset=${headerBgImage ? 'PRESENT' : 'DEFAULT'}
-Nombre de Missions : ${missions.length}
+Missions Production : ${missions.length}
+Missions Secondaires : ${secondaryMissions.length}
 Log Stream Size : ${globalLogs.length} entrées
 
---- RÉSUMÉ DES MISSIONS ---
+--- RÉSUMÉ DES MISSIONS PRODUCTION ---
 ${missions.map(m => `- #${m.missionNo} [${m.refId}] ${m.enabled ? '(ACTIF)' : '(INACTIF)'}: ${m.product} | Status: ${m.status} | Progress: ${m.progress}%`).join('\n')}
 
---- DERNIERS LOGS SYSTÈME ---
-${globalLogs.slice(-10).map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] ${l.type.toUpperCase()}: ${l.message}`).join('\n')}
+--- RÉSUMÉ DES MISSIONS SECONDAIRES ---
+${secondaryMissions.map(m => `- ${m.title} ${m.enabled ? '(ACTIF)' : '(INACTIF)'} | Progress: ${m.progress}% | Rating: ${m.rating}/5 | Deadline: ${m.deadline || 'N/A'}`).join('\n')}
 
-Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une conclusion stratégique.
+--- JOURNAL DE BORD COMPLET ---
+${globalLogs.map(l => `[${new Date(l.timestamp).toLocaleString()}] ${l.type.toUpperCase()}: ${l.message}`).join('\n')}
+
+Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une conclusion stratégique incluant l'analyse des missions secondaires.
 `;
 
     navigator.clipboard.writeText(prompt.trim());
@@ -1344,8 +2684,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     setCategories(prev => prev.map(c => c.id === catId ? { ...c, ...updates } : c));
   };
 
-  const avgProgress = missions.length > 0 
-    ? Math.round(missions.reduce((acc, m) => acc + m.progress, 0) / missions.length) 
+  const activeMissions = missions.filter(m => m.enabled);
+
+  const avgProgress = activeMissions.length > 0 
+    ? Math.round(activeMissions.reduce((acc, m) => acc + m.progress, 0) / activeMissions.length) 
     : 0;
 
   const handleFeedbackSubmit = () => {
@@ -1371,21 +2713,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     }, 2000);
   };
 
-  const avgRating = missions.length > 0
-    ? (missions.reduce((acc, m) => acc + (m.rating || 0), 0) / missions.length).toFixed(1)
+  const avgRating = activeMissions.length > 0
+    ? (activeMissions.reduce((acc, m) => acc + (m.rating || 0), 0) / activeMissions.length).toFixed(1)
     : '0.0';
 
   const logEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (activeTab === 'journal') {
-      // Small timeout to ensure DOM catchup for AnimatePresence
-      const timer = setTimeout(() => {
-        logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [globalLogs, activeTab]);
 
   // New sub-components for Dashboard and Journal
   const WaveEffect = ({ progress, color, type, opacity }: { progress: number, color: string, type: 'liquid' | 'organic' | 'tech', opacity?: number }) => {
@@ -1468,206 +2800,432 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
   const MosaicView = () => {
     const allStatuses = categories.find(c => c.id === 'status')?.items || [];
+    
+    // Group missions by status
+    const groupedMissions = allStatuses.reduce((acc, status) => {
+      acc[status] = filteredMissions.filter(m => m.status === status);
+      return acc;
+    }, {} as Record<string, Mission[]>);
+
+    const toggleGroup = (status: string) => {
+      setCollapsedMosaicGroups(prev => 
+        prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
+      );
+    };
+
+    const expandAll = () => setCollapsedMosaicGroups([]);
+    const collapseAll = () => setCollapsedMosaicGroups([...allStatuses]);
+
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
-        {filteredMissions.map((m, idx) => (
-          <motion.div
-            key={m.id}
-            layout
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: idx * 0.05 }}
-            className={`cursor-pointer bg-black/40 border border-white/10 rounded-2xl overflow-hidden group hover:border-accent/40 transition-all shadow-xl flex flex-col relative ${
-              selectedMissionIds.includes(m.id) ? 'ring-2 ring-accent border-accent' : ''
-            }`}
-            onClick={(e) => {
-              if (e.shiftKey) {
-                toggleSelectMission(m.id, e);
-              } else {
-                setSelectedMissionId(m.id);
-              }
-            }}
-          >
-            {/* Image/Placeholder */}
-            <div className="h-40 bg-white/5 relative overflow-hidden">
-               {m.imageUrl ? (
-                <img src={m.imageUrl} alt={m.product} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center gap-2 opacity-20">
-                  <ImageIcon size={32} />
-                  <span className="text-[10px] uppercase font-black tracking-widest">No Capture</span>
-                </div>
-              )}
-              {/* Overlay Tags */}
-              <div className="absolute top-2 left-2 flex gap-1">
-                <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter ${
-                   m.priority === 'High priority' ? 'bg-red-500 text-white' : 
-                   m.priority === 'Medium priority' ? 'bg-accent-red text-black' : 
-                   'bg-white/10 text-text-dim'
-                }`}>
-                  {m.priority.split(' ')[0]}
-                </div>
-              </div>
-              <div className="absolute top-2 right-2">
-                <button 
-                  onClick={(e) => { e.stopPropagation(); toggleSelectMission(m.id, e); }}
-                  className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
-                    selectedMissionIds.includes(m.id) ? 'bg-accent border-accent text-black' : 'bg-black/60 border-white/20 text-transparent opacity-0 group-hover:opacity-100'
-                  }`}
-                >
-                  <Check size={12} strokeWidth={4} />
-                </button>
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-black to-transparent opacity-60" />
-              <div className="absolute bottom-2 left-3 z-10">
-                 <span className="text-[10px] font-mono font-black text-accent" style={{ color: refIdColor }}>{m.refId}</span>
-              </div>
-              {/* Rating on Image */}
-              {m.rating ? (
-                <div className="absolute bottom-2 right-3 z-10 flex items-center gap-1.5 bg-black/40 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
-                  <div className="flex gap-0.5">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Sparkles 
-                        key={star} 
-                        size={8} 
-                        className={m.rating! >= star ? 'text-accent-yellow fill-accent-yellow' : m.rating! >= star - 0.5 ? 'text-accent-yellow fill-accent-yellow opacity-50' : 'hidden'} 
-                      />
-                    ))}
-                  </div>
-                  <span className="text-[8px] font-mono font-bold text-accent-yellow leading-none">{m.rating}/5</span>
-                </div>
-              ) : null}
-
-              {/* Activation Toggle Overlay */}
-              <div className="absolute top-2 left-10 z-20">
-                <Toggle enabled={m.enabled} onToggle={(e) => toggleMissionEnabled(m.id, e)} />
-              </div>
+      <div className="space-y-8">
+        {/* Mosaic Controls */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
+              <LayoutGrid size={16} />
             </div>
-
-            {/* Content */}
-            <div className={`p-4 flex flex-col flex-1 space-y-4 transition-opacity duration-300 ${!m.enabled ? 'opacity-40 grayscale-[0.5]' : 'opacity-100'}`}>
-              <div>
-                <h3 className="text-xs font-black text-white uppercase tracking-wider line-clamp-1 group-hover:text-accent transition-colors">
-                  {m.product}
-                  {!m.enabled && <span className="ml-2 text-[8px] text-red-500 font-bold border border-red-500/20 px-1 rounded bg-red-500/5">OFF</span>}
-                </h3>
-                <p className="text-[9px] font-mono text-text-dim/60 uppercase mt-1">{m.color} • {m.support}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-white/5 border border-white/10 p-2 rounded-xl group/status relative overflow-hidden">
-                  <span className="text-[7px] font-black text-text-dim uppercase tracking-widest block mb-1">State</span>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const statusIdx = allStatuses.indexOf(m.status);
-                      const nextStatus = allStatuses[(statusIdx + 1) % allStatuses.length];
-                      updateMission(m.id, { status: nextStatus });
-                    }}
-                    className={`text-[9px] font-black uppercase tracking-tighter truncate w-full text-left flex items-center justify-between group-hover/status:text-white transition-colors ${
-                      m.status === 'livré' ? 'text-accent' : 
-                      m.status === 'en cour de shoot' ? 'text-accent-blue' : 
-                      'text-text-dim'
-                    }`}
-                  >
-                    {m.status}
-                    <RotateCcw size={8} className="opacity-0 group-hover/status:opacity-100 transition-opacity ml-1" />
-                  </button>
-                </div>
-                <div className="bg-white/5 border border-white/10 p-2 rounded-xl">
-                  <span className="text-[7px] font-black text-text-dim uppercase tracking-widest block mb-1">Dimen.</span>
-                  <div className="text-[9px] font-black text-white/80 uppercase tracking-tighter truncate">
-                    {m.format}
-                  </div>
-                </div>
-              </div>
-
-              {/* Editable Notes in Mosaic */}
-              <div className="space-y-1" onClick={(e) => e.stopPropagation()}>
-                <span className="text-[7px] font-black text-text-dim uppercase tracking-widest block">Notes</span>
-                <div className="relative group/mosaic-notes">
-                  <textarea 
-                    defaultValue={m.info}
-                    onBlur={(e) => {
-                      if (e.target.value !== m.info) {
-                        updateMission(m.id, { info: e.target.value });
-                      }
-                    }}
-                    placeholder="Ajouter une note..."
-                    className="w-full h-12 bg-black/40 border border-white/5 rounded text-[9px] p-2 text-white/90 outline-none focus:border-accent/40 hover:border-white/10 transition-all resize-none custom-scrollbar font-mono leading-relaxed"
-                  />
-                  <button 
-                    onClick={(e) => {
-                      const text = (e.currentTarget.previousSibling as HTMLTextAreaElement).value;
-                      updateMission(m.id, { info: text });
-                    }}
-                    className="absolute right-1 bottom-1 p-1 bg-accent/20 border border-accent/30 rounded text-accent opacity-0 group-hover/mosaic-notes:opacity-100 hover:bg-accent hover:text-black transition-all"
-                  >
-                    <Check size={10} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Progress */}
-              <div className="space-y-1.5 pt-1">
-                <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
-                  <span className="text-text-dim">Progress</span>
-                  <span className={m.progress === 100 ? 'text-accent' : 'text-white'}>{m.progress}%</span>
-                </div>
-                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                  <motion.div 
-                    className={`h-full ${m.progress === 100 ? 'bg-accent' : 'bg-accent-blue'}`}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${m.progress}%` }}
-                    transition={{ duration: 0.8 }}
-                  />
-                </div>
-              </div>
+            <div>
+              <h2 className="text-[10px] font-black uppercase tracking-[3px] text-white">Vue Mosaïque</h2>
+              <p className="text-[8px] text-text-dim font-mono uppercase">Groupé par État d'avancement</p>
             </div>
+          </div>
+          
+          <div className="flex gap-2">
+            <button 
+              onClick={expandAll}
+              className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all flex items-center gap-2"
+            >
+              <Maximize size={10} /> Tout Développer
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {allStatuses.map((status) => {
+            const missionsInStatus = groupedMissions[status] || [];
+            if (missionsInStatus.length === 0) return null;
             
-            {/* Info Footer */}
-            <div className="px-4 py-3 border-t border-white/5 bg-white/[0.02] flex items-center justify-between mt-auto">
-               <div className="flex items-center gap-1.5">
-                  <Clock size={10} className="text-text-dim" />
-                  <span className="text-[8px] font-mono font-bold text-text-dim">{m.deadline || '-'}</span>
-               </div>
-               <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setSelectedMissionId(m.id); }}
-                    className="p-1.5 bg-accent-blue/10 text-accent-blue rounded hover:bg-accent-blue/20 transition-all border border-accent-blue/20"
-                  >
-                    <Maximize size={12} />
-                  </button>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
-                    className="p-1.5 bg-red-500/10 text-red-400 rounded hover:bg-red-500/20 transition-all border border-red-500/20"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-               </div>
-            </div>
-          </motion.div>
-        ))}
+            const isCollapsed = collapsedMosaicGroups.includes(status);
+            
+            return (
+              <div key={status} className="space-y-4">
+                <button 
+                  onClick={() => toggleGroup(status)}
+                  className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group hover:bg-white/[0.08] transition-all"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className={`w-2 h-2 rounded-full ${
+                      status === 'livré' ? 'bg-accent' : 
+                      status === 'en cour de shoot' ? 'bg-accent-blue' : 
+                      status === 'annuler' ? 'bg-red-500' :
+                      'bg-white/20'
+                    }`} />
+                    <span className="text-[11px] font-black uppercase tracking-[2px] text-white/90">{status}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[8px] font-mono text-text-dim">
+                      {missionsInStatus.length} {missionsInStatus.length > 1 ? 'missions' : 'mission'}
+                    </span>
+                  </div>
+                  {isCollapsed ? <ChevronDown size={14} className="text-text-dim" /> : <ChevronUp size={14} className="text-text-dim" />}
+                </button>
+
+                <AnimatePresence>
+                  {!isCollapsed && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 pt-2">
+                        {missionsInStatus.map((m, idx) => (
+                          <motion.div
+                            key={m.id}
+                            layout
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: idx * 0.05 }}
+                            className={`cursor-pointer bg-black/40 border border-white/10 rounded-2xl overflow-hidden group hover:border-accent/40 transition-all shadow-xl flex flex-col relative ${
+                              selectedMissionIds.includes(m.id) ? 'ring-2 ring-accent border-accent' : ''
+                            } ${(showDuplicateIndicators && isDuplicate(m)) ? 'border-l-2 border-l-red-500 bg-red-500/5' : ''}`}
+                            onDoubleClick={(e) => {
+                              if (!e.shiftKey) {
+                                setSelectedMissionId(m.id);
+                              }
+                            }}
+                            onClick={(e) => {
+                              if (e.shiftKey) {
+                                toggleSelectMission(m.id, e);
+                              }
+                            }}
+                          >
+                            {/* Image/Placeholder */}
+                            <div className="h-40 bg-white/5 relative overflow-hidden">
+                               {m.imageUrl ? (
+                                <img 
+                                  id={`mission-image-${m.id}`}
+                                  src={m.imageUrl} 
+                                  alt={m.product} 
+                                  className={`w-full h-full object-cover group-hover:scale-110 transition-all duration-700 ${!m.enabled ? 'grayscale opacity-40' : 'grayscale-0 opacity-100'} group-hover:grayscale-0 group-hover:opacity-100`} 
+                                  referrerPolicy="no-referrer" 
+                                />
+                              ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center gap-2 opacity-20">
+                                  <ImageIcon size={32} />
+                                  <span className="text-[10px] uppercase font-black tracking-widest">No Capture</span>
+                                </div>
+                              )}
+                              {/* Overlay Tags */}
+                              <div className="absolute top-2 left-2 flex gap-1">
+                                <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter ${
+                                   m.priority === 'High priority' ? 'bg-red-500 text-white' : 
+                                   m.priority === 'Medium priority' ? 'bg-accent-red text-black' : 
+                                   'bg-white/10 text-text-dim'
+                                }`}>
+                                  {m.priority.split(' ')[0]}
+                                </div>
+                              </div>
+                              <div className="absolute top-2 right-2 flex gap-1.5 items-center">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
+                                  className="w-5 h-5 rounded border bg-black/60 border-white/20 text-white/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all hover:bg-red-500 hover:border-red-500 hover:text-white"
+                                  title="Supprimer la mission"
+                                >
+                                  <Trash2 size={10} />
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); toggleSelectMission(m.id, e); }}
+                                  className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
+                                    selectedMissionIds.includes(m.id) ? 'bg-accent border-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'bg-black/60 border-white/20 text-transparent opacity-0 group-hover:opacity-100'
+                                  }`}
+                                >
+                                  <Check size={12} strokeWidth={4} />
+                                </button>
+                              </div>
+                              <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-black to-transparent opacity-60" />
+                              <div className="absolute bottom-2 left-3 z-10">
+                                 <span className="text-[10px] font-mono font-black text-accent" style={{ color: refIdColor }}>{m.refId}</span>
+                              </div>
+                              {/* Rating on Image */}
+                              {m.rating ? (
+                                <div className="absolute bottom-2 right-3 z-10 flex items-center gap-1.5 bg-black/40 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
+                                  <StarRatingStatic rating={m.rating} size={8} />
+                                  <span className="text-[8px] font-mono font-bold text-accent-yellow leading-none">{m.rating}/5</span>
+                                </div>
+                              ) : null}
+
+                              {/* Activation Toggle Overlay */}
+                              <div className="absolute top-2 left-10 z-20">
+                                <Toggle enabled={m.enabled} onToggle={(e) => toggleMissionEnabled(m.id, e)} />
+                              </div>
+                            </div>
+
+                            {/* Content */}
+                            <div className={`p-4 flex flex-col flex-1 space-y-4 transition-opacity duration-300 ${!m.enabled ? 'opacity-40 grayscale-[0.5]' : 'opacity-100'}`}>
+                              <div>
+                                <h3 className="text-xs font-black text-white uppercase tracking-wider line-clamp-1 group-hover:text-accent transition-colors">
+                                  {m.product}
+                                  {!m.enabled && <span className="ml-2 text-[8px] text-red-500 font-bold border border-red-500/20 px-1 rounded bg-red-500/5">OFF</span>}
+                                </h3>
+                                <p className="text-[9px] font-mono text-text-dim/60 uppercase mt-1">{m.color} • {m.support}</p>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="bg-white/5 border border-white/10 p-2 rounded-xl group/status relative overflow-hidden">
+                                  <span className="text-[7px] font-black text-text-dim uppercase tracking-widest block mb-1">State</span>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const statusIdx = allStatuses.indexOf(m.status);
+                                      const nextStatus = allStatuses[(statusIdx + 1) % allStatuses.length];
+                                      updateMission(m.id, { status: nextStatus });
+                                    }}
+                                    className={`text-[9px] font-black uppercase tracking-tighter truncate w-full text-left flex items-center justify-between group-hover/status:text-white transition-colors ${
+                                      m.status === 'livré' ? 'text-accent' : 
+                                      m.status === 'en cour de shoot' ? 'text-accent-blue' : 
+                                      'text-text-dim'
+                                    }`}
+                                  >
+                                    {m.status}
+                                    <RotateCcw size={8} className="opacity-0 group-hover/status:opacity-100 transition-opacity ml-1" />
+                                  </button>
+                                </div>
+                                <div className="bg-white/5 border border-white/10 p-2 rounded-xl">
+                                  <span className="text-[7px] font-black text-text-dim uppercase tracking-widest block mb-1">Dimen.</span>
+                                  <div className="text-[9px] font-black text-white/80 uppercase tracking-tighter truncate">
+                                    {m.format}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Editable Notes in Mosaic */}
+                              <div className="space-y-1" onClick={(e) => e.stopPropagation()}>
+                                <span className="text-[7px] font-black text-text-dim uppercase tracking-widest block">Notes</span>
+                                <div className="relative group/mosaic-notes">
+                                  <textarea 
+                                    defaultValue={m.info}
+                                    onBlur={(e) => {
+                                      if (e.target.value !== m.info) {
+                                        updateMission(m.id, { info: e.target.value });
+                                      }
+                                    }}
+                                    placeholder="Ajouter une note..."
+                                    className="w-full h-12 bg-black/40 border border-white/5 rounded text-[9px] p-2 text-white/90 outline-none focus:border-accent/40 hover:border-white/10 transition-all resize-none custom-scrollbar font-mono leading-relaxed"
+                                  />
+                                  <button 
+                                    onClick={(e) => {
+                                      const text = (e.currentTarget.previousSibling as HTMLTextAreaElement).value;
+                                      updateMission(m.id, { info: text });
+                                    }}
+                                    className="absolute right-1 bottom-1 p-1 bg-accent/20 border border-accent/30 rounded text-accent opacity-0 group-hover/mosaic-notes:opacity-100 hover:bg-accent hover:text-black transition-all"
+                                  >
+                                    <Check size={10} />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Progress */}
+                              <div className="space-y-1.5 pt-1">
+                                <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
+                                  <span className="text-text-dim">Progress</span>
+                                  <span className={m.progress === 100 ? 'text-accent' : 'text-white'}>{m.progress}%</span>
+                                </div>
+                                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                  <motion.div 
+                                    className={`h-full ${m.progress === 100 ? 'bg-accent' : 'bg-accent-blue'}`}
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${m.progress}%` }}
+                                    transition={{ duration: 0.8 }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Info Footer */}
+                            <div className="px-4 py-3 border-t border-white/5 bg-white/[0.02] flex items-center justify-between mt-auto">
+                               <div className="flex items-center gap-1.5">
+                                  {isDeadlineApproaching(m.deadline) && m.status !== 'livré' && m.enabled && (
+                                    <motion.div
+                                      initial={{ scale: 0 }}
+                                      animate={{ scale: 1 }}
+                                      className="text-accent-yellow animate-pulse"
+                                    >
+                                      <AlertTriangle size={12} />
+                                    </motion.div>
+                                  )}
+                                  <Clock size={10} className="text-text-dim" />
+                                  <span className={`text-[8px] font-mono font-bold ${isDeadlineApproaching(m.deadline) && m.status !== 'livré' ? 'text-red-500 animate-pulse' : 'text-text-dim'}`}>{m.deadline || '-'}</span>
+                               </div>
+                               <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); setSelectedMissionId(m.id); }}
+                                    className="p-1.5 bg-accent-blue/10 text-accent-blue rounded hover:bg-accent-blue/20 transition-all border border-accent-blue/20"
+                                  >
+                                    <Maximize size={12} />
+                                  </button>
+                               </div>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   };
-  const renderDashboardView = () => {
-    const stats = {
-      total: missions.length,
-      completed: missions.filter(m => m.status === 'livré').length,
-      inProduction: missions.filter(m => ['en cour de shoot', 'déja shooter'].includes(m.status)).length,
-      pending: missions.filter(m => m.status === 'en attente' || m.status === 'produit preparé').length,
-      urgent: missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length,
-      bugs: missions.filter(m => m.status === 'livré' && m.progress < 100).length,
+  // Calculate data series for charts
+  const statusCounts = missions.reduce((acc: any, m) => {
+    if (m.status) acc[m.status] = (acc[m.status] || 0) + 1;
+    return acc;
+  }, {});
+  const statusData = Object.entries(statusCounts).map(([name, value]) => ({
+    name,
+    value
+  }));
+
+  const COLORS = ['#00FF94', '#00D1FF', '#BD00FF', '#FF9900', '#FF007A', '#FF3B30', '#EBFF00'];
+
+  const supportCounts = missions.reduce((acc: any, m) => {
+    if (m.support) acc[m.support] = (acc[m.support] || 0) + 1;
+    return acc;
+  }, {});
+  const supportData = Object.entries(supportCounts).map(([name, value]) => ({
+    name,
+    value
+  })).sort((a: any, b: any) => b.value - a.value);
+
+  const productCounts = missions.reduce((acc: any, m) => {
+    if (m.product) acc[m.product] = (acc[m.product] || 0) + 1;
+    return acc;
+  }, {});
+  const productData = Object.entries(productCounts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a: any, b: any) => b.value - a.value);
+
+  const universCounts = missions.reduce((acc: any, m) => {
+    if (m.univers) acc[m.univers] = (acc[m.univers] || 0) + 1;
+    return acc;
+  }, {});
+  const universData = Object.entries(universCounts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a: any, b: any) => b.value - a.value);
+
+  const argumentCounts = missions.reduce((acc: any, m) => {
+    if (m.argumentType) acc[m.argumentType] = (acc[m.argumentType] || 0) + 1;
+    return acc;
+  }, {});
+  const argumentData = Object.entries(argumentCounts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a: any, b: any) => b.value - a.value);
+
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return {
+      dateString: d.toISOString().split('T')[0],
+      label: d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' })
+    };
+  });
+
+  const timelineData = last7Days.map(dayInfo => {
+    const dayStart = new Date(dayInfo.dateString).getTime();
+    const dayEnd = dayStart + 86400000;
+    
+    // Filter currently active missions to count deliveries for this specific day
+    const deliveredCount = activeMissions.filter(m => {
+      if (m.status !== 'livré') return false;
+      
+      // Check if it was delivered on this particular day by looking at history or updatedAt
+      const becameDeliveredThisDay = (m.history || []).some(h => 
+        h.timestamp >= dayStart && 
+        h.timestamp < dayEnd && 
+        (h.message.includes('-> livré') || h.message.includes('-> "livré"'))
+      );
+      
+      // Fallback: if no history match but updatedAt is this day and status is currently livré
+      const updatedThisDay = m.updatedAt && m.updatedAt >= dayStart && m.updatedAt < dayEnd;
+      
+      return becameDeliveredThisDay || updatedThisDay;
+    }).length;
+
+    const missionsAtDay = activeMissions.filter(m => m.createdAt < dayEnd);
+    
+    const calculateHistoricalProgress = (m: Mission) => {
+       const relevantHistory = (m.history || []).filter(h => h.timestamp < dayEnd && h.message.includes('Progression'));
+       if (relevantHistory.length > 0) {
+          const lastMsg = relevantHistory[relevantHistory.length - 1].message;
+          const match = lastMsg.match(/(\d+)%/);
+          if (match) return parseInt(match[1]);
+       }
+       return m.createdAt < dayEnd ? (m.createdAt > dayStart ? 0 : m.progress) : 0; 
     };
 
-    const requestedBySupport = missions.reduce((acc: any, m) => {
-      acc[m.support] = (acc[m.support] || 0) + (m.photoCountRequested || 1);
+    const totalProgress = missionsAtDay.reduce((acc, m) => acc + calculateHistoricalProgress(m), 0);
+    const avgProgDay = missionsAtDay.length > 0 ? totalProgress / missionsAtDay.length : 0;
+
+    return {
+      name: dayInfo.label,
+      MissionsLivrees: deliveredCount,
+      ProgressionMoyenne: Math.round(avgProgDay)
+    };
+  });
+
+  const renderDashboardView = () => {
+    const stats = {
+      total: activeMissions.length,
+      completed: activeMissions.filter(m => m.status === 'livré').length,
+      inProduction: activeMissions.filter(m => ['en cour de shoot', 'déja shooter', 'En post-production'].includes(m.status)).length,
+      pending: activeMissions.filter(m => m.status === 'en attente' || m.status === 'produit preparé').length,
+      urgent: activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length,
+      bugs: activeMissions.filter(m => m.status === 'livré' && m.progress < 100).length,
+    };
+
+    const dashboardProductionMissions = [...activeMissions].sort((a, b) => {
+      const priorityMap: Record<string, number> = { 'High priority': 3, 'Medium priority': 2, 'Low priority': 1 };
+      const pA = priorityMap[a.priority] || 0;
+      const pB = priorityMap[b.priority] || 0;
+      if (pA !== pB) return pB - pA;
+      return b.createdAt - a.createdAt;
+    }).slice(0, 15);
+
+    const secondaryStats = {
+      total: secondaryMissions.filter(m => m.enabled).length,
+      completed: secondaryMissions.filter(m => m.enabled && m.progress === 100).length,
+      avgProgress: secondaryMissions.filter(m => m.enabled).length > 0
+        ? secondaryMissions.filter(m => m.enabled).reduce((acc, m) => acc + m.progress, 0) / secondaryMissions.filter(m => m.enabled).length
+        : 0
+    };
+
+    const dashboardSecondaryMissions = [...secondaryMissions]
+      .filter(m => m.enabled)
+      .sort((a, b) => {
+        const priorityMap: Record<string, number> = { 'high': 3, 'medium': 2, 'low': 1 };
+        const pA = priorityMap[a.priority] || 0;
+        const pB = priorityMap[b.priority] || 0;
+        if (pA !== pB) return pB - pA;
+        return b.createdAt - a.createdAt;
+      });
+
+    const requestedBySupport = activeMissions.reduce((acc: any, m) => {
+      const supports = (m.support || '').split(', ');
+      supports.forEach(s => {
+        const key = s === 'video' ? 'vidéo' : s; 
+        acc[key] = (acc[key] || 0) + (m.photoCountRequested || 1);
+      });
       return acc;
     }, {});
 
-    const deliveredBySupport = missions.reduce((acc: any, m) => {
-      acc[m.support] = (acc[m.support] || 0) + (m.photoCountDelivered || 0);
+    const deliveredBySupport = activeMissions.reduce((acc: any, m) => {
+      const supports = (m.support || '').split(', ');
+      supports.forEach(s => {
+        const key = s === 'video' ? 'vidéo' : s; 
+        acc[key] = (acc[key] || 0) + (m.photoCountDelivered || 0);
+      });
       return acc;
     }, {});
 
@@ -1675,37 +3233,25 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     const totalDelivered = Object.values(deliveredBySupport).reduce((a, b) => (a as any) + (b as any), 0) as number;
 
     const photoRate = (requestedBySupport['photo'] || 0) > 0 ? ((deliveredBySupport['photo'] || 0) / (requestedBySupport['photo'] || 1)) * 100 : 0;
-    const videoRate = (requestedBySupport['video'] || 0) > 0 ? ((deliveredBySupport['video'] || 0) / (requestedBySupport['video'] || 1)) * 100 : 0;
+    const videoRate = (requestedBySupport['vidéo'] || 0) > 0 ? ((deliveredBySupport['vidéo'] || 0) / (requestedBySupport['vidéo'] || 1)) * 100 : 0;
     const graphicRate = (requestedBySupport['graphisme'] || 0) > 0 ? ((deliveredBySupport['graphisme'] || 0) / (requestedBySupport['graphisme'] || 1)) * 100 : 0;
 
     const involvedSupports = [
-      requestedBySupport['photo'] > 0 ? photoRate : null,
-      requestedBySupport['video'] > 0 ? videoRate : null,
-      requestedBySupport['graphisme'] > 0 ? graphicRate : null
-    ].filter(v => v !== null) as number[];
+      (requestedBySupport['photo'] || 0) > 0 ? photoRate : null,
+      (requestedBySupport['vidéo'] || 0) > 0 ? videoRate : null,
+      (requestedBySupport['graphisme'] || 0) > 0 ? graphicRate : null
+    ].filter(v => v !== null && !isNaN(v)) as number[];
 
-    const finalEfficiencyScore = involvedSupports.length > 0 
+    let finalEfficiencyScore = involvedSupports.length > 0 
       ? involvedSupports.reduce((a, b) => a + b, 0) / involvedSupports.length 
       : (totalRequested > 0 ? (totalDelivered / totalRequested) * 100 : 0);
+    
+    if (isNaN(finalEfficiencyScore)) finalEfficiencyScore = 0;
 
-    const bugRate = missions.length > 0 ? (stats.bugs / missions.length) * 100 : 0;
+    const bugRate = activeMissions.length > 0 ? (stats.bugs / activeMissions.length) * 100 : 0;
     const stabilityScore = 100 - bugRate;
 
-    // Calculate Distribution data with all possible categories for stability
-    const allStatuses = categories.find(c => c.id === 'status')?.items || [];
-    const statusCounts = missions.reduce((acc: any, m) => {
-      acc[m.status] = (acc[m.status] || 0) + 1;
-      return acc;
-    }, {});
-
-    const statusData = allStatuses.map(status => ({
-      name: status,
-      value: statusCounts[status] || 0
-    }));
-
-    const COLORS = ['#00FF94', '#00D1FF', '#BD00FF', '#FF9900', '#FF007A', '#FF3B30', '#EBFF00'];
-
-    const duplicateGroups = missions.reduce((acc: Mission[][], m) => {
+    const duplicateGroups = activeMissions.reduce((acc: Mission[][], m) => {
       const matchIdx = acc.findIndex(group => 
         group[0].product === m.product &&
         group[0].color === m.color &&
@@ -1722,17 +3268,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       }
       return acc;
     }, []).filter(g => g.length > 1);
-
-    const allSupports = categories.find(c => c.id === 'support')?.items || [];
-    const supportCounts = missions.reduce((acc: any, m) => {
-      acc[m.support] = (acc[m.support] || 0) + 1;
-      return acc;
-    }, {});
-
-    const supportData = allSupports.map(support => ({
-      name: support,
-      value: supportCounts[support] || 0
-    }));
 
     const StatCard = ({ label, value, subValue, icon: Icon, color, delay = 0, breakdown }: any) => (
       <motion.div 
@@ -1769,19 +3304,31 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       </motion.div>
     );
 
-    const ChartCard = ({ title, subtitle, children, delay = 0, className = "" }: any) => (
+    const ChartCard = ({ title, subtitle, children, delay = 0, className = "", rightElement, id }: any) => (
       <motion.div 
+        id={id}
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ delay }}
-        className={`bg-black/40 border border-white/10 p-6 rounded-2xl shadow-xl flex flex-col ${className}`}
+        className={`bg-black/40 border border-white/10 p-6 rounded-2xl shadow-xl flex flex-col group/chart ${className}`}
       >
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-start mb-6">
           <div>
             <h4 className="text-[11px] font-black uppercase tracking-[2px] text-white">{title}</h4>
             <p className="text-[8px] font-mono text-accent/60 uppercase tracking-widest mt-0.5">{subtitle}</p>
           </div>
-          <Activity size={14} className="text-white/20" />
+          <div className="flex items-center gap-2">
+            {id && (
+              <button 
+                onClick={() => exportChartAsJPEG(id, title)}
+                className="p-1 px-1.5 bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 hover:border-white/30 rounded transition-all opacity-0 group-hover/chart:opacity-100"
+                title="Exporter ce graphique"
+              >
+                <Download size={12} />
+              </button>
+            )}
+            {rightElement ? rightElement : <Activity size={14} className="text-white/20" />}
+          </div>
         </div>
         <div className="flex-1 min-h-[150px]">
           {children}
@@ -1795,88 +3342,238 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     return (
       <div className="space-y-6 mb-12">
         {/* Bilan Stratégique Header */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="lg:col-span-2 p-8 bg-gradient-to-br from-accent/10 via-black/40 to-black/60 border border-white/10 rounded-2xl relative overflow-hidden flex flex-col justify-between shadow-2xl"
+            className="lg:col-span-3 p-8 bg-black/40 border border-white/10 rounded-2xl relative overflow-hidden flex flex-col justify-between shadow-2xl group hover:border-accent/30 transition-all"
           >
-            <div className="absolute top-0 right-0 p-4 opacity-10">
-              <Sparkles size={120} className="text-accent" />
+            <div className="absolute top-0 right-0 p-4 opacity-[0.03] group-hover:opacity-10 transition-opacity">
+              <Sparkles size={160} className="text-accent" />
             </div>
-            <div className="relative z-10">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-accent/20 rounded-lg text-accent">
-                  <TrendingUp size={18} />
+            <div className="relative z-10 w-full">
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-accent/20 rounded-lg text-accent shadow-[0_0_15px_rgba(0,255,148,0.2)]">
+                    <TrendingUp size={18} />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-[4px] text-white">Analyse de Performance Stratégique</h2>
+                    <p className="text-[9px] font-mono text-accent/60 uppercase tracking-widest mt-1">Status: Operational // Engine-ID: AIS-MD-V3</p>
+                  </div>
                 </div>
-                <h2 className="text-sm font-black uppercase tracking-[4px] text-white">Bilan de Progrès Stratégique</h2>
+                <div className="flex items-center gap-4">
+                  <div className="flex flex-col items-end">
+                    <span className="text-[8px] font-black text-white/40 uppercase tracking-[2px]">Moy. Note</span>
+                    <span className="text-sm font-mono text-accent-yellow">{avgRating}/5</span>
+                  </div>
+                  <button 
+                    onClick={handleRefreshScore}
+                    className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                    title="Rafraichir le tableau de bord"
+                  >
+                    <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                  </button>
+                </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div className="space-y-2">
+              <div className={`grid grid-cols-1 md:grid-cols-4 gap-10 ${isRefreshingScore ? 'animate-pulse' : ''}`}>
+                <div className="space-y-3">
                   <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Taux de Livraison</span>
                   <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-display font-black text-white italic">{completionRate.toFixed(1)}%</span>
+                    <span className="text-4xl font-display font-black text-white italic tracking-tighter">{completionRate.toFixed(1)}%</span>
                   </div>
                   <div className="h-1 bg-white/5 rounded-full overflow-hidden">
                     <motion.div initial={{ width: 0 }} animate={{ width: `${completionRate}%` }} className="h-full bg-accent shadow-[0_0_10px_rgba(0,255,148,0.3)]" />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">En Production active</span>
+                <div className="space-y-3">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Production active</span>
                   <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-display font-black text-white italic">{productionRate.toFixed(1)}%</span>
+                    <span className="text-4xl font-display font-black text-white italic tracking-tighter">{productionRate.toFixed(1)}%</span>
                   </div>
                   <div className="h-1 bg-white/5 rounded-full overflow-hidden">
                     <motion.div initial={{ width: 0 }} animate={{ width: `${productionRate}%` }} className="h-full bg-accent-blue shadow-[0_0_10px_rgba(0,209,255,0.3)]" />
                   </div>
                 </div>
-                <div className="space-y-2">
-                   <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Efficience Brute</span>
+                <div className="space-y-3">
+                   <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Indices Qualité</span>
                    <div className="flex items-baseline gap-2">
-                     <span className="text-4xl font-display font-black text-white italic">{finalEfficiencyScore.toFixed(1)}</span>
-                     <span className="text-xs font-mono text-accent">pts</span>
+                     <span className="text-4xl font-display font-black text-white italic tracking-tighter">{stabilityScore.toFixed(0)}%</span>
                    </div>
                    <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-                    <motion.div initial={{ width: 0 }} animate={{ width: `${finalEfficiencyScore}%` }} className="h-full bg-accent-purple shadow-[0_0_10px_rgba(189,0,255,0.3)]" />
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${stabilityScore}%` }} className="h-full bg-accent-purple shadow-[0_0_10px_rgba(189,0,255,0.3)]" />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                   <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Missions Totales</span>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl font-display font-black text-white italic tracking-tighter">{stats.total}</span>
+                     <span className="text-xs font-mono text-white/20">UNIT</span>
+                   </div>
+                   <div className="h-1 bg-white/5 rounded-full" />
+                </div>
+              </div>
+              
+              <div className="mt-10 pt-6 border-t border-white/5 grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Target size={14} className="text-accent-blue" />
+                      <span className="text-[10px] font-black uppercase tracking-[2px] text-white/60">Moniteur Missions Secondaires</span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-accent-blue">{secondaryStats.avgProgress.toFixed(0)}% Eff.</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl">
+                      <span className="text-[8px] font-black text-text-dim/60 uppercase tracking-widest block mb-1">Missions</span>
+                      <span className="text-2xl font-mono font-black text-white">{secondaryStats.total}</span>
+                    </div>
+                    <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl">
+                      <span className="text-[8px] font-black text-text-dim/60 uppercase tracking-widest block mb-1">Terminées</span>
+                      <span className="text-2xl font-mono font-black text-accent-blue">{secondaryStats.completed}</span>
+                    </div>
+                  </div>
+                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }} 
+                      animate={{ width: `${secondaryStats.avgProgress}%` }} 
+                      className="h-full bg-accent-blue shadow-[0_0_15px_rgba(0,209,255,0.4)]" 
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col justify-center">
+                  <div className="flex items-center gap-6">
+                    <p className="text-[10px] text-text-dim/60 font-medium italic">
+                      {secondaryStats.avgProgress > 70 ? "Flux secondaire stable. Objectifs annexes en cours d'atteinte." : "Attention requise sur les missions de gestion studio."}
+                    </p>
                   </div>
                 </div>
               </div>
             </div>
-            <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between relative z-10">
-               <p className="text-[10px] text-text-dim/60 font-medium italic">
-                 {finalEfficiencyScore > 80 ? "Séquenceur en haute performance. Flux optimal détecté." : "Reprise de cadence recommandée sur les supports critiques."}
-               </p>
+            <div className="mt-10 pt-6 border-t border-white/5 flex items-center justify-between relative z-10">
+               <div className="flex items-center gap-6">
+                 <p className="text-[10px] text-text-dim/60 font-medium italic">
+                   {finalEfficiencyScore > 80 ? "Séquenceur en haute performance. Flux optimal détecté." : "Reprise de cadence recommandée sur les supports critiques."}
+                 </p>
+                 <div className="flex items-center gap-2 px-3 py-1 bg-accent/5 border border-accent/10 rounded">
+                    <Zap size={10} className="text-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
+                    <span className="text-[9px] font-black text-accent uppercase tracking-widest">Efficience Brute: {finalEfficiencyScore.toFixed(1)}</span>
+                 </div>
+               </div>
                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+                  <div className="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
                   <span className="text-[8px] font-black uppercase tracking-widest text-accent">Analyse IA Live</span>
                </div>
             </div>
           </motion.div>
 
-          {/* Quick Metrics */}
-          <div className="grid grid-cols-2 gap-4">
-             <div className="p-6 bg-black/40 border border-white/10 rounded-2xl flex flex-col justify-between hover:border-accent/30 transition-all group">
-                <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Urgences</span>
-                <span className={`text-4xl font-black font-mono transition-colors ${stats.urgent > 0 ? 'text-red-500' : 'text-white/20'}`}>{stats.urgent}</span>
-                <AlertTriangle size={16} className={stats.urgent > 0 ? 'text-red-500 animate-pulse' : 'text-white/10'} />
+          {/* Critical Monitor */}
+          <div className={`flex flex-col gap-4 ${isRefreshingScore ? 'animate-pulse' : ''}`}>
+             <div className="flex-1 p-6 bg-black/40 border border-white/10 rounded-2xl flex flex-col justify-between hover:border-red-500/30 transition-all group relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-20 h-20 bg-red-500/5 blur-3xl rounded-full" />
+                <span className="text-[9px] font-black uppercase tracking-widest text-red-500/60 relative z-10">Urgences Critiques</span>
+                <div className="flex items-baseline gap-2 relative z-10">
+                  <span className={`text-5xl font-black font-mono transition-colors ${stats.urgent > 0 ? 'text-red-500' : 'text-white/20'}`}>{stats.urgent}</span>
+                  <span className="text-[10px] font-bold text-white/20 uppercase">Missions</span>
+                </div>
+                <div className="flex items-center justify-between relative z-10">
+                  <AlertTriangle size={20} className={stats.urgent > 0 ? 'text-red-500 animate-pulse' : 'text-white/10'} />
+                  <span className="text-[8px] font-mono text-red-500/40 uppercase tracking-tighter">Requires Action</span>
+                </div>
              </div>
-             <div className="p-6 bg-black/40 border border-white/10 rounded-2xl flex flex-col justify-between hover:border-accent-blue/30 transition-all group">
-                <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Bilan Qualité</span>
-                <span className="text-4xl font-black font-mono text-white italic">{stabilityScore.toFixed(0)}%</span>
-                <Zap size={16} className="text-accent-blue" />
-             </div>
-             <div className="p-6 bg-black/40 border border-white/10 rounded-2xl flex flex-col justify-between hover:border-accent-purple/30 transition-all group">
-                <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Moy. Note</span>
-                <span className="text-4xl font-black font-mono text-white">{avgRating}</span>
-                <Sparkles size={16} className="text-accent-yellow" />
-             </div>
-             <div className="p-6 bg-black/40 border border-white/10 rounded-2xl flex flex-col justify-between hover:border-green-500/30 transition-all group">
-                <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Total Flux</span>
-                <span className="text-4xl font-black font-mono text-white">{stats.total}</span>
-                <Layers size={16} className="text-white/40" />
+             <div className="p-5 bg-white/5 border border-white/10 rounded-2xl flex flex-col justify-center items-center text-center group cursor-pointer hover:bg-white/[0.08] transition-all" onClick={handleRefreshScore}>
+                <RefreshCw size={16} className={`text-white/20 group-hover:text-accent transition-colors ${isRefreshingScore ? 'animate-spin text-accent' : ''}`} />
+                <span className="text-[8px] font-black uppercase tracking-widest text-white/20 mt-2 group-hover:text-white transition-colors">Rafraichir Data</span>
              </div>
           </div>
         </div>
+
+        {/* Timeline Chart */}
+        <motion.div 
+          id="chart-timeline"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`bg-black/40 border border-white/10 p-8 rounded-2xl relative overflow-hidden shadow-xl group/chart hover:border-accent-blue/20 transition-all ${isRefreshingScore ? 'animate-pulse ring-1 ring-accent-blue/30' : ''}`}
+        >
+           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
+             <div className="flex items-center gap-4">
+               <div className={`p-2.5 bg-accent-blue/10 border border-accent-blue/20 rounded-xl text-accent-blue shadow-[0_0_20px_rgba(0,209,255,0.1)] transition-all ${isRefreshingScore ? 'scale-110 shadow-[0_0_30px_rgba(0,209,255,0.3)]' : ''}`}>
+                 <Activity size={20} className={isRefreshingScore ? 'animate-pulse' : ''} />
+               </div>
+               <div>
+                 <h2 className="text-sm font-black uppercase tracking-[5px] text-white leading-tight">Vecteur d'Évolution Hebdomadaire</h2>
+                 <p className="text-[10px] text-text-dim uppercase tracking-[3px] mt-1 font-mono">Stream: Active // Sampling: 24h</p>
+               </div>
+             </div>
+             <div className="flex items-center gap-4 px-2 py-1.5 bg-white/5 border border-white/10 rounded-xl backdrop-blur-sm">
+                <button 
+                  onClick={() => exportChartAsJPEG('chart-timeline', 'Evolution Hebdomadaire')}
+                  className="p-2 bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 hover:border-white/30 rounded-lg transition-all opacity-0 group-hover/chart:opacity-100"
+                  title="Exporter ce graphique"
+                >
+                  <Download size={14} />
+                </button>
+
+                <div className="w-px h-6 bg-white/10 mx-1 opacity-0 group-hover/chart:opacity-100" />
+                <div className="flex items-center gap-4 px-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-accent-blue shadow-[0_0_8px_rgba(0,209,255,0.5)]" />
+                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">Livrables</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
+                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">Progression</span>
+                  </div>
+                </div>
+                
+                <div className="w-px h-6 bg-white/10 mx-1" />
+                
+                <button 
+                  onClick={handleRefreshScore}
+                  className={`p-2 rounded-lg transition-all ${isRefreshingScore ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/5 text-white/40 hover:text-white hover:bg-white/10'}`}
+                  title="Recalculer les données analytiques"
+                >
+                  <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                </button>
+             </div>
+           </div>
+           
+           <div className={`h-80 w-full transition-opacity duration-300 ${isRefreshingScore ? 'opacity-40 grayscale-[0.5]' : 'opacity-100'}`}>
+             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'refreshing' : 'stable'}>
+               <ComposedChart data={timelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                 <CartesianGrid strokeDasharray="1 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                 <XAxis 
+                   dataKey="name" 
+                   tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: 'bold' }} 
+                   axisLine={false} 
+                   tickLine={false} 
+                   dy={10}
+                 />
+                 <YAxis 
+                   yAxisId="left" 
+                   tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9, fontFamily: 'monospace' }} 
+                   axisLine={false} 
+                   tickLine={false} 
+                 />
+                 <YAxis 
+                   yAxisId="right" 
+                   orientation="right" 
+                   tick={{ fill: 'rgba(0,255,148,0.3)', fontSize: 9, fontFamily: 'monospace' }} 
+                   axisLine={false} 
+                   tickLine={false} 
+                 />
+                 <RechartsTooltip 
+                   cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                   contentStyle={{ backgroundColor: '#0A0A0A', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px', textTransform: 'uppercase', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
+                   itemStyle={{ padding: '2px 0' }}
+                 />
+                 <Bar yAxisId="left" dataKey="MissionsLivrees" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} maxBarSize={30} opacity={0.8} />
+                 <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" stroke="var(--color-accent)" strokeWidth={4} dot={{ fill: '#0A0A0A', stroke: 'var(--color-accent)', strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: 'var(--color-accent)' }} />
+               </ComposedChart>
+             </ResponsiveContainer>
+           </div>
+        </motion.div>
 
         {/* Dashboard Tools */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8 bg-black/40 border border-white/10 p-4 rounded-xl backdrop-blur-md">
@@ -1908,6 +3605,16 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   <Download size={12} />
                 </div>
                 Export Global Excel
+              </button>
+              <button 
+                onClick={pushToGoogleSheets}
+                className="flex items-center gap-2 px-6 py-2.5 bg-[#0F9D58]/10 border border-[#0F9D58]/20 rounded text-[10px] font-black uppercase tracking-[2px] text-[#0F9D58] hover:bg-[#0F9D58]/20 active:scale-95 transition-all group shadow-[0_0_20px_rgba(15,157,88,0.1)]"
+                title="Pousser vers Google Sheets"
+              >
+                <div className="p-1 px-1.5 bg-[#0F9D58]/20 rounded group-hover:bg-[#0F9D58] group-hover:text-white transition-all">
+                  <FileSpreadsheet size={12} />
+                </div>
+                Direct to Sheets
               </button>
            </div>
         </div>
@@ -1943,167 +3650,26 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           </motion.div>
         )}
 
-        {/* Efficiency & Motivation (Moved to Top) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-           <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-gradient-to-br from-accent/20 via-black/40 to-black/60 border border-accent/20 p-8 rounded-2xl relative overflow-hidden group shadow-2xl flex items-center justify-between"
-           >
-              <div className="absolute top-0 right-0 w-64 h-64 bg-accent/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl opacity-50" />
-              <div className="space-y-4 relative z-10">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="text-xs font-black uppercase tracking-[4px] text-accent">Efficiency Score</h4>
-                    <p className="text-[9px] font-mono text-white/40 uppercase tracking-widest">Calculé sur Livrables (Photos/Vidéo/Graphisme)</p>
-                  </div>
-                  <button 
-                    onClick={handleRefreshScore}
-                    className={`p-2 rounded-lg bg-white/5 border border-white/10 text-accent hover:bg-accent/10 transition-all ${isRefreshingScore ? 'animate-spin' : ''}`}
-                    title="Rafraîchir le score"
-                  >
-                    <RefreshCw size={14} />
-                  </button>
-                </div>
-                <div className="flex items-baseline gap-3">
-                  <span className={`text-6xl font-display font-black text-white italic ${isRefreshingScore ? 'animate-pulse' : ''}`}>{finalEfficiencyScore.toFixed(1)}</span>
-                  <span className="text-xl font-mono text-accent">%</span>
-                </div>
-                <div className={`grid grid-cols-3 gap-2 ${isRefreshingScore ? 'animate-pulse' : ''}`}>
-                   <div className="flex flex-col">
-                     <span className="text-[7px] font-black uppercase text-text-dim">Photos</span>
-                     <span className="text-[10px] font-mono font-bold text-accent">{photoRate.toFixed(0)}%</span>
-                   </div>
-                   <div className="flex flex-col">
-                     <span className="text-[7px] font-black uppercase text-text-dim">Vidéos</span>
-                     <span className="text-[10px] font-mono font-bold text-accent-blue">{videoRate.toFixed(0)}%</span>
-                   </div>
-                   <div className="flex flex-col">
-                     <span className="text-[7px] font-black uppercase text-text-dim">Graphisme</span>
-                     <span className="text-[10px] font-mono font-bold text-accent-purple">{graphicRate.toFixed(0)}%</span>
-                   </div>
-                </div>
-                <div className="flex items-center gap-2 pt-2">
-                  <div className="px-2 py-1 bg-accent/10 border border-accent/20 rounded text-[8px] font-black text-accent uppercase tracking-tighter animate-pulse">Alpha Performance</div>
-                  <span className="text-[10px] text-white/50 font-bold italic">
-                    {finalEfficiencyScore === 0 ? "C'est le désert total là, on s'y met ?" :
-                     finalEfficiencyScore < 30 ? "On démarre doucement, faut passer la seconde." :
-                     finalEfficiencyScore < 70 ? "Pas mal, on est dans le rythme." :
-                     finalEfficiencyScore < 100 ? "Ça commence à ressembler à quelque chose !" :
-                     finalEfficiencyScore === 100 ? "Objectif atteint, c'est propre." :
-                     "Incroyable, t'es en surrégime ! Continue comme ça."}
-                  </span>
-                </div>
-              </div>
-              <div className="hidden sm:block relative z-10 pr-4">
-                 <div className="w-24 h-24 rounded-full border-4 border-accent/20 flex items-center justify-center p-2 relative">
-                    <motion.div 
-                      className="absolute inset-0 rounded-full border-4 border-accent border-t-transparent"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                    />
-                    <TrendingUp size={32} className="text-accent" />
-                 </div>
-              </div>
-           </motion.div>
-
-           <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-black/40 border border-white/10 p-8 rounded-2xl relative overflow-hidden group shadow-xl flex flex-col justify-center"
-           >
-              <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, #fff 1px, transparent 0)', backgroundSize: '24px 24px' }} />
-              <div className="space-y-6 relative z-10">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center text-white">
-                    <Globe size={24} />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black uppercase tracking-[3px] text-white">Global Impact</h4>
-                    <p className="text-[9px] font-mono text-text-dim uppercase tracking-widest mt-0.5">Visibilité Internationale du Dashboard</p>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                  <div className="space-y-1">
-                    <span className="text-[8px] font-black text-text-dim uppercase tracking-widest">Missions Livrées</span>
-                    <div className="flex items-center gap-2">
-                      <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                        <motion.div 
-                          className="h-full bg-accent-blue" 
-                          initial={{ width: 0 }}
-                          animate={{ width: stats.total > 0 ? `${(stats.completed / stats.total) * 100}%` : 0 }}
-                          transition={{ duration: 1, ease: "easeOut" }}
-                        />
-                      </div>
-                      <span className="text-xs font-mono font-bold text-white">{stats.completed}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[8px] font-black text-text-dim uppercase tracking-widest">File d'Attente</span>
-                    <div className="flex items-center gap-2">
-                       <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                        <motion.div 
-                          className="h-full bg-accent-purple" 
-                          initial={{ width: 0 }}
-                          animate={{ width: stats.total > 0 ? `${(stats.pending / stats.total) * 100}%` : 0 }}
-                          transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
-                        />
-                       </div>
-                       <span className="text-xs font-mono font-bold text-white">{stats.pending}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[8px] font-black text-text-dim uppercase tracking-widest">In Shoot Velocity</span>
-                    <div className="flex items-center gap-2">
-                       <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                        <motion.div 
-                          className="h-full bg-accent" 
-                          initial={{ width: 0 }}
-                          animate={{ width: stats.total > 0 ? `${(stats.inProduction / stats.total) * 100}%` : 0 }}
-                          transition={{ duration: 1, ease: "easeOut", delay: 0.4 }}
-                        />
-                       </div>
-                       <span className="text-xs font-mono font-bold text-white">{stats.inProduction}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-           </motion.div>
-        </div>
-
-        {/* Top Tier: Critical Intel */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard label="Missions Actives" value={stats.total} subValue={`+${stats.total > 0 ? 1 : 0}`} icon={Layers} color="text-white" delay={0.3} />
-          <StatCard label="Progression Flux" value={`${avgProgress}%`} icon={TrendingUp} color="text-accent-purple" delay={0.4} />
-          <StatCard label={filterSupports.length === 1 && filterSupports[0] === 'video' ? "Séquences Demandées" : filterSupports.length === 1 && filterSupports[0] === 'graphisme' ? "Visuels Demandés" : "Photos Demandées"} value={totalRequested} subValue="Total (Unités)" icon={Package} color="text-accent-blue" delay={0.5} breakdown={requestedBySupport} />
-          <StatCard label={filterSupports.length === 1 && filterSupports[0] === 'video' ? "Séquences Livrées" : filterSupports.length === 1 && filterSupports[0] === 'graphisme' ? "Visuels Livrés" : "Photos Livrées"} value={totalDelivered} subValue={`${((totalDelivered / (totalRequested || 1)) * 100).toFixed(1)}% Ratio`} icon={Zap} color="text-accent" delay={0.6} breakdown={deliveredBySupport} />
-          <StatCard label="Moyenne Notation" value={`${avgRating}/5`} subValue="Flux Satisfaction" icon={Sparkles} color="text-accent-yellow" delay={0.7} />
-          <StatCard label="Alerte Haute Priorité" value={stats.urgent} icon={AlertTriangle} color={stats.urgent > 0 ? "text-accent-red" : "text-text-dim"} delay={0.8} />
-        </div>
-
         {/* Middle Tier: Data Deep Dive */}
-        <div className="space-y-4">
+        <div className="space-y-4 pt-6">
           <div className="flex items-center justify-between">
              <div className="flex items-center gap-2">
                 <BarChart3 size={14} className="text-accent" />
-                <h3 className="text-[10px] font-black uppercase tracking-[3px] text-white/60">Analyse de Distribution</h3>
+                <h3 className="text-[10px] font-black uppercase tracking-[3px] text-white/60">Analyse de Distribution Analytique</h3>
              </div>
              <button 
                onClick={() => setIsMiddleTierVisible(!isMiddleTierVisible)}
-               className="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-md text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all"
+               className="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-md text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all shadow-sm"
              >
                {isMiddleTierVisible ? (
                  <>
                    <Minimize size={10} />
-                   Rétracter les Graphiques
+                   Rétracter les Vecteurs
                  </>
                ) : (
                  <>
                    <Maximize size={10} />
-                   Afficher les Graphiques
+                   Déployer l'Intelligence
                  </>
                )}
              </button>
@@ -2120,9 +3686,31 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               >
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2">
                   {/* Main Status Velocity */}
-                  <ChartCard title="Distribution par État" subtitle="Data Flow Analysis" className="lg:col-span-2" delay={0.1}>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={statusData} margin={{ top: 25, right: 10, left: 10, bottom: 0 }}>
+                  <ChartCard 
+                    id="chart-status"
+                    title="Distribution par État" 
+                    subtitle="Data Flow Analysis" 
+                    className="lg:col-span-2" 
+                    delay={0.1}
+                    rightElement={
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-text-dim hidden sm:inline">Progression Flux</span>
+                          <span className="text-lg font-black font-mono text-accent-purple bg-accent-purple/10 px-2 py-0.5 rounded border border-accent-purple/20">{avgProgress}%</span>
+                        </div>
+                        <button 
+                          onClick={handleRefreshScore} 
+                          className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                          title="Mettre à jour les graphiques"
+                        >
+                          <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                        </button>
+                      </div>
+                    }
+                  >
+                    <div style={{ width: '100%', height: 260 }}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-1' : 'anim-2'}>
+                        <BarChart data={statusData} margin={{ top: 25, right: 10, left: 10, bottom: 0 }}>
                         <XAxis 
                           dataKey="name" 
                           stroke="#444" 
@@ -2161,12 +3749,28 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
+                    </div>
                   </ChartCard>
 
                   {/* Support Split */}
-                  <ChartCard title="Répartition Supports" subtitle="Asset Allocation" delay={0.2}>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <ChartCard 
+                    id="chart-support"
+                    title="Répartition Supports" 
+                    subtitle="Asset Allocation" 
+                    delay={0.2}
+                    rightElement={
+                      <button 
+                        onClick={handleRefreshScore} 
+                        className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                        title="Mettre à jour les graphiques"
+                      >
+                        <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                      </button>
+                    }
+                  >
+                    <div style={{ width: '100%', height: 260 }}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-3' : 'anim-4'}>
+                        <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                         <Pie
                           data={supportData}
                           cx="50%"
@@ -2190,19 +3794,376 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         />
                       </RPieChart>
                     </ResponsiveContainer>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2">
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
                       {supportData.map((s, i) => (
                         <div key={s.name} className="flex items-center gap-1.5">
-                          <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: COLORS[(i + 2) % COLORS.length] }} />
+                          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 2) % COLORS.length] }} />
                           <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
                         </div>
                       ))}
                     </div>
                   </ChartCard>
                 </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-6">
+                  {/* Produit Split */}
+                  <ChartCard 
+                    id="chart-product"
+                    title="Produits" 
+                    subtitle="Répartition par Produit" 
+                    delay={0.3}
+                    rightElement={
+                      <button 
+                        onClick={handleRefreshScore} 
+                        className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                        title="Mettre à jour les graphiques"
+                      >
+                        <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                      </button>
+                    }
+                  >
+                    <div style={{ width: '100%', height: 260 }}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-5' : 'anim-6'}>
+                        <BarChart data={productData} margin={{ top: 10, bottom: 20, left: -20, right: 10 }} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
+                        <XAxis type="number" fontSize={10} tick={{ fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} />
+                        <YAxis type="category" dataKey="name" fontSize={9} tick={{ fill: '#ccc' }} axisLine={{ stroke: '#333' }} tickLine={false} width={80} />
+                        <RechartsTooltip 
+                          contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                          cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                        />
+                        <Bar dataKey="value" radius={[0, 4, 4, 0]} animationBegin={0} animationDuration={1200} isAnimationActive={true}>
+                          {productData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                    </div>
+                  </ChartCard>
+
+                  {/* Univers Split */}
+                  <ChartCard 
+                    id="chart-univers"
+                    title="Univers" 
+                    subtitle="Répartition par Univers" 
+                    delay={0.4}
+                    rightElement={
+                      <button 
+                        onClick={handleRefreshScore} 
+                        className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                        title="Mettre à jour les graphiques"
+                      >
+                        <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                      </button>
+                    }
+                  >
+                    <div style={{ width: '100%', height: 260 }}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-7' : 'anim-8'}>
+                        <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Pie
+                          data={universData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={75}
+                          paddingAngle={2}
+                          dataKey="value"
+                          animationBegin={0}
+                          animationDuration={1200}
+                          isAnimationActive={true}
+                          label={({ name, value }) => value > 0 ? `${value}` : ''}
+                          labelLine={false}
+                        >
+                          {universData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[(index + 4) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip 
+                          contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                        />
+                      </RPieChart>
+                    </ResponsiveContainer>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
+                      {universData.map((s, i) => (
+                        <div key={s.name} className="flex items-center gap-1.5" title={s.name}>
+                          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 4) % COLORS.length] }} />
+                          <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </ChartCard>
+
+                  {/* Argument Split */}
+                  <ChartCard 
+                    id="chart-argument"
+                    title="Type d'Argument" 
+                    subtitle="Répartition par Argument" 
+                    delay={0.5}
+                    rightElement={
+                      <button 
+                        onClick={handleRefreshScore} 
+                        className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                        title="Mettre à jour les graphiques"
+                      >
+                        <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                      </button>
+                    }
+                  >
+                    <div style={{ width: '100%', height: 260 }}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-9' : 'anim-10'}>
+                        <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Pie
+                          data={argumentData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={75}
+                          paddingAngle={2}
+                          dataKey="value"
+                          animationBegin={0}
+                          animationDuration={1200}
+                          isAnimationActive={true}
+                          label={({ name, value }) => value > 0 ? `${value}` : ''}
+                          labelLine={false}
+                        >
+                          {argumentData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[(index + 5) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip 
+                          contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                        />
+                      </RPieChart>
+                    </ResponsiveContainer>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2 h-10 overflow-y-auto custom-scrollbar">
+                      {argumentData.map((s, i) => (
+                        <div key={s.name} className="flex items-center gap-1.5" title={s.name}>
+                          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[(i + 5) % COLORS.length] }} />
+                          <span className="text-[8px] font-bold text-text-dim truncate max-w-[60px]">{s.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </ChartCard>
+
+                  {/* Poids Stratégique */}
+                  <ChartCard 
+                    id="chart-poids"
+                    title="Poids Stratégique" 
+                    subtitle="Production vs Secondaire" 
+                    delay={0.6}
+                    rightElement={
+                      <button 
+                        onClick={handleRefreshScore} 
+                        className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                        title="Mettre à jour les graphiques"
+                      >
+                        <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                      </button>
+                    }
+                  >
+                    <div className="flex flex-col items-center justify-center h-full">
+                       <div className="relative h-[160px] w-[160px]">
+                          {(() => {
+                            const prod = missions.length;
+                            const sec = secondaryMissions.length;
+                            const totalCount = prod + sec || 1;
+                            const prodP = (prod / totalCount) * 100;
+                            const secP = (sec / totalCount) * 100;
+                            return (
+                              <>
+                                <svg viewBox="0 0 100 100" className="transform -rotate-90 w-full h-full">
+                                  <circle cx="50" cy="50" r="40" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
+                                  <circle 
+                                    cx="50" cy="50" r="40" fill="transparent" stroke="#EBFF00" 
+                                    strokeWidth="10" 
+                                    strokeDasharray={`${prodP * 251.2 / 100} 251.2`} 
+                                    className="transition-all duration-1000"
+                                  />
+                                  <circle 
+                                    cx="50" cy="50" r="40" fill="transparent" stroke="#00D1FF" 
+                                    strokeWidth="10" 
+                                    strokeDasharray={`${secP * 251.2 / 100} 251.2`} 
+                                    strokeDashoffset={`${-prodP * 251.2 / 100}`}
+                                    className="transition-all duration-1000"
+                                  />
+                                </svg>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                   <span className="text-[8px] font-black text-white/20 uppercase tracking-[2px]">TOTAL</span>
+                                   <span className="text-xl font-black text-white">{prod + sec}</span>
+                                </div>
+                              </>
+                            );
+                          })()}
+                       </div>
+                       <div className="w-full space-y-2 mt-4">
+                          <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-wider">
+                             <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-[#EBFF00]" />
+                                <span className="text-text-dim">Production</span>
+                             </div>
+                             <span className="text-white">{missions.length} units</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-wider">
+                             <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-[#00D1FF]" />
+                                <span className="text-text-dim">Secondaire</span>
+                             </div>
+                             <span className="text-white">{secondaryMissions.length} units</span>
+                          </div>
+                       </div>
+                    </div>
+                  </ChartCard>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
+
+        {/* Tableaux de Synthèse Opérationnelle */}
+        <div className="grid grid-cols-1 gap-6 pt-10">
+          {/* Tableau de Production */}
+          <ChartCard 
+            title="Aperçu du Flux de Production" 
+            subtitle="Top 15 Missions Actives"
+            className="w-full overflow-hidden"
+            delay={0.6}
+            rightElement={
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-mono text-white/40">{activeMissions.length} Missions</span>
+                <button 
+                  onClick={handleRefreshScore} 
+                  className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                  title="Rafraichir les données"
+                >
+                  <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            }
+          >
+            <div className={`overflow-x-auto custom-scrollbar ${isRefreshingScore ? 'animate-pulse opacity-50' : ''}`}>
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead>
+                  <tr className="border-b border-white/5">
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">ID</th>
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Produit</th>
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Support</th>
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Priorité</th>
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim font-mono text-right">Progrès</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dashboardProductionMissions.map(m => (
+                    <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group">
+                      <td className="py-3 px-4 text-[10px] font-mono font-bold text-accent-blue">{m.refId}</td>
+                      <td className="py-3 px-4 text-[10px] font-bold text-white/80">{m.product}</td>
+                      <td className="py-3 px-4 text-[10px] text-text-dim">{m.support}</td>
+                      <td className="py-3 px-4">
+                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
+                          m.priority === 'High priority' ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 
+                          m.priority === 'Medium priority' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30' : 
+                          'bg-blue-500/20 text-blue-500 border border-blue-500/30'
+                        }`}>
+                          {m.priority.split(' ')[0]}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="text-[10px] font-mono font-black text-accent">{m.progress}%</span>
+                          <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${m.progress}%` }}
+                              className="h-full bg-accent" 
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {activeMissions.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center text-text-dim text-[10px] font-mono uppercase italic tracking-widest">Aucune mission active détectée</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </ChartCard>
+
+          {/* Tableau de Mission Secondaire */}
+          <ChartCard 
+            title="Statut des Missions Secondaires" 
+            subtitle="Gestion Plateau & Studio"
+            delay={0.7}
+            rightElement={
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-mono text-white/40">{secondaryMissions.filter(m => m.enabled).length} Items</span>
+                <button 
+                  onClick={handleRefreshScore} 
+                  className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                  title="Rafraichir les missions secondaires"
+                >
+                  <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            }
+          >
+            <div className={`overflow-x-auto custom-scrollbar ${isRefreshingScore ? 'animate-pulse opacity-50' : ''}`}>
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead>
+                  <tr className="border-b border-white/5">
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Titre de la Mission</th>
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Priorité</th>
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim">Note</th>
+                    <th className="py-3 px-4 text-[9px] font-black uppercase tracking-widest text-text-dim text-right">Progrès</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dashboardSecondaryMissions.map(m => (
+                    <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
+                      <td className="py-3 px-4 text-[10px] font-bold text-white/80">
+                        {m.title} 
+                        <span className="ml-2 text-[8px] opacity-40 font-mono tracking-widest uppercase">{m.status}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
+                          m.priority === 'high' ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 
+                          m.priority === 'medium' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/30' : 
+                          'bg-blue-500/20 text-blue-500 border border-blue-500/30'
+                        }`}>
+                          {m.priority}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <StarRatingStatic rating={m.rating} size={8} />
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="text-[10px] font-mono font-black text-accent-blue">{m.progress}%</span>
+                          <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${m.progress}%` }}
+                              className="h-full bg-accent-blue shadow-[0_0_10px_rgba(0,209,255,0.3)]" 
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {dashboardSecondaryMissions.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-10 text-center text-text-dim text-[10px] font-mono uppercase italic tracking-widest">Aucune mission secondaire active</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </ChartCard>
         </div>
       </div>
     );
@@ -2217,6 +4178,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         <div className="flex flex-wrap gap-4 p-2 bg-black/40 border border-white/10 rounded-2xl backdrop-blur-md mb-10 sticky top-24 z-30 shadow-2xl">
           {[
             { id: 'branding', label: 'Identité Visuelle', icon: Palette },
+            { id: 'display', label: 'Configuration Affichage', icon: Layout },
             { id: 'data', label: 'Structure & Data', icon: Database },
             { id: 'ai', label: 'Agent IA Gemini', icon: Cpu }
           ].map(tab => {
@@ -2287,7 +4249,16 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <label className="text-[10px] font-black uppercase tracking-[3px] text-accent flex items-center gap-2">
                         <Cpu size={12} /> Directives Gemini Agent
                       </label>
-                      <span className="text-[9px] font-mono text-white/20">v2.4.0</span>
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={() => setAiInstructions(defaultAiInstructions)}
+                          className="text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-accent flex items-center gap-1 transition-colors"
+                          title="Réinitialiser les directives par défaut"
+                        >
+                          <RotateCcw size={10} /> Reset
+                        </button>
+                        <span className="text-[9px] font-mono text-white/20">v2.4.0</span>
+                      </div>
                     </div>
                     <textarea 
                       value={aiInstructions}
@@ -2295,12 +4266,63 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       placeholder="Comment l'IA doit-elle traiter vos données ?"
                       className="w-full h-[300px] bg-black/60 border border-white/10 p-6 rounded-2xl text-xs text-white outline-none focus:border-accent hover:border-white/20 transition-all font-mono leading-relaxed shadow-inner"
                     />
+
+                    <div className="flex flex-col gap-2 relative">
+                      <select 
+                        className="w-full bg-black/60 border border-white/10 p-3 rounded-xl text-[11px] text-white/80 outline-none focus:border-accent hover:border-white/20 transition-all font-mono appearance-none relative z-10 cursor-pointer"
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            const valToInject = e.target.value.replace(/\\n/g, '\n');
+                            setAiInstructions(prev => prev + (prev.endsWith('\n') || prev === '' ? '' : '\n') + valToInject);
+                            e.target.value = ""; // Reset dropdown
+                          }
+                        }}
+                        defaultValue=""
+                      >
+                        <option value="" disabled>Sélectionner une commande à injecter au prompt...</option>
+                        <option value="/matrice : Vue globale du tableau.">/matrice - Vue globale du tableau.</option>
+                        <option value="/load : Charge par univers (Flux).">/load - Charge par univers (Flux).</option>
+                        <option value="/enchawer : Séquençage optimisé plateau.">/enchawer - Séquençage optimisé plateau.</option>
+                        <option value="/inv : Picking dédupliqué.">/inv - Picking dédupliqué.</option>
+                        <option value="/scan : Transcription OCR.">/scan - Transcription OCR.</option>
+                        <option value="/% : Score de progression.">/% - Score de progression.</option>
+                        <option value="/eod : Bilan soir trié par date.">/eod - Bilan soir trié par date.</option>
+                        <option value="@Google Agenda : Sync Calendrier.">@Google Agenda - Sync Calendrier.</option>
+                        <option value="@Google Tasks : Sync Tâches.">@Google Tasks - Sync Tâches.</option>
+                        <option value="/help : Aide efficace.">/help - Aide efficace.</option>
+                        <option value="LISTE DES COMMANDES :\n/matrice : Vue globale du tableau.\n/load : Charge par univers (Flux).\n/enchawer : Séquençage optimisé plateau.\n/inv : Picking dédupliqué.\n/scan : Transcription OCR.\n/% : Score de progression.\n/eod : Bilan soir trié par date.\n@Google Agenda : Sync Calendrier.\n@Google Tasks : Sync Tâches.\n/help : Aide efficace.">-- Injecter toute la liste --</option>
+                      </select>
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-white/50 z-20">
+                        <ChevronDown size={14} />
+                      </div>
+                    </div>
+
                     <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
                       <h5 className="text-[9px] font-black uppercase tracking-widest text-accent mb-2">Bilan de Progrès IA</h5>
                       <p className="text-[10px] text-text-dim leading-relaxed italic">
                         "Actuellement : {missions.length} missions suivies. Taux de complétion global : {avgProgress}%. 
-                        {stats.urgent > 0 ? ` Alerte : ${stats.urgent} missions critiques en attente.` : ' Flux opérationnel nominal.'}"
+                        {missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length > 0 ? ` Alerte : ${missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length} missions critiques en attente.` : ' Flux opérationnel nominal.'}"
                       </p>
+                    </div>
+
+                    <div className="p-4 bg-black/60 border border-white/10 rounded-xl space-y-3">
+                      <label className="text-[10px] font-black uppercase tracking-[3px] text-accent flex items-center gap-2">
+                        <Cpu size={12} /> Clé API Personnalisée
+                      </label>
+                      <p className="text-[10px] text-white/50 leading-relaxed font-mono">
+                        Connectez votre propre clé Gemini AI pour un usage sans limite. Cette clé est stockée uniquement localement sur votre navigateur.
+                      </p>
+                      <input 
+                        type="password"
+                        placeholder="Optionnel : Collez votre clé API Gemini ici..."
+                        value={customApiKey}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCustomApiKey(val);
+                          localStorage.setItem('gemini_custom_api_key', val);
+                        }}
+                        className="w-full bg-black border border-white/10 p-3 rounded-xl text-xs text-white outline-none focus:border-accent transition-all font-mono"
+                      />
                     </div>
                   </div>
 
@@ -2433,7 +4455,49 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest mt-1 opacity-60">Imagerie & Effets Fluides</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+                    <div className="space-y-4">
+                      <label className="text-[10px] font-black uppercase tracking-[2px] text-white/40 block">Logo de l'Application</label>
+                      <div 
+                        onClick={() => document.getElementById('app-logo-upload')?.click()}
+                        className="h-32 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-accent/40 hover:bg-black/40 transition-all overflow-hidden relative group"
+                      >
+                        {appLogo ? (
+                          <div className="relative w-full h-full p-4 flex items-center justify-center">
+                            <img src={appLogo} alt="Logo Preview" className="max-w-full max-h-full object-contain" />
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                               <Plus size={24} className="text-white" />
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center">
+                              <ImageIcon size={20} className="text-white/20" />
+                            </div>
+                            <span className="text-[9px] font-black uppercase tracking-widest text-white/30">Importer Logo</span>
+                          </>
+                        )}
+                      </div>
+                      <input id="app-logo-upload" type="file" accept="image/*" onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setAppLogo(reader.result as string);
+                            setToast({ show: true, message: 'Logo mis à jour', type: 'task' });
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }} className="hidden" />
+                      {appLogo && (
+                        <button 
+                          onClick={() => setAppLogo(null)}
+                          className="text-[9px] font-black text-red-500/60 hover:text-red-500 uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                        >
+                          <Trash2 size={10} /> Supprimer le logo
+                        </button>
+                      )}
+                    </div>
                     <div className="space-y-4">
                       <label className="text-[10px] font-black uppercase tracking-[2px] text-white/40 block">Background Asset</label>
                       <div 
@@ -2454,15 +4518,114 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           reader.readAsDataURL(file);
                         }
                       }} className="hidden" />
+                      {headerBgImage && (
+                        <button 
+                          onClick={() => {
+                            setHeaderBgImage(null);
+                            localStorage.removeItem('headerBgImage');
+                          }}
+                          className="text-[9px] font-black text-red-500/60 hover:text-red-500 uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                        >
+                          <Trash2 size={10} /> Supprimer le background
+                        </button>
+                      )}
                     </div>
                     <div className="space-y-4">
                       <label className="text-[10px] font-black uppercase tracking-[2px] text-white/40 block">Effets de Vague</label>
-                      <div className="grid grid-cols-2 gap-4">
-                         {(['liquid', 'organic'] as const).map(t => (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         {(['liquid', 'organic', 'tech'] as const).map(t => (
                            <button key={t} onClick={() => setWaveType(t)} className={`py-4 text-[10px] font-black uppercase rounded-xl border transition-all ${waveType === t ? 'bg-accent text-black border-accent' : 'bg-black/40 text-text-dim border-white/10'}`}>
                              {t}
                            </button>
                          ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-8 pt-8 border-t border-white/5 grid grid-cols-1 md:grid-cols-3 gap-10">
+                    <div className="space-y-4">
+                      <label className="text-[10px] font-black uppercase tracking-[2px] text-white/40 block">Couleur de la Vague</label>
+                      <div className="flex items-center gap-4">
+                        <input 
+                          type="color" 
+                          value={waveColor.startsWith('#') ? waveColor : '#00FF94'}
+                          onChange={(e) => setWaveColor(e.target.value)}
+                          className="w-12 h-12 rounded-xl bg-transparent cursor-pointer border-none p-0"
+                        />
+                        <div className="flex-1 flex gap-2">
+                          {['text-accent', 'text-accent-blue', 'text-accent-purple'].map(c => (
+                            <button 
+                              key={c}
+                              onClick={() => setWaveColor(c)}
+                              className={`w-8 h-8 rounded-lg border transition-all ${waveColor === c ? 'border-white scale-110 shadow-[0_0_10px_currentColor]' : 'border-white/10 opacity-60 hover:opacity-100'}`}
+                              style={{ 
+                                backgroundColor: c === 'text-accent' ? '#00FF94' : 
+                                               c === 'text-accent-blue' ? '#00D1FF' : 
+                                               '#BF7AF0',
+                                color: c === 'text-accent' ? '#00FF94' : 
+                                       c === 'text-accent-blue' ? '#00D1FF' : 
+                                       '#BF7AF0'
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-black uppercase tracking-[2px] text-white/40 block">Opacité Vague</label>
+                        <span className="text-[10px] font-mono text-accent">{Math.round(waveOpacity * 100)}%</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.05" 
+                        value={waveOpacity} 
+                        onChange={(e) => setWaveOpacity(parseFloat(e.target.value))} 
+                        className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent" 
+                      />
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-black uppercase tracking-[2px] text-white/40 block">Opacité Background</label>
+                        <span className="text-[10px] font-mono text-accent">{Math.round(headerBgOpacity * 100)}%</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.05" 
+                        value={headerBgOpacity} 
+                        onChange={(e) => setHeaderBgOpacity(parseFloat(e.target.value))} 
+                        className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-8 pt-8 border-t border-white/5 space-y-6">
+                    <label className="text-[10px] font-black uppercase tracking-[2px] text-white/40 block">Colorimétrie du Header</label>
+                    <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-3">
+                         <input 
+                            type="color" 
+                            value={headerBgColor}
+                            onChange={(e) => setHeaderBgColor(e.target.value)}
+                            className="w-10 h-10 rounded-lg bg-transparent cursor-pointer border-none p-0"
+                         />
+                         <span className="text-[10px] font-mono text-white/60">{headerBgColor.toUpperCase()}</span>
+                      </div>
+                      <div className="flex-1 border-l border-white/10 pl-6 flex gap-2">
+                        {['#000000', '#0F172A', '#1E1B4B', '#111827'].map(c => (
+                          <button 
+                            key={c}
+                            onClick={() => setHeaderBgColor(c)}
+                            className={`w-8 h-8 rounded-lg border transition-all ${headerBgColor === c ? 'border-accent scale-110' : 'border-white/10 opacity-60 hover:opacity-100'}`}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -2497,18 +4660,259 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                        <Palette size={20} />
                     </div>
                     <div>
-                      <h3 className="text-base font-black uppercase tracking-wider text-white leading-tight">Palette Chromatique</h3>
+                      <h3 className="text-base font-black uppercase tracking-wider text-white leading-tight">Palette Chromatique Interface</h3>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                      <div className="space-y-3">
                         <label className="text-[9px] font-black uppercase tracking-wide text-white/40">Navigation Accent</label>
-                        <input type="color" value={navActiveColor} onChange={(e) => setNavActiveColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent" />
+                        <input type="color" value={navActiveColor} onChange={(e) => setNavActiveColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
                         <label className="text-[9px] font-black uppercase tracking-wide text-white/40">Title Accent</label>
-                        <input type="color" value={missionTitleColor} onChange={(e) => setMissionTitleColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent" />
+                        <input type="color" value={missionTitleColor} onChange={(e) => setMissionTitleColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
+                     <div className="space-y-3">
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent">Principal (Accent)</label>
+                        <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
+                     </div>
+                     <div className="space-y-3">
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-blue">Accent Bleu</label>
+                        <input type="color" value={accentBlueColor} onChange={(e) => setAccentBlueColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
+                     </div>
+                     <div className="space-y-3">
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-purple">Accent Violet</label>
+                        <input type="color" value={accentPurpleColor} onChange={(e) => setAccentPurpleColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
+                     </div>
+                     <div className="space-y-3">
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-orange">Accent Orange</label>
+                        <input type="color" value={accentOrangeColor} onChange={(e) => setAccentOrangeColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
+                     </div>
+                     <div className="space-y-3">
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-pink">Accent Rose</label>
+                        <input type="color" value={accentPinkColor} onChange={(e) => setAccentPinkColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
+                     </div>
+                     <div className="space-y-3">
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-red">Accent Rouge</label>
+                        <input type="color" value={accentRedColor} onChange={(e) => setAccentRedColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
+                     </div>
+                     <div className="space-y-3">
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-yellow">Accent Jaune</label>
+                        <input type="color" value={accentYellowColor} onChange={(e) => setAccentYellowColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
+                     </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {systemSubTab === 'display' && (
+            <motion.div
+              key="display"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-8"
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Compact View Configuration */}
+                <div className="p-8 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-12 h-12 bg-accent/10 flex items-center justify-center text-accent border border-accent/20 rounded-xl">
+                       <Columns size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black uppercase tracking-wider text-white leading-tight">Colonnes Masquées : Vue Compacte</h3>
+                      <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest mt-1 opacity-60">Sélectionnez les colonnes à masquer dans ce mode</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { id: 'missionNo', label: 'ID.Ref' },
+                      { id: 'refId', label: 'Reference' },
+                      { id: 'imageUrl', label: 'Capture' },
+                      { id: 'product', label: 'Product Name' },
+                      { id: 'color', label: 'Variant' },
+                      { id: 'argumentType', label: 'Arg.' },
+                      { id: 'univers', label: 'Universe' },
+                      { id: 'format', label: 'Dimen.' },
+                      { id: 'position', label: 'Orient.' },
+                      { id: 'support', label: 'Support Cat.' },
+                      { id: 'priority', label: 'Priority' },
+                      { id: 'deadline', label: 'Date Deadline' },
+                      { id: 'info', label: 'Consignes' },
+                      { id: 'rating', label: 'Note' },
+                      { id: 'status', label: 'Machine.State' },
+                      { id: 'progress', label: 'Progression %' },
+                      { id: 'photoCountRequested', label: 'Requise(s)' },
+                      { id: 'photoCountDelivered', label: 'Livrée(s)' },
+                      { id: 'ficha', label: 'Dossier' }
+                    ].map(col => {
+                      const isHidden = compactHiddenColumns.includes(col.id);
+                      return (
+                        <button
+                          key={`compact-${col.id}`}
+                          onClick={() => {
+                            setCompactHiddenColumns(prev => 
+                              isHidden ? prev.filter(id => id !== col.id) : [...prev, col.id]
+                            );
+                          }}
+                          className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${isHidden ? 'bg-accent/10 border-accent/30 text-accent' : 'bg-black/20 border-white/5 text-white/40 hover:border-white/20'}`}
+                        >
+                          <div className={`w-3 h-3 rounded-sm border flex items-center justify-center ${isHidden ? 'bg-accent border-accent text-black' : 'border-white/20'}`}>
+                            {isHidden && <Check size={8} strokeWidth={4} />}
+                          </div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider">{col.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Minimal View Configuration */}
+                <div className="p-8 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-12 h-12 bg-accent-purple/10 flex items-center justify-center text-accent-purple border border-accent-purple/20 rounded-xl">
+                       <ChevronsLeft size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black uppercase tracking-wider text-white leading-tight">Colonnes Masquées : Tout Rétracter</h3>
+                      <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest mt-1 opacity-60">Sélectionnez les colonnes à masquer dans ce mode</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { id: 'missionNo', label: 'ID.Ref' },
+                      { id: 'refId', label: 'Reference' },
+                      { id: 'imageUrl', label: 'Capture' },
+                      { id: 'product', label: 'Product Name' },
+                      { id: 'color', label: 'Variant' },
+                      { id: 'argumentType', label: 'Arg.' },
+                      { id: 'univers', label: 'Universe' },
+                      { id: 'format', label: 'Dimen.' },
+                      { id: 'position', label: 'Orient.' },
+                      { id: 'support', label: 'Support Cat.' },
+                      { id: 'priority', label: 'Priority' },
+                      { id: 'deadline', label: 'Date Deadline' },
+                      { id: 'info', label: 'Consignes' },
+                      { id: 'rating', label: 'Note' },
+                      { id: 'status', label: 'Machine.State' },
+                      { id: 'progress', label: 'Progression %' },
+                      { id: 'photoCountRequested', label: 'Requise(s)' },
+                      { id: 'photoCountDelivered', label: 'Livrée(s)' },
+                      { id: 'ficha', label: 'Dossier' }
+                    ].map(col => {
+                      const isHidden = minimalHiddenColumns.includes(col.id);
+                      return (
+                        <button
+                          key={`minimal-${col.id}`}
+                          onClick={() => {
+                            setMinimalHiddenColumns(prev => 
+                              isHidden ? prev.filter(id => id !== col.id) : [...prev, col.id]
+                            );
+                          }}
+                          className={`flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${isHidden ? 'bg-accent-purple/10 border-accent-purple/30 text-accent-purple' : 'bg-black/20 border-white/5 text-white/40 hover:border-white/20'}`}
+                        >
+                          <div className={`w-3 h-3 rounded-sm border flex items-center justify-center ${isHidden ? 'bg-accent-purple border-accent-purple text-black' : 'border-white/20'}`}>
+                            {isHidden && <Check size={8} strokeWidth={4} />}
+                          </div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider">{col.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-8 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 bg-accent-yellow/10 flex items-center justify-center text-accent-yellow border border-accent-yellow/20 rounded-xl">
+                     <Clock size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black uppercase tracking-wider text-white leading-tight">Gestion des Alertes Deadline</h3>
+                    <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest mt-1 opacity-60">Configurer le seuil d'alerte pour les échéances</p>
+                  </div>
+                </div>
+                
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+                    <div>
+                      <p className="text-xs font-bold text-white uppercase tracking-wider">Configuration de la Deadline Globale</p>
+                      <p className="text-[10px] text-text-dim mt-1">Choisir le jour pour la Deadline par défaut de toutes les missions</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input 
+                        type="date"
+                        value={globalDeadline}
+                        onChange={(e) => setGlobalDeadline(e.target.value)}
+                        className="bg-black/40 border border-white/10 rounded-lg text-xs p-2 text-white outline-none focus:border-accent transition-all font-mono"
+                      />
+                      <button 
+                        onClick={() => {
+                          if (!globalDeadline) return;
+                          setMissions(prev => prev.map(m => ({ ...m, deadline: globalDeadline })));
+                          setSecondaryMissions(prev => prev.map(m => ({ ...m, deadline: globalDeadline })));
+                          saveToLocalStorage();
+                          setToast({ show: true, message: 'Deadline appliquée à toutes les missions !', type: 'task' });
+                          setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+                        }}
+                        disabled={!globalDeadline}
+                        className="px-4 py-2 bg-accent text-black text-[10px] font-black uppercase rounded hover:bg-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Appliquer à tout
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+                    <div>
+                      <p className="text-xs font-bold text-white uppercase tracking-wider">Seuil d'Alerte Personnalisable</p>
+                      <p className="text-[10px] text-text-dim mt-1">Régler le nombre de jours avant alerte (Indication en rouge)</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={() => setDeadlineAlertThreshold(Math.max(0, deadlineAlertThreshold - 1))}
+                        className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-all font-mono text-xl"
+                      >
+                        -
+                      </button>
+                      <div className="flex flex-col items-center justify-center min-w-[60px]">
+                        <span className="text-2xl font-black text-accent-yellow font-mono">{deadlineAlertThreshold}</span>
+                        <span className="text-[8px] text-text-dim uppercase font-bold tracking-tighter">jours</span>
+                      </div>
+                      <button 
+                        onClick={() => setDeadlineAlertThreshold(deadlineAlertThreshold + 1)}
+                        className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white hover:bg-white/10 transition-all font-mono text-xl"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 px-1">
+                     <div className={`p-2 rounded-lg ${deadlineAlertThreshold > 0 ? 'bg-accent-yellow/10 text-accent-yellow' : 'bg-white/5 text-white/20'}`}>
+                       <AlertTriangle size={16} />
+                     </div>
+                     <p className="text-[10px] text-text-dim leading-relaxed">
+                       L'icône <span className="text-accent-yellow font-bold">⚠️</span> apparaîtra sur les missions non terminées dont la date d'échéance est inférieure ou égale à <span className="text-white font-bold">{deadlineAlertThreshold} jours</span> par rapport à aujourd'hui.
+                     </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-8 bg-blue-500/5 border border-blue-500/20 rounded-2xl">
+                <div className="flex items-start gap-4">
+                  <div className="p-2 bg-blue-500/20 rounded text-blue-500 flex-shrink-0">
+                    <Info size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-white mb-2">Comportement des Presets</h4>
+                    <p className="text-[11px] text-text-dim leading-relaxed">
+                      Les colonnes sélectionnées ici seront automatiquement masquées lorsque vous basculerez sur les modes <span className="text-accent underline decoration-accent/30 font-bold">Vue Compacte</span> ou <span className="text-accent-purple underline decoration-accent-purple/30 font-bold">Tout Rétracter</span>. 
+                      Vous pouvez toujours les réafficher manuellement depuis le tableau, mais ces réglages servent de base pour chaque mode.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -2540,48 +4944,218 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <textarea 
                         value={systemDataJson}
                         onChange={(e) => setSystemDataJson(e.target.value)}
-                        placeholder="Coller le flux JSON pour restauration immédiate..."
+                        placeholder="Coller le flux JSON ou charger un fichier pour restauration immédiate..."
                         className="w-full h-48 bg-black/80 border border-white/10 p-6 rounded-2xl text-xs text-accent-blue font-mono outline-none focus:border-accent-blue transition-all resize-none shadow-inner custom-scrollbar"
                       />
                    </div>
 
-                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                       <button 
-                        onClick={exportSystemData}
-                        className="py-5 bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-[3px] text-white hover:bg-white/10 transition-all rounded-2xl flex items-center justify-center gap-3"
+                        onClick={copySystemJson}
+                        className="py-4 bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-[2px] text-white hover:bg-white/10 transition-all rounded-xl flex items-center justify-center gap-3"
+                        title="Copier le flux JSON dans le presse-papier"
                       >
-                        <Copy size={16} /> Exporter JSON
+                        <Copy size={14} /> Copier JSON
                       </button>
+
                       <button 
-                         onClick={downloadFullExport}
-                         className="py-5 bg-accent-blue/10 border border-accent-blue/20 text-[9px] font-black uppercase tracking-[3px] text-accent-blue hover:bg-accent-blue hover:text-black transition-all rounded-2xl flex items-center justify-center gap-3"
+                         onClick={downloadSystemJson}
+                         className="py-4 bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-[2px] text-white hover:bg-white/10 transition-all rounded-xl flex items-center justify-center gap-3"
+                         title="Exporter la sauvegarde en fichier .json"
                       >
-                         <Download size={16} /> Rapport Complet
+                         <FileJson size={14} /> Exporter .JSON
                       </button>
+
+                      <button 
+                        onClick={() => jsonFileInputRef.current?.click()}
+                        className="py-4 bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-[2px] text-white hover:bg-white/10 transition-all rounded-xl flex items-center justify-center gap-3"
+                        title="Charger un fichier de sauvegarde .json"
+                      >
+                        <Upload size={14} /> Charger JSON
+                        <input 
+                          type="file"
+                          ref={jsonFileInputRef}
+                          onChange={handleJsonFileUpload}
+                          className="hidden"
+                          accept=".json"
+                        />
+                      </button>
+
                       <button 
                         onClick={importSystemData}
                         disabled={!systemDataJson.trim()}
-                        className="py-5 bg-accent/10 border border-accent/20 text-[9px] font-black uppercase tracking-[3px] text-accent hover:bg-accent hover:text-black transition-all rounded-2xl flex items-center justify-center gap-3 disabled:opacity-20"
+                        className="py-4 bg-accent/10 border border-accent/20 text-[9px] font-black uppercase tracking-[2px] text-accent hover:bg-accent hover:text-black transition-all rounded-xl flex items-center justify-center gap-3 disabled:opacity-20 shadow-[0_0_20px_rgba(0,255,148,0.1)]"
+                        title="Appliquer les données présentes dans l'éditeur"
                       >
-                        <Zap size={16} /> Importer le Flux
+                        <Zap size={14} /> Importer
                       </button>
+
+                      <button 
+                         onClick={downloadFullExport}
+                         className="py-4 bg-accent-blue/10 border border-accent-blue/20 text-[9px] font-black uppercase tracking-[2px] text-accent-blue hover:bg-accent-blue hover:text-black transition-all rounded-xl flex items-center justify-center gap-3"
+                         title="Générer un rapport Excel complet"
+                      >
+                         <FileSpreadsheet size={14} /> Rapport Excel
+                      </button>
+
                       <button 
                          onClick={resetJournal}
-                         className="py-5 bg-red-500/10 border border-red-500/20 text-[9px] font-black uppercase tracking-[3px] text-red-500 hover:bg-red-500 hover:text-white transition-all rounded-2xl flex items-center justify-center gap-3"
+                         className="py-4 bg-red-500/10 border border-red-500/20 text-[9px] font-black uppercase tracking-[2px] text-red-500 hover:bg-red-500 hover:text-white transition-all rounded-xl flex items-center justify-center gap-3"
+                         title="Réinitialiser l'historique global"
                       >
-                         <RotateCcw size={16} /> Reset Journal
+                         <RotateCcw size={14} /> Reset Journal
                       </button>
                    </div>
                 </div>
               </div>
 
+              {/* Auto Export Configuration */}
+              <div className="p-10 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl relative overflow-hidden group">
+                <div className="flex items-center gap-5 mb-10">
+                   <div className="w-14 h-14 bg-accent-purple/10 flex items-center justify-center text-accent-purple border border-accent-purple/20 rounded-2xl shadow-lg">
+                      <Clock size={24} />
+                   </div>
+                   <div>
+                     <h3 className="text-xl font-black uppercase tracking-wider text-white leading-tight">Exportation Silencieuse</h3>
+                     <p className="text-[11px] text-text-dim uppercase font-bold tracking-[3px] mt-1">Automatisation de Sauvegarde Excel</p>
+                   </div>
+                </div>
+
+                <div className="space-y-8">
+                  {/* Periodic Export */}
+                  <div className="p-6 bg-black/20 border border-white/5 rounded-2xl space-y-6">
+                    <div className="flex flex-col md:flex-row items-center gap-8">
+                      <div className="flex-1 w-full space-y-4">
+                        <div className="flex items-center justify-between p-4 bg-black/40 border border-white/10 rounded-xl">
+                          <div>
+                            <h4 className="text-sm font-bold text-white mb-1">Export Périodique</h4>
+                            <p className="text-[10px] text-text-dim max-w-[250px]">Téléchargement régulier du fichier Excel en arrière-plan à la fréquence définie.</p>
+                          </div>
+                          <Toggle enabled={autoExportEnabled} onToggle={() => setAutoExportEnabled(!autoExportEnabled)} />
+                        </div>
+                      </div>
+
+                      <div className="flex-1 w-full space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2">
+                           <Activity size={10} /> Fréquence (Minutes)
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <input 
+                            type="range"
+                            min="1"
+                            max="120"
+                            step="1"
+                            value={autoExportInterval}
+                            onChange={(e) => setAutoExportInterval(parseInt(e.target.value))}
+                            disabled={!autoExportEnabled}
+                            className="w-full form-range accent-accent-purple"
+                          />
+                          <span className={`text-xl font-black uppercase tracking-widest ${autoExportEnabled ? 'text-accent-purple' : 'text-text-dim'} min-w-[60px] text-right`}>
+                            {autoExportInterval}m
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Scheduled Export */}
+                  <div className="p-6 bg-black/20 border border-white/5 rounded-2xl space-y-6">
+                    <div className="flex flex-col md:flex-row items-center gap-8">
+                      <div className="flex-1 w-full space-y-4">
+                        <div className="flex items-center justify-between p-4 bg-black/40 border border-white/10 rounded-xl">
+                          <div>
+                            <h4 className="text-sm font-bold text-white mb-1">Export Planifié</h4>
+                            <p className="text-[10px] text-text-dim max-w-[250px]">Téléchargement programmé un jour précis de la semaine à une heure donnée.</p>
+                          </div>
+                          <Toggle enabled={scheduledExportEnabled} onToggle={() => setScheduledExportEnabled(!scheduledExportEnabled)} />
+                        </div>
+                      </div>
+
+                      <div className="flex-1 w-full space-y-4 flex flex-col md:flex-row gap-4">
+                        <div className="flex-[2_2_0%]">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2 mb-2">
+                             <Calendar size={10} /> Jours de la semaine
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              { value: '1', label: 'Lun' },
+                              { value: '2', label: 'Mar' },
+                              { value: '3', label: 'Mer' },
+                              { value: '4', label: 'Jeu' },
+                              { value: '5', label: 'Ven' },
+                              { value: '6', label: 'Sam' },
+                              { value: '0', label: 'Dim' }
+                            ].map(day => (
+                              <button
+                                key={day.value}
+                                onClick={() => {
+                                  if (scheduledExportDays.includes(day.value)) {
+                                    setScheduledExportDays(scheduledExportDays.filter(d => d !== day.value));
+                                  } else {
+                                    setScheduledExportDays([...scheduledExportDays, day.value]);
+                                  }
+                                }}
+                                disabled={!scheduledExportEnabled}
+                                className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${
+                                  scheduledExportDays.includes(day.value) && scheduledExportEnabled
+                                    ? 'bg-accent-purple text-white'
+                                    : 'bg-black/40 text-text-dim border border-white/10'
+                                } ${!scheduledExportEnabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-accent-purple/50'}`}
+                              >
+                                {day.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2 mb-2">
+                             <Clock size={10} /> Heure
+                          </label>
+                          <input
+                            type="time"
+                            value={scheduledExportTime}
+                            onChange={(e) => setScheduledExportTime(e.target.value)}
+                            disabled={!scheduledExportEnabled}
+                            className={`w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm font-bold tracking-wider outline-none focus:border-accent-purple/50 transition-colors ${scheduledExportEnabled ? 'text-white' : 'text-text-dim'} [color-scheme:dark]`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Categories */}
+              <div className="flex items-center justify-between mt-8 mb-4">
+                <h3 className="text-xl font-black uppercase tracking-wider text-white">Éditeur de Catégories</h3>
+                <button 
+                  onClick={() => {
+                    const editorIds = categories.map(c => `editor-${c.id}`);
+                    const allCollapsed = editorIds.every(id => collapsedSettingsSections.includes(id));
+                    if (allCollapsed) {
+                      setCollapsedSettingsSections(prev => prev.filter(id => !editorIds.includes(id)));
+                    } else {
+                      setCollapsedSettingsSections(prev => [...new Set([...prev, ...editorIds])]);
+                    }
+                  }}
+                  className="text-[10px] font-black uppercase tracking-[2px] text-accent hover:text-white transition-colors flex items-center gap-2 bg-accent/10 hover:bg-accent/20 px-3 py-1.5 rounded-md"
+                >
+                  {categories.map(c => `editor-${c.id}`).every(id => collapsedSettingsSections.includes(id)) ? 'Tout Développer' : 'Tout Rétracter'}
+                </button>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                 {categories.map((cat) => (
-                  <div key={cat.id} className="p-8 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl h-fit">
+                  <div key={cat.id} className="bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl h-fit overflow-hidden">
                     <CategoryEditor 
                       category={cat} 
                       onUpdate={(updates) => updateCategory(cat.id, updates)}
+                      isCollapsed={collapsedSettingsSections.includes(`editor-${cat.id}`)}
+                      onToggle={() => setCollapsedSettingsSections(prev => 
+                        prev.includes(`editor-${cat.id}`)
+                          ? prev.filter(id => id !== `editor-${cat.id}`)
+                          : [...prev, `editor-${cat.id}`]
+                      )}
                     />
                   </div>
                 ))}
@@ -2621,6 +5195,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           </div>
         </div>
         <div className="flex items-center gap-4 px-5 py-2 bg-black/60 border border-white/5 rounded-sm">
+           <div className="flex items-center gap-2 mr-4 bg-white/5 px-3 py-1.5 rounded-lg border border-white/10 group">
+              <span className="text-[9px] font-black text-white/40 uppercase tracking-[2px] group-hover:text-accent transition-colors">Exposer Missions Secondaires</span>
+              <Toggle enabled={showSecondaryInReport} onToggle={() => setShowSecondaryInReport(!showSecondaryInReport)} />
+           </div>
+
            <div className="flex flex-col items-end mr-4">
              <span className="text-[8px] font-black text-white/40 uppercase tracking-[2px]">Log Latency</span>
              <span className="text-[10px] font-mono text-accent">0.002ms</span>
@@ -2647,66 +5226,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         </div>
       </div>
       
-      <div className="h-[450px] overflow-y-auto p-4 flex flex-col gap-1 custom-scrollbar bg-[rgba(10,10,10,0.4)] relative">
-        {/* Subtle grid overlay */}
-        <div className="absolute inset-0 pointer-events-none opacity-[0.03] bg-[linear-gradient(to_right,#888_1px,transparent_1px),linear-gradient(to_bottom,#888_1px,transparent_1px)] bg-[size:40px_40px]" />
-        
-        {globalLogs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full opacity-20 gap-6 py-20">
-            <Loader2 size={48} className="animate-spin text-accent" />
-            <p className="uppercase tracking-[10px] text-[10px] font-black text-white">Initializing Télémétrie System.log...</p>
-          </div>
-        ) : (
-          <div className="space-y-1 relative z-10">
-            {globalLogs.map((log) => (
-              <motion.div 
-                key={log.id}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                className={`flex gap-4 p-3 border-b border-white/[0.03] hover:bg-white/[0.02] group transition-colors cursor-default`}
-              >
-                <div className="flex flex-col items-center pt-0.5 min-w-[85px]">
-                  <span className="text-[9px] font-mono text-white/60 mb-0.5">
-                    {new Date(log.timestamp).toLocaleDateString()}
-                  </span>
-                  <span className="text-[10px] font-mono text-white/40 group-hover:text-white transition-colors">
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-2 flex-1">
-                  <div className="flex items-center gap-3">
-                    <span className={`text-[8px] font-black uppercase tracking-[2px] px-2 py-0.5 border ${
-                      log.type === 'manual' ? 'bg-accent/10 border-accent/20 text-accent' : 
-                      log.type === 'instruction' ? 'bg-accent-purple/10 border-accent-purple/20 text-accent-purple' :
-                      log.type === 'mission' ? 'bg-accent-blue/10 border-accent-blue/20 text-accent-blue' : 
-                      'bg-white/5 border-white/10 text-white/60'
-                    }`}>
-                      {log.type === 'instruction' ? 'instruction' : log.type}
-                    </span>
-                    <div className="h-[1px] flex-1 bg-white/[0.05]" />
-                  </div>
-                  <p className={`text-[13px] font-medium leading-relaxed tracking-wide ${
-                    log.type === 'manual' ? 'text-accent shadow-[0_0_10px_rgba(0,255,148,0.1)]' : 
-                    log.type === 'instruction' ? 'text-accent-purple font-bold' :
-                    log.type === 'mission' ? 'text-[#00D1FF]' : 
-                    'text-white'
-                  }`}>
-                    {log.message}
-                  </p>
-                </div>
-                
-                <div className="opacity-0 group-hover:opacity-10 transition-opacity">
-                  <span className="text-[9px] font-mono text-white uppercase">ID:{log.id}</span>
-                </div>
-              </motion.div>
-            ))}
-            <div ref={logEndRef} />
-          </div>
-        )}
-      </div>
-
-      <div className="p-6 border-t border-white/10 bg-black/60 relative">
+      <div className="px-6 py-4 border-b border-white/10 bg-black/40">
+        <div className="flex flex-col gap-2 mb-4">
+           <h4 className="text-[10px] font-black uppercase tracking-[3px] text-accent flex items-center gap-2">
+             <BookOpen size={12} />
+             Manuel d'opérations
+           </h4>
+        </div>
         <div className="flex gap-4 items-center">
           <div className="flex-1 relative group">
             <div className="absolute left-4 top-1/2 -translate-y-1/2 text-accent/40 group-focus-within:text-accent transition-colors">
@@ -2717,8 +5243,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               value={manualLog}
               onChange={(e) => setManualLog(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addManualLog()}
-              placeholder="Saisir rapport manuel d'opération (Enter pour valider)..."
-              className="w-full bg-black/40 border border-white/10 pl-12 pr-4 py-4 rounded text-[13px] text-white placeholder:text-white/20 outline-none focus:border-accent/40 hover:bg-black/60 transition-all font-mono"
+              placeholder="Saisir rapport manuel d'opération (Manuel d'opérations)..."
+              className="w-full bg-black/20 border border-white/10 pl-12 pr-4 py-4 rounded text-[13px] text-white placeholder:text-white/20 outline-none focus:border-accent/40 hover:bg-black/60 transition-all font-mono"
             />
           </div>
           <button 
@@ -2728,6 +5254,166 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           >
             EXECUTE
           </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-6 p-6 min-h-[600px]">
+        {/* Left column: Logs */}
+        <div className="flex flex-col bg-black/40 border border-white/5 rounded-xl overflow-hidden shadow-inner">
+          <div className="px-5 py-3 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-black uppercase tracking-[3px] text-text-dim">Flux Télémétrie / Temps Réel</span>
+              <button 
+                onClick={handleLiveRefresh}
+                className={`flex items-center gap-2 px-2 py-0.5 rounded border border-white/10 bg-white/5 transition-all hover:bg-white/10 group ${isRefreshing ? 'opacity-50' : ''}`}
+                title="Actualiser le flux"
+              >
+                <RefreshCw size={10} className={`text-accent ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                <span className="text-[8px] font-bold text-white/40 uppercase tracking-tighter">Live Refresh</span>
+              </button>
+            </div>
+            <span className="text-[10px] font-mono text-accent animate-pulse">{globalLogs.length} LOGS</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-1 custom-scrollbar relative">
+            {/* Subtle grid overlay */}
+            <div className="absolute inset-0 pointer-events-none opacity-[0.03] bg-[linear-gradient(to_right,#888_1px,transparent_1px),linear-gradient(to_bottom,#888_1px,transparent_1px)] bg-[size:40px_40px]" />
+            
+            {globalLogs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full opacity-20 gap-6 py-20">
+                <Loader2 size={48} className="animate-spin text-accent" />
+                <p className="uppercase tracking-[10px] text-[10px] font-black text-white">Initializing Télémétrie System.log...</p>
+              </div>
+            ) : (
+              <div className="space-y-1 relative z-10">
+                {globalLogs.slice().reverse().map((log) => (
+                  <motion.div 
+                    key={log.id}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex gap-4 p-3 border-b border-white/[0.03] hover:bg-white/[0.02] group transition-colors cursor-default"
+                  >
+                    <div className="flex flex-col items-center pt-0.5 min-w-[85px]">
+                      <span className="text-[9px] font-mono text-white/60 mb-0.5">
+                        {new Date(log.timestamp).toLocaleDateString()}
+                      </span>
+                      <span className="text-[10px] font-mono text-white/40 group-hover:text-white transition-colors">
+                        {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-2 flex-1">
+                      <div className="flex items-center gap-3">
+                        <span className={`text-[8px] font-black uppercase tracking-[2px] px-2 py-0.5 border ${
+                          log.type === 'manual' ? 'bg-accent/10 border-accent/20 text-accent' : 
+                          log.type === 'instruction' ? 'bg-accent-purple/10 border-accent-purple/20 text-accent-purple' :
+                          log.type === 'mission' ? 'bg-accent-blue/10 border-accent-blue/20 text-accent-blue' : 
+                          'bg-white/5 border-white/10 text-white/60'
+                        }`}>
+                          {log.type === 'instruction' ? 'instruction' : log.type}
+                        </span>
+                        <div className="h-[1px] flex-1 bg-white/[0.05]" />
+                      </div>
+                      <p className={`text-[12px] font-medium leading-relaxed tracking-wide ${
+                        log.type === 'manual' ? 'text-accent shadow-[0_0_10px_rgba(0,255,148,0.1)]' : 
+                        log.type === 'instruction' ? 'text-accent-purple font-bold' :
+                        log.type === 'mission' ? 'text-[#00D1FF]' : 
+                        'text-white'
+                      }`}>
+                        {log.message}
+                      </p>
+                    </div>
+
+                    <button 
+                      onClick={() => deleteLog(log.id)}
+                      className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/10 text-white/20 hover:text-red-500 transition-all rounded-lg shrink-0 self-center"
+                      title="Supprimer ce log"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right column: Pilotage Center */}
+        <div className="bg-black/20 border border-white/5 rounded-xl flex flex-col overflow-hidden">
+          <div className="px-5 py-4 border-b border-white/5 bg-accent/5 flex items-center gap-3 shrink-0">
+             <div className="p-2 bg-accent/10 rounded-lg text-accent">
+                <Target size={18} />
+             </div>
+             <div>
+                <h4 className="text-xs font-black uppercase tracking-[3px] text-white">Central Pilotage</h4>
+                <p className="text-[8px] font-mono text-accent/60 uppercase tracking-widest mt-0.5">Quick Actions // Mission Override</p>
+             </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+            {missions.filter(m => m.enabled).length === 0 ? (
+               <div className="h-40 flex flex-col items-center justify-center border border-dashed border-white/10 rounded-xl opacity-20">
+                  <Package size={32} />
+                  <p className="text-[9px] font-black uppercase mt-4">Aucune mission active</p>
+               </div>
+            ) : (
+              missions.filter(m => m.enabled).map((m) => (
+                <div key={m.id} className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-4 hover:border-accent/30 transition-all group">
+                   <div className="flex justify-between items-start">
+                      <div className="flex flex-col">
+                         <span className="text-[10px] font-mono text-accent-blue font-bold">#{m.missionNo} — [{m.refId}]</span>
+                         <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold text-white mt-1 group-hover:text-accent transition-colors truncate max-w-[170px] text-left uppercase">{m.product}</span>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
+                              className="opacity-0 group-hover:opacity-100 p-1 text-text-dim hover:text-red-500 transition-all flex h-6 w-6 items-center justify-center rounded-lg hover:bg-red-500/10"
+                              title="Supprimer"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                         </div>
+                      </div>
+                      <InteractiveStarRating 
+                        rating={m.rating} 
+                        onRatingChange={(val) => updateMission(m.id, { rating: val })} 
+                        size={14}
+                      />
+                   </div>
+
+                   <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                         <label className="text-[8px] font-black uppercase tracking-widest text-text-dim">Statut</label>
+                         <select 
+                           value={m.status}
+                           onChange={(e) => updateMission(m.id, { status: e.target.value })}
+                           className="w-full bg-black border border-white/10 rounded px-2 py-1.5 text-[9px] text-white uppercase font-bold outline-none focus:border-accent appearance-none cursor-pointer"
+                         >
+                            {categories.find(c => c.id === 'status')?.items.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                         </select>
+                      </div>
+                      <div className="space-y-1">
+                         <label className="text-[8px] font-black uppercase tracking-widest text-text-dim flex justify-between">
+                            <span>Progress</span>
+                            <span className="text-accent">{m.progress}%</span>
+                         </label>
+                         <input 
+                           type="range"
+                           min="0"
+                           max="100"
+                           step="5"
+                           value={m.progress}
+                           onChange={(e) => updateMission(m.id, { progress: parseInt(e.target.value) })}
+                           className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
+                         />
+                      </div>
+                   </div>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="p-4 border-t border-white/5 bg-black/40 text-center">
+             <span className="text-[8px] font-mono text-white/30 uppercase tracking-[4px]">System Integrity: Confirmed</span>
+          </div>
         </div>
       </div>
     </div>
@@ -2765,6 +5451,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         let progress = m.progress;
         switch (newStatus) {
           case 'livré': progress = 100; break;
+          case 'En post-production': progress = 85; break;
           case 'déja shooter': progress = 75; break;
           case 'en cour de shoot': progress = 50; break;
           case 'produit preparé': progress = 25; break;
@@ -2848,9 +5535,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
   const renderFilterChips = (label: string, selected: string[], setSelected: (val: any) => void) => {
     if (selected.length === 0) return null;
-    return selected.map(val => (
+    return selected.map((val, idx) => (
       <motion.div 
-        key={`${label}-${val}`}
+        key={`${label}-${val}-${idx}`}
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         className="flex items-center gap-1.5 px-2 py-1 bg-white/5 border border-white/10 rounded text-[9px] text-white hover:border-white/30 transition-all group"
@@ -2868,6 +5555,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   };
 
   const filteredMissions = missions.filter(m => {
+    const isDup = isDuplicate(m);
+    const matchesDuplicates = !filterDuplicates || !isDup;
+    
     const matchesQuery = m.product.toLowerCase().includes(filterQuery.toLowerCase()) || 
                          m.info.toLowerCase().includes(filterQuery.toLowerCase()) ||
                          m.refId.toLowerCase().includes(filterQuery.toLowerCase()) ||
@@ -2883,6 +5573,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       (filterEnabled.includes('Actif') && m.enabled) ||
       (filterEnabled.includes('Inactif') && !m.enabled)
     );
+
+    const matchesDeadlineAlert = !filterDeadlineAlert || (isDeadlineApproaching(m.deadline) && m.status !== 'livré');
     
     const matchesDate = (() => {
       if (!filterDateStart && !filterDateEnd) return true;
@@ -2910,8 +5602,25 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       return missionDateNum >= start && missionDateNum <= end;
     })();
 
-    return matchesQuery && matchesStatus && matchesProduct && matchesUniverse && matchesSupport && matchesColor && matchesArgument && matchesPriority && matchesEnabled && matchesDate;
+    return matchesDuplicates && matchesQuery && matchesStatus && matchesProduct && matchesUniverse && matchesSupport && matchesColor && matchesArgument && matchesPriority && matchesEnabled && matchesDate && matchesDeadlineAlert;
   }).sort((a, b) => {
+    // Si le filtre d'alerte deadline est actif, on trie par échéance la plus proche en priorité
+    if (filterDeadlineAlert) {
+      const parseDateQuick = (d?: string) => {
+        if (!d || d === '-') return Infinity;
+        const parts = d.split(/[\/\-]/);
+        if (parts.length === 3) {
+          if (parts[0].length === 4) return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])).getTime();
+          return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
+        }
+        const dt = new Date(d);
+        return isNaN(dt.getTime()) ? Infinity : dt.getTime();
+      };
+      const timeA = parseDateQuick(a.deadline);
+      const timeB = parseDateQuick(b.deadline);
+      if (timeA !== timeB) return timeA - timeB;
+    }
+
     if (sortConfigs.length === 0) return 0;
 
     for (const config of sortConfigs) {
@@ -2942,6 +5651,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     
     return 0;
   });
+
+  const tabs = [
+    { id: 'table', label: 'Rapport', icon: Activity },
+    { id: 'dashboard', label: 'Monitor', icon: BarChart3 },
+    { id: 'journal', label: 'Journal', icon: Clock },
+    { id: 'system', label: 'Système', icon: Settings }
+  ];
 
   return (
     <div 
@@ -2988,19 +5704,19 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[300] flex items-center gap-4 bg-black/90 border-2 border-accent px-6 py-4 rounded-xl shadow-[0_0_30px_rgba(0,255,148,0.3)] backdrop-blur-md"
+            className={`fixed bottom-10 left-1/2 -translate-x-1/2 z-[300] flex items-center gap-4 bg-black/90 border-2 px-6 py-4 rounded-xl backdrop-blur-md ${toast.type === 'error' ? 'border-red-500 shadow-[0_0_30px_rgba(239,68,68,0.3)]' : 'border-accent shadow-[0_0_30px_rgba(0,255,148,0.3)]'}`}
           >
-            <div className={`p-2 rounded-lg ${toast.type === 'calendar' ? 'bg-accent/20 text-accent' : 'bg-accent-blue/20 text-accent-blue'}`}>
-              {toast.type === 'calendar' ? <Calendar size={20} /> : <Sparkles size={20} />}
+            <div className={`p-2 rounded-lg ${toast.type === 'error' ? 'bg-red-500/20 text-red-500' : toast.type === 'calendar' ? 'bg-accent/20 text-accent' : 'bg-accent-blue/20 text-accent-blue'}`}>
+               {toast.type === 'error' ? <AlertTriangle size={20} /> : toast.type === 'calendar' ? <Calendar size={20} /> : <Sparkles size={20} />}
             </div>
             <div className="flex flex-col">
-              <span className="text-[10px] uppercase font-black tracking-widest text-white/50">Système de Planification</span>
-              <span className="text-sm font-bold text-white">{toast.message}</span>
+              <span className="text-[10px] uppercase font-black tracking-widest text-white/50">{toast.type === 'error' ? 'Erreur de saisie' : 'Système de Notification'}</span>
+              <span className="text-sm font-bold text-white max-w-sm">{toast.message}</span>
             </div>
             <div className="w-10 h-10 border-r border-white/10 ml-2" />
-            <div className="flex items-center gap-1 text-accent font-black text-xs animate-pulse">
+            <div className={`flex items-center gap-1 font-black text-xs animate-pulse ${toast.type === 'error' ? 'text-red-500' : 'text-accent'}`}>
               <Sparkles size={14} />
-              SYNC
+              {toast.type === 'error' ? 'ERR' : 'SYNC'}
             </div>
           </motion.div>
         )}
@@ -3008,7 +5724,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       <div className="max-w-[1600px] mx-auto w-full flex-1 flex flex-col">
         
         {/* Header */}
-        <header className="px-10 py-10 flex justify-between items-center border-b border-white/5 relative overflow-hidden group bg-black/40 backdrop-blur-sm">
+        <header 
+          className="px-10 py-10 flex justify-between items-center border-b border-white/5 relative overflow-hidden group backdrop-blur-sm"
+          style={{ backgroundColor: `rgba(${parseInt(headerBgColor.slice(1,3), 16)}, ${parseInt(headerBgColor.slice(3,5), 16)}, ${parseInt(headerBgColor.slice(5,7), 16)}, ${headerBgOpacity})` }}
+        >
           {headerBgImage && (
             <div 
               className="absolute inset-0 z-0 pointer-events-none transition-opacity duration-700" 
@@ -3025,6 +5744,32 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           <div className="absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/5 to-transparent z-10"></div>
           
           <div className="title-group relative z-10 flex items-center gap-6">
+            {appLogo ? (
+              <div className="w-24 h-24 border border-white/20 p-2 bg-black/20 backdrop-blur-sm rounded-lg flex items-center justify-center group/logo relative overflow-hidden">
+                <img src={appLogo} alt="App Logo" className="max-w-full max-h-full object-contain" />
+                <div 
+                  onClick={() => {
+                    setActiveTab('system');
+                    setSystemSubTab('branding');
+                  }}
+                  className="absolute inset-0 bg-accent/20 opacity-0 group-hover/logo:opacity-100 transition-opacity cursor-pointer flex items-center justify-center"
+                  title="Changer le logo"
+                >
+                  <Settings size={16} className="text-white animate-spin-slow" />
+                </div>
+              </div>
+            ) : (
+               <div 
+                onClick={() => {
+                  setActiveTab('system');
+                  setSystemSubTab('branding');
+                }}
+                className="w-24 h-24 border-2 border-dashed border-white/10 rounded-lg flex items-center justify-center group/logo hover:border-accent/40 hover:bg-accent/5 transition-all cursor-pointer"
+                title="Ajouter un logo"
+              >
+                <div className="text-[10px] font-black uppercase tracking-widest text-white/10 group-hover/logo:text-accent/60 transition-colors">LOGO</div>
+              </div>
+            )}
             <div className="flex flex-col">
               <h1 className="font-display text-4xl leading-none uppercase tracking-[-1px] group-hover:tracking-[1px] transition-all duration-700">
                 <span style={{ color: missionTitleColor }}>MISSION</span><br /><span className="text-accent">CONTRÔLE</span>
@@ -3053,12 +5798,24 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             </div>
             
             <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className="lg:hidden w-12 h-12 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center hover:bg-accent/10 hover:border-accent hover:text-accent transition-all active:scale-95 group relative shadow-2xl"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="w-12 h-12 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center hover:bg-accent/10 hover:border-accent hover:text-accent transition-all active:scale-95 group relative shadow-2xl"
+              title={isSidebarOpen ? "Fermer le volet" : "Ouvrir le volet"}
             >
-              <Menu size={20} />
+              {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
             
+            <button 
+              onClick={googleUser ? handleGoogleLogout : handleGoogleLogin}
+              className={`h-12 px-4 border rounded-lg flex items-center justify-center transition-all active:scale-95 group relative shadow-2xl ${googleUser ? 'bg-accent/10 border-accent/30 text-accent/80' : 'bg-[#4285F4]/10 border-[#4285F4]/30 hover:border-[#4285F4] hover:bg-[#4285F4]/20 text-[#4285F4]'}`}
+              title={googleUser ? "Connecté à Google - Se déconnecter" : "Connecter Google Workspace (Drive, Calendar, etc.)"}
+            >
+              {isLoggingIn ? <Loader2 size={18} className="animate-spin" /> : googleUser ? <Check size={18} /> : <Globe size={18} />}
+              <span className="ml-2 text-xs font-bold whitespace-nowrap hidden md:inline">
+                {googleUser ? `Connecté: ${googleUser.email}` : "Connecter Workspace"}
+              </span>
+            </button>
+
             <button 
               onClick={() => setActiveTab('system')}
               className={`w-12 h-12 border rounded-lg flex items-center justify-center transition-all active:scale-95 group relative shadow-2xl ${activeTab === 'system' ? 'bg-accent border-accent text-black shadow-[0_0_20px_rgba(0,255,148,0.3)]' : 'bg-white/5 border-white/10 hover:bg-accent/10 hover:border-accent hover:text-accent'}`}
@@ -3086,9 +5843,28 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             {/* Main Input Form - Responsive Volet */}
             {activeTab !== 'system' && (
               <aside className={`
-                fixed lg:static inset-y-0 left-0 w-full max-w-[450px] bg-[#0A0A0A] border-r border-border p-10 space-y-8 overflow-y-auto custom-scrollbar z-[110] transition-transform duration-500 lg:translate-x-0
-                ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+                fixed lg:relative inset-y-0 left-0 bg-[#0A0A0A] border-r border-border space-y-8 overflow-y-auto overflow-x-hidden custom-scrollbar z-[110] transition-all duration-500 ease-in-out
+                ${isSidebarOpen ? 'w-full max-w-[450px] translate-x-0 p-10 opacity-100' : 'w-0 translate-x-[-100%] p-0 opacity-0 border-none'}
               `}>
+                <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl mb-6">
+                  <button 
+                    onClick={() => setSidebarTab('production')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sidebarTab === 'production' ? 'bg-accent text-black shadow-[0_0_15px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
+                  >
+                    <Layout size={14} />
+                    Production
+                  </button>
+                  <button 
+                    onClick={() => setSidebarTab('secondary')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sidebarTab === 'secondary' ? 'bg-accent-blue text-black shadow-[0_0_15px_rgba(0,209,255,0.3)]' : 'text-text-dim hover:text-white'}`}
+                  >
+                    <List size={14} />
+                    Secondaires
+                  </button>
+                </div>
+
+                {sidebarTab === 'production' ? (
+                  <>
                 <div className="flex items-center justify-between lg:hidden border-b border-white/5 pb-6 mb-4">
                   <span className="text-[10px] font-black uppercase text-accent tracking-[3px]">Configuration de Mission</span>
                   <button onClick={() => setIsSidebarOpen(false)} className="text-white hover:text-accent"><X size={24} /></button>
@@ -3148,8 +5924,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             
             {/* Selection Categories */}
             {categories.map((cat) => {
+              if (!cat) return null;
               const isCollapsed = collapsedCategories.includes(cat.id);
+              const isHex = cat.colorRef?.startsWith('#');
+              
               const activeColor = 
+                isHex ? 'border' :
                 cat.colorRef === 'accent' ? 'text-accent border-accent bg-accent/5 shadow-[0_0_15px_-5px_var(--color-accent)]' :
                 cat.colorRef === 'accent-blue' ? 'text-accent-blue border-accent-blue bg-accent-blue/5 shadow-[0_0_15px_-5px_var(--color-accent-blue)]' :
                 cat.colorRef === 'accent-pink' ? 'text-accent-pink border-accent-pink bg-accent-pink/5 shadow-[0_0_15px_-5px_var(--color-accent-pink)]' :
@@ -3159,7 +5939,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 cat.colorRef === 'accent-yellow' ? 'text-accent-yellow border-accent-yellow bg-accent-yellow/5 shadow-[0_0_15px_-5px_var(--color-accent-yellow)]' :
                 'text-accent border-accent bg-accent/5';
 
+              const activeStyle = isHex ? {
+                color: cat.colorRef,
+                borderColor: cat.colorRef,
+                backgroundColor: `${cat.colorRef}0A`, // approx 4% opacity
+                boxShadow: `0 0 15px -5px ${cat.colorRef}`
+              } : {};
+
               const iconColor = 
+                isHex ? '' :
                 cat.colorRef === 'accent' ? 'text-accent' :
                 cat.colorRef === 'accent-blue' ? 'text-accent-blue' :
                 cat.colorRef === 'accent-pink' ? 'text-accent-pink' :
@@ -3168,6 +5956,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 cat.colorRef === 'accent-red' ? 'text-accent-red' :
                 cat.colorRef === 'accent-yellow' ? 'text-accent-yellow' :
                 'text-accent';
+              
+              const iconStyle = isHex ? { color: cat.colorRef } : {};
 
               return (
                 <div key={cat.id} className="flex flex-col gap-3 group/cat">
@@ -3180,12 +5970,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     }}
                   >
                     <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2 group-hover:text-white transition-colors cursor-pointer">
-                      <cat.icon size={12} className={iconColor} />
+                      {cat.icon && <cat.icon size={12} className={iconColor} style={iconStyle} />}
                       {cat.name}
                     </label>
                     <motion.div
                       animate={{ rotate: isCollapsed ? -90 : 0 }}
                       className="text-text-dim/40 group-hover:text-accent transition-colors"
+                      style={!isCollapsed ? iconStyle : {}}
                     >
                       <ChevronDown size={14} />
                     </motion.div>
@@ -3211,6 +6002,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               onFocus={() => setIsProductDropdownOpen(true)}
                               placeholder="Nom du produit..."
                               className="w-full bg-card-bg border border-border p-3 pr-10 rounded-md text-white outline-none focus:border-accent transition-all text-sm focus:ring-1 focus:ring-accent/30 relative z-[161]"
+                              style={isHex ? { borderColor: `${cat.colorRef}40`, boxShadow: `0 0 0 1px ${cat.colorRef}20` } : {}}
                             />
                             <button
                               type="button"
@@ -3237,8 +6029,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     onClick={(e) => e.stopPropagation()}
                                     className="absolute top-full left-0 w-full mt-1 bg-[#1A1A1A] border border-white/10 rounded-md shadow-2xl z-[155] max-h-60 overflow-y-auto custom-scrollbar"
                                   >
-                                  {cat.items
-                                    .filter(item => item.toLowerCase().includes(selectedProduct.toLowerCase()))
+                                  {(cat.items || [])
+                                    .filter(item => item.toLowerCase().includes((selectedProduct || '').toLowerCase()))
                                     .map(item => (
                                       <button
                                         key={item}
@@ -3251,7 +6043,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                         {item}
                                       </button>
                                     ))}
-                                  {cat.items.filter(item => item.toLowerCase().includes(selectedProduct.toLowerCase())).length === 0 && (
+                                  {((cat.items || []).filter(item => item.toLowerCase().includes((selectedProduct || '').toLowerCase()))).length === 0 && (
                                     <div className="px-4 py-3 text-[10px] text-white/30 italic">Aucun résultat</div>
                                   )}
                                 </motion.div>
@@ -3272,7 +6064,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         }}
                         className={`w-full bg-card-bg border border-border p-3 rounded-md text-white outline-none focus:border-accent transition-all text-sm appearance-none cursor-pointer focus:ring-1 focus:ring-accent/30`}
                        >
-                         {cat.items.map(item => (
+                         {(cat.items || []).map(item => (
                            <option key={item} value={item}>{item}</option>
                          ))}
                        </select>
@@ -3282,36 +6074,37 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                      </div>
                   ) : (
                     <div className={`grid gap-2 grid-cols-2`}>
-                      {cat.items.map((item) => {
+                      {(cat.items || []).map((item) => {
                         const isSelected = 
                           (cat.id === 'argument' && selectedArgument === item) ||
                           (cat.id === 'univers' && selectedUnivers === item) ||
                           (cat.id === 'format' && selectedFormat === item) ||
                           (cat.id === 'position' && selectedPosition === item) ||
-                          (cat.id === 'support' && selectedSupport === item) ||
+                          (cat.id === 'support' && (selectedSupport || []).includes(item)) ||
                           (cat.id === 'priority' && selectedPriority === item) ||
                           (cat.id === 'status' && selectedStatus === item);
 
                         return (
-                          <button
-                            key={item}
-                            onClick={() => {
-                              if (cat.id === 'argument') setSelectedArgument(item);
-                              if (cat.id === 'univers') setSelectedUnivers(item);
-                              if (cat.id === 'format') setSelectedFormat(item);
-                              if (cat.id === 'position') setSelectedPosition(item);
-                              if (cat.id === 'support') setSelectedSupport(item);
-                              if (cat.id === 'priority') setSelectedPriority(item);
-                              if (cat.id === 'status') setSelectedStatus(item);
-                            }}
-                            className={`text-left p-2.5 rounded-md text-[11px] font-medium transition-all active:scale-95 border lowercase ${
-                              isSelected
-                                ? activeColor
-                                : 'bg-card-bg border-border text-text-dim hover:border-slate-500 hover:text-white'
-                            }`}
-                          >
-                            {item}
-                          </button>
+                            <button
+                              key={item}
+                              onClick={() => {
+                                if (cat.id === 'argument') setSelectedArgument(item);
+                                if (cat.id === 'univers') setSelectedUnivers(item);
+                                if (cat.id === 'format') setSelectedFormat(item);
+                                if (cat.id === 'position') setSelectedPosition(item);
+                                if (cat.id === 'support') setSelectedSupport(prev => (prev || []).includes(item) ? (prev || []).filter(x => x !== item) : [...(prev || []), item]);
+                                if (cat.id === 'priority') setSelectedPriority(item);
+                                if (cat.id === 'status') setSelectedStatus(item);
+                              }}
+                              className={`text-left p-2.5 rounded-md text-[11px] font-medium transition-all active:scale-95 border lowercase ${
+                                isSelected
+                                  ? activeColor
+                                  : 'bg-card-bg border-border text-text-dim hover:border-slate-500 hover:text-white'
+                              }`}
+                              style={isSelected ? activeStyle : {}}
+                            >
+                              {item}
+                            </button>
                         );
                       })}
                     </div>
@@ -3419,8 +6212,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             <div className="pt-2">
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2">
-                  {selectedSupport === 'video' ? <Film size={10} className="text-accent-purple" /> : <ImageIcon size={10} className="text-accent-purple" />}
-                  {selectedSupport === 'video' ? 'Séquences Vidéo' : selectedSupport === 'graphisme' ? 'Visuels Graphiques' : 'Photos Requises'}
+                  {(selectedSupport || []).includes('vidéo') ? <Film size={10} className="text-accent-purple" /> : <ImageIcon size={10} className="text-accent-purple" />}
+                  {(selectedSupport || []).includes('vidéo') ? 'Séquences Vidéo' : (selectedSupport || []).includes('graphisme') ? 'Visuels Graphiques' : 'Photos Requises'}
                 </label>
                 <input 
                   type="number"
@@ -3481,6 +6274,118 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 Ajouter au tableau
               </button>
             </div>
+            </>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xs font-black uppercase text-accent-blue tracking-[5px]">Missions Secondaires</h3>
+                    <div className="p-2 bg-accent-blue/10 rounded-lg text-accent-blue">
+                      <Target size={14} />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-text-dim uppercase tracking-[2px] leading-relaxed font-bold opacity-60">
+                    Gestion du studio / Recherche / Entretien
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2">
+                    <Info size={12} className="text-accent-blue" />
+                    Intitulé de la mission
+                  </label>
+                  <input 
+                    type="text"
+                    value={secondaryTitle}
+                    onChange={(e) => setSecondaryTitle(e.target.value)}
+                    placeholder="Ex: Recherche marketing, Nettoyage..."
+                    className="w-full bg-card-bg border border-border p-3 rounded-md text-white outline-none focus:border-accent-blue transition-all text-sm h-[48px]"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2">
+                    <AlertTriangle size={12} className="text-accent-red" />
+                    Priorité
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['low', 'medium', 'high'] as const).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setSelectedSecondaryPriority(p)}
+                        className={`py-2 rounded-md text-[9px] font-bold uppercase tracking-widest border transition-all ${
+                          selectedSecondaryPriority === p 
+                            ? (p === 'low' ? 'bg-accent-blue/20 border-accent-blue text-accent-blue' : p === 'medium' ? 'bg-accent-yellow/20 border-accent-yellow text-accent-yellow' : 'bg-red-500/20 border-red-500 text-red-500')
+                            : 'bg-card-bg border-border text-text-dim hover:border-white/20'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2">
+                      <Sparkles size={12} className="text-accent-yellow" />
+                      Notation
+                    </label>
+                    <span className="text-[11px] font-mono font-bold text-accent-yellow pr-1">{selectedRating}/5</span>
+                  </div>
+                  <div className="flex items-center gap-2 px-1">
+                    {[1, 2, 3, 4, 5].map((val) => (
+                      <button 
+                        key={val}
+                        onClick={() => setSelectedRating(val)}
+                        className={`transition-all ${selectedRating >= val ? 'text-accent-yellow scale-110' : 'text-white/10 hover:text-white/20'}`}
+                      >
+                        <Sparkles size={24} fill={selectedRating >= val ? 'currentColor' : 'none'} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2">
+                    <Clock size={12} className="text-accent-blue" />
+                    Deadline
+                  </label>
+                  <input 
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="w-full bg-card-bg border border-border p-3 rounded-md text-white outline-none focus:border-accent-blue transition-all text-sm h-[48px]"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2">
+                    <MessageSquare size={12} className="text-accent-blue" />
+                    Notes détaillées
+                  </label>
+                  <textarea 
+                    value={info}
+                    onChange={(e) => setInfo(e.target.value)}
+                    placeholder="Précisez les tâches à accomplir..."
+                    rows={4}
+                    className="w-full bg-card-bg border border-border p-3 rounded-md text-white outline-none focus:border-accent-blue transition-all text-sm resize-none"
+                  />
+                </div>
+
+                <button 
+                  onClick={() => {
+                    addSecondaryMission(secondaryTitle);
+                    setSecondaryTitle('');
+                  }}
+                  disabled={!secondaryTitle}
+                  className="w-full py-4 bg-gradient-to-r from-accent-blue to-accent-purple text-black rounded-lg font-extrabold uppercase text-sm tracking-wide hover:brightness-110 shadow-[0_4px_20px_rgba(0,209,255,0.2)] hover:shadow-[0_0_25px_rgba(0,209,255,0.4)] active:scale-[0.98] disabled:opacity-50 transition-all flex items-center justify-center gap-3 mt-4"
+                >
+                  <Plus size={18} />
+                  Enregistrer
+                </button>
+              </div>
+            )}
 
             <div className="pt-4 space-y-3">
                <button 
@@ -3512,51 +6417,102 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         )}
 
           {/* Table Section */}
-          <main className="p-10 bg-[#0F0F0F] overflow-y-auto custom-scrollbar relative">
+          <main className="p-10 bg-[#0F0F0F] overflow-y-auto custom-scrollbar relative space-y-12">
             <div className="absolute top-0 right-0 w-64 h-64 bg-accent-purple/5 blur-[100px] rounded-full -z-10"></div>
             <div className="absolute bottom-0 left-0 w-64 h-64 bg-accent-blue/5 blur-[100px] rounded-full -z-10"></div>
 
-            <div className="flex flex-col gap-6 mb-8">
+            <div className="flex flex-col gap-8">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div className="flex flex-col">
-                  <h2 className="font-display text-4xl uppercase tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-accent-blue to-accent-purple animate-srgb">
-                    {activeTab === 'table' ? 'Rapport de Production' : activeTab === 'dashboard' ? 'Tableau de Bord' : activeTab === 'journal' ? 'Journal de Bord' : 'Configuration Système'}
-                  </h2>
+                  <div className="bg-accent-purple/90 p-3 rounded shadow-[0_0_20px_rgba(191,122,240,0.3)]">
+                    <h2 className="font-display text-3xl font-black uppercase leading-[0.8] tracking-tighter text-black">
+                      {activeTab === 'table' ? <>TABLEAU<br/>DE BORD</> : activeTab === 'dashboard' ? <>MONITEUR<br/>SYSTÈME</> : activeTab === 'journal' ? <>JOURNAL<br/>DE BORD</> : <>CONFIG<br/>SYSTÈME</>}
+                    </h2>
+                  </div>
                   <div className="flex items-center gap-2 mt-2">
                     <div className="w-1 h-1 bg-accent rounded-full animate-pulse"></div>
                     <span className="text-[10px] font-black uppercase tracking-[2px] text-text-dim">
-                      Console Centrale / {activeTab.toUpperCase()}
+                      Console Centrale / {activeTab === 'table' ? 'DASHBOARD' : activeTab.toUpperCase()}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center p-1 bg-white/5 border border-white/10 rounded-xl overflow-x-auto overflow-y-hidden custom-scrollbar max-w-full">
-                  {[
-                    { id: 'table', label: 'Rapport', icon: Activity },
-                    { id: 'dashboard', label: 'Monitor', icon: BarChart3 },
-                    { id: 'journal', label: 'Journal', icon: Clock },
-                    { id: 'system', label: 'Système', icon: Settings }
-                  ].map((tab) => (
+                <div className="relative">
+                  {/* Version Mobile : Liste Déroulante */}
+                  <div className="md:hidden">
                     <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id as any)}
-                      className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                        activeTab === tab.id 
-                          ? 'shadow-[0_0_20px_rgba(0,0,0,0.4)]' 
-                          : 'text-text-dim hover:text-white hover:bg-white/5'
-                      }`}
-                      style={activeTab === tab.id ? { backgroundColor: navActiveColor, color: 'black' } : {}}
+                      onClick={() => setIsNavDropdownOpen(!isNavDropdownOpen)}
+                      className="flex items-center gap-3 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-[2px] transition-all hover:bg-white/10 h-[42px]"
+                      style={{ color: navActiveColor }}
                     >
-                      <tab.icon size={12} />
-                      {tab.label}
+                      {(() => {
+                        const activeTabData = tabs.find(t => t.id === activeTab);
+                        const ActiveIcon = activeTabData?.icon || Activity;
+                        return (
+                          <>
+                            <ActiveIcon size={14} />
+                            <span>{activeTabData?.label}</span>
+                          </>
+                        );
+                      })()}
+                      <ChevronDown size={14} className={`transition-transform duration-300 ml-2 ${isNavDropdownOpen ? 'rotate-180' : ''}`} />
                     </button>
-                  ))}
+                    
+                    <AnimatePresence>
+                      {isNavDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-[100]" onClick={() => setIsNavDropdownOpen(false)} />
+                          <motion.div
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute top-full left-0 mt-2 w-48 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-2xl z-[101] overflow-hidden backdrop-blur-xl"
+                          >
+                            {tabs.map((tab) => (
+                              <button
+                                key={tab.id}
+                                onClick={() => {
+                                  setActiveTab(tab.id as any);
+                                  setIsNavDropdownOpen(false);
+                                }}
+                                className={`w-full flex items-center gap-3 px-4 py-3 text-[10px] font-black uppercase tracking-widest transition-all hover:bg-white/5 text-left ${activeTab === tab.id ? 'text-white bg-white/10' : 'text-text-dim'}`}
+                              >
+                                <tab.icon size={12} className={activeTab === tab.id ? 'text-accent' : ''} />
+                                <span style={activeTab === tab.id ? { color: navActiveColor } : {}}>{tab.label}</span>
+                                {activeTab === tab.id && <Check size={12} className="ml-auto text-accent" />}
+                              </button>
+                            ))}
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Version Desktop : Rail Horizontal (Initial) */}
+                  <div className="hidden md:flex items-center p-1 bg-white/5 border border-white/10 rounded-xl overflow-x-auto overflow-y-hidden custom-scrollbar max-w-full">
+                    {tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as any)}
+                        className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                          activeTab === tab.id 
+                            ? 'shadow-[0_0_20px_rgba(0,0,0,0.4)]' 
+                            : 'text-text-dim hover:text-white hover:bg-white/5'
+                        }`}
+                        style={activeTab === tab.id ? { backgroundColor: navActiveColor, color: 'black' } : {}}
+                      >
+                        <tab.icon size={12} />
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-3 bg-white/5 p-1.5 rounded-lg border border-white/10 backdrop-blur-sm shadow-2xl">
-                    <div className="px-2 border-r border-white/10 hidden lg:block">
-                      <span className="text-[9px] font-black uppercase tracking-widest text-text-dim/60">Synchro Flux</span>
+                    <div className="px-2 border-r border-white/10 hidden lg:block text-[8px] font-black uppercase leading-tight tracking-widest text-text-dim/60">
+                      <div>SYNCHRO</div>
+                      <div>FLUX</div>
                     </div>
                     <button 
                       onClick={() => document.getElementById('bulk-image-upload')?.click()}
@@ -3565,14 +6521,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     >
                       <ImagePlus size={10} className="group-hover:scale-110 transition-transform" />
                       IMPORTER IMAGES
-                    </button>
-                    <button 
-                      onClick={cleanupDuplicates}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest hover:bg-red-500 hover:text-white active:scale-95 transition-all rounded shadow-md"
-                      title="Supprimer les missions en doublon"
-                    >
-                      <Trash2 size={10} />
-                      NETTOYER DOUBLONS
                     </button>
                     <input 
                       id="bulk-image-upload"
@@ -3607,29 +6555,50 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       className="bg-black/40 border border-white/10 px-3 py-1.5 text-[9px] font-bold text-accent-blue w-40 outline-none focus:border-accent-blue transition-all rounded placeholder:text-text-dim/40 placeholder:font-normal italic"
                     />
                   </div>
-
-                  <button 
-                    onClick={saveToLocalStorage}
-                    className="flex items-center gap-2 px-4 py-2 rounded text-black text-[10px] font-black uppercase tracking-widest hover:brightness-110 transition-all font-display shadow-[0_0_20px_rgba(0,0,0,0.3)]"
-                    style={{ backgroundColor: saveBtnColor }}
-                    title="Sauvegarde forcée locale"
-                  >
-                    <Save size={12} />
-                    SAUVEGARDER
-                  </button>
-                  
-                  <div className="h-6 w-[1px] bg-white/10 mx-1" />
-
-                  <button 
-                    onClick={captureAsJPEG}
-                    disabled={isCapturing}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed disabled:opacity-50"
-                    title="Sauvegarder toutes les données en JPEG"
-                  >
-                    {isCapturing ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />}
-                    {isCapturing ? 'Capture...' : 'Export JPEG'}
-                  </button>
                 </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4">
+                <button 
+                  onClick={saveToLocalStorage}
+                  className="flex items-center gap-2 px-4 py-2 rounded text-black text-[10px] font-black uppercase tracking-widest hover:brightness-110 transition-all font-display shadow-[0_0_20px_rgba(0,0,0,0.3)]"
+                  style={{ backgroundColor: saveBtnColor }}
+                  title="Sauvegarde forcée locale"
+                >
+                  <Save size={12} />
+                  SAUVEGARDER
+                </button>
+                
+                <div className="h-6 w-[1px] bg-white/10 mx-1" />
+
+                <button 
+                  onClick={captureAsJPEG}
+                  disabled={isCapturing}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed disabled:opacity-50"
+                  title="Sauvegarder toutes les données en JPEG"
+                >
+                  {isCapturing ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />}
+                  {isCapturing ? 'Capture...' : 'Export JPEG'}
+                </button>
+
+                <button 
+                  onClick={exportAllCharts}
+                  disabled={isCapturing}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-accent/10 border border-accent/30 rounded text-accent text-[10px] font-black uppercase tracking-widest hover:bg-accent/20 transition-all border-dashed disabled:opacity-50"
+                  title="Télécharger tous les graphiques séparément"
+                >
+                  {isCapturing ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                  {isCapturing ? 'Batch...' : 'Tout Exporter'}
+                </button>
+
+                <button 
+                  onClick={downloadFullExport}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-accent/10 border border-accent/30 rounded text-accent text-[10px] font-black uppercase tracking-widest hover:bg-accent/20 transition-all border-dashed"
+                  title="Exporter toutes les données en format Excel"
+                >
+                  <FileSpreadsheet size={12} />
+                  Export Excel
+                </button>
               </div>
 
               {activeTab === 'table' && (
@@ -3682,66 +6651,176 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       {isFilterVisible ? 'Masquer Filtres' : 'Filtres'}
                     </button>
 
-                    <button 
-                      onClick={() => setHiddenColumns([])}
-                      className={`flex items-center gap-2 px-3 py-1.5 border rounded text-[10px] font-black uppercase tracking-widest transition-all ${
-                        hiddenColumns.length === 0 
-                          ? 'bg-accent text-black border-accent' 
-                          : 'bg-white/5 border-white/10 text-white hover:bg-white/10 shadow-[0_0_15px_rgba(0,255,148,0.2)]'
-                      }`}
-                      title="Afficher toutes les colonnes"
-                    >
-                      <Maximize size={12} />
-                      Vue Complète
-                    </button>
+                    <div className="relative">
+                      <button 
+                        onClick={() => setIsViewDropdownOpen(!isViewDropdownOpen)}
+                        className={`flex items-center gap-2 px-3 py-1.5 border rounded text-[10px] font-black uppercase tracking-widest transition-all ${
+                          isViewDropdownOpen 
+                            ? 'bg-white/10 border-white/20 text-white' 
+                            : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
+                        }`}
+                        title="Changer de vue"
+                      >
+                        {tableViewState === 'full' ? <Maximize size={12} className="text-accent" /> : 
+                         tableViewState === 'minimal' ? <ChevronsLeft size={12} className="text-accent-red" /> : 
+                         <Minimize size={12} className="text-accent-blue" />}
+                        {tableViewState === 'full' ? "Vue Complète" : 
+                         tableViewState === 'minimal' ? "Tout Rétracter" : 
+                         "Vue Compacte"}
+                        <ChevronDown size={14} className={`ml-1 transition-transform ${isViewDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
 
-                    <button 
-                      onClick={() => {
-                        const toHide = [
-                          'imageUrl', 'color', 'argumentType', 'format', 'position', 'support', 
-                          'priority'
-                        ];
-                        setHiddenColumns(toHide);
-                      }}
-                      className={`flex items-center gap-2 px-3 py-1.5 border rounded text-[10px] font-black uppercase tracking-widest transition-all ${
-                        hiddenColumns.length >= 8 && hiddenColumns.length < 14
-                          ? 'bg-accent-blue text-black border-accent-blue shadow-[0_0_15px_rgba(0,209,255,0.3)]' 
-                          : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
-                      }`}
-                      title="Mode Compact (Masquer les détails)"
-                    >
-                      <Minimize size={12} />
-                      Vue Compacte
-                    </button>
+                      <AnimatePresence>
+                        {isViewDropdownOpen && (
+                          <>
+                            <div 
+                              className="fixed inset-0 z-[60]" 
+                              onClick={() => setIsViewDropdownOpen(false)} 
+                            />
+                            <motion.div
+                              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                              className="absolute top-full left-0 mt-2 w-56 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-2xl z-[70] py-1 overflow-hidden"
+                            >
+                              <div className="px-4 py-2 border-b border-white/5">
+                                <p className="text-[7px] font-black text-text-dim uppercase tracking-widest">Configuration de vue</p>
+                              </div>
 
-                    <button 
-                      onClick={() => {
-                        const toHide = [
-                          'missionNo', 'imageUrl', 'color', 'argumentType', 'univers', 'format', 
-                          'position', 'support', 'priority', 'deadline', 'info', 'rating', 'progress'
-                        ];
-                        setHiddenColumns(toHide);
-                      }}
-                      className={`flex items-center gap-2 px-3 py-1.5 border rounded text-[10px] font-black uppercase tracking-widest transition-all ${
-                        hiddenColumns.length >= 14
-                          ? 'bg-accent-red text-white border-accent-red shadow-[0_0_15px_rgba(255,61,0,0.3)]' 
-                          : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
-                      }`}
-                      title="Vue Minimale (Tout rétracter)"
-                    >
-                      <ChevronsLeft size={12} />
-                      Tout Rétracter
-                    </button>
+                              <button 
+                                onClick={() => {
+                                  applyViewPreset('full');
+                                  setIsViewDropdownOpen(false);
+                                }}
+                                className={`w-full flex items-center gap-3 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all hover:bg-white/5 ${tableViewState === 'full' ? 'text-accent bg-accent/5' : 'text-text-dim'}`}
+                              >
+                                <Maximize size={12} />
+                                <span>Vue Complète</span>
+                                {tableViewState === 'full' && <Check size={12} className="ml-auto" />}
+                              </button>
+
+                              <button 
+                                onClick={() => {
+                                  applyViewPreset('compact');
+                                  setIsViewDropdownOpen(false);
+                                }}
+                                className={`w-full flex items-center gap-3 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all hover:bg-white/5 ${tableViewState === 'compact' ? 'text-accent-blue bg-accent-blue/5' : 'text-text-dim'}`}
+                              >
+                                <Minimize size={12} />
+                                <span>Vue Compacte</span>
+                                {tableViewState === 'compact' && <Check size={12} className="ml-auto" />}
+                              </button>
+
+                              <button 
+                                onClick={() => {
+                                  applyViewPreset('minimal');
+                                  setIsViewDropdownOpen(false);
+                                }}
+                                className={`w-full flex items-center gap-3 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all hover:bg-white/5 ${tableViewState === 'minimal' ? 'text-accent-red bg-accent-red/5' : 'text-text-dim'}`}
+                              >
+                                <ChevronsLeft size={12} />
+                                <span>Tout Rétracter</span>
+                                {tableViewState === 'minimal' && <Check size={12} className="ml-auto" />}
+                              </button>
+
+                              <div className="mx-2 my-1 border-t border-white/5" />
+
+                              <div className="px-4 py-2">
+                                <p className="text-[7px] font-black text-text-dim uppercase tracking-widest mb-2">Structure</p>
+                                <div className="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewMode('table');
+                                    }}
+                                    className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'table' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
+                                  >
+                                    <List size={10} />
+                                    <span className="text-[8px] uppercase tracking-widest">Liste</span>
+                                  </button>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewMode('grid');
+                                    }}
+                                    className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'grid' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
+                                  >
+                                    <LayoutGrid size={10} />
+                                    <span className="text-[8px] uppercase tracking-widest">Grille</span>
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="px-4 py-2 bg-white/[0.02]">
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setManualHiddenColumns(prev => 
+                                      prev.includes('imageUrl') 
+                                        ? prev.filter(h => h !== 'imageUrl') 
+                                        : [...prev, 'imageUrl']
+                                    );
+                                  }}
+                                  className="w-full flex items-center justify-between text-[8px] font-black uppercase tracking-widest group"
+                                >
+                                  <span className={`transition-colors ${!manualHiddenColumns.includes('imageUrl') ? 'text-accent' : 'text-text-dim group-hover:text-white'}`}>Afficher Miniatures</span>
+                                  <div className={`w-6 h-3 rounded-full relative transition-colors ${!manualHiddenColumns.includes('imageUrl') ? 'bg-accent/40' : 'bg-white/10'}`}>
+                                    <div className={`absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all ${!manualHiddenColumns.includes('imageUrl') ? 'right-0.5' : 'left-0.5 opacity-20'}`} />
+                                  </div>
+                                </button>
+                              </div>
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
                     
                     {hiddenColumns.length > 0 && (
                       <button 
-                        onClick={() => setHiddenColumns([])}
+                        onClick={() => {
+                          setTableViewState('full');
+                          setManualHiddenColumns([]);
+                        }}
                         className="flex items-center gap-1.5 px-2 py-1 bg-accent-purple/10 border border-accent-purple/20 text-accent-purple text-[8px] font-black uppercase tracking-widest rounded hover:bg-accent-purple hover:text-white transition-all ml-2"
                       >
                         <RotateCcw size={10} />
                         Restaurer ({hiddenColumns.length})
                       </button>
                     )}
+
+                    <button 
+                      onClick={() => setFilterDuplicates(!filterDuplicates)}
+                      className={`flex items-center gap-2 px-3 py-1.5 border rounded text-[10px] font-black uppercase tracking-widest transition-all ml-2 ${
+                        filterDuplicates 
+                          ? 'bg-red-500 text-white border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' 
+                          : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
+                      }`}
+                      title={filterDuplicates ? "Afficher les doublons" : "Masquer les doublons"}
+                    >
+                      <Copy size={12} />
+                      {filterDuplicates ? "Doublons Masqués" : "Cacher Doublons"}
+                    </button>
+
+                    <button 
+                      onClick={() => setShowDuplicateIndicators(!showDuplicateIndicators)}
+                      className={`flex items-center gap-2 px-3 py-1.5 border rounded text-[10px] font-black uppercase tracking-widest transition-all ml-2 ${
+                        showDuplicateIndicators 
+                          ? 'bg-accent/20 text-accent border-accent/40 shadow-[0_0_10px_rgba(0,255,148,0.2)]' 
+                          : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10'
+                      }`}
+                      title={showDuplicateIndicators ? "Cacher les bordures rouges" : "Afficher les bordures rouges"}
+                    >
+                      {showDuplicateIndicators ? <Eye size={12} /> : <EyeOff size={12} />}
+                      Indicateurs
+                    </button>
+
+                    <button 
+                      onClick={() => setShowCleanDuplicatesModal(true)}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/30 text-red-500 rounded text-[10px] font-black uppercase tracking-widest transition-all hover:bg-red-500/20 ml-2"
+                    >
+                      <Trash2 size={12} />
+                      Nettoyer
+                    </button>
 
                     <div className="flex items-center gap-1 bg-white/5 border border-white/10 p-1 rounded-lg ml-2">
                       <button 
@@ -3767,6 +6846,23 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <span className="text-[11px] text-text-dim uppercase tracking-wider font-bold">
                         {missions.length} mission(s)
                       </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 px-3 py-1.5 bg-white/5 border border-white/10 rounded-md">
+                      <div className="flex flex-col">
+                        <span className="text-[7px] text-text-dim uppercase font-black tracking-tighter">Flux Global</span>
+                        <span className={`text-[9px] font-black uppercase tracking-widest transition-colors ${missions.every(m => m.enabled) && missions.length > 0 ? 'text-accent' : 'text-red-400'}`}>
+                          {missions.every(m => m.enabled) && missions.length > 0 ? 'TOUT ACTIF' : 'TOUT INACTIF'}
+                        </span>
+                      </div>
+                      <Toggle 
+                        enabled={missions.every(m => m.enabled) && missions.length > 0}
+                        onToggle={(e) => {
+                          e.stopPropagation();
+                          const areAllEnabled = missions.every(m => m.enabled) && missions.length > 0;
+                          toggleAllMissions(!areAllEnabled);
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -3813,7 +6909,19 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
+                  className="space-y-16"
                 >
+                  {/* Production Missions Segment */}
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-accent/20 rounded-lg text-accent">
+                        <Layout size={18} />
+                      </div>
+                      <div>
+                        <h2 className="text-sm font-black uppercase tracking-[4px] text-white">Missions de Production</h2>
+                        <p className="text-[9px] font-mono text-accent/60 uppercase tracking-widest mt-1">Photos, Vidéos & Graphismes</p>
+                      </div>
+                    </div>
                   <AnimatePresence>
                     {isFilterVisible && (
                       <motion.div 
@@ -3824,7 +6932,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       >
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-9 gap-4 p-5 bg-white/5 border border-white/10 rounded-xl backdrop-blur-md relative z-20">
                           {/* Search */}
-                          <div className="space-y-2 lg:col-span-2 xl:col-span-1">
+                          <div className="space-y-2 lg:col-span-2 xl:col-span-2 2xl:col-span-2">
                             <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2">
                               <Search size={10} /> Recherche
                             </label>
@@ -3872,7 +6980,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                           {/* Active / Inactive filter */}
                           <FilterSelect 
-                            label="État (Actif/Inactif)" 
+                            label="État" 
                             icon={Power} 
                             items={['Actif', 'Inactif']} 
                             selected={filterEnabled} 
@@ -3883,7 +6991,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           />
 
                           {/* Date Range Picker */}
-                          <div className="space-y-2 lg:col-span-2 xl:col-span-2 2xl:col-span-1">
+                          <div className="space-y-2 lg:col-span-2 xl:col-span-2 2xl:col-span-2">
                             <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center justify-between gap-2">
                               <span className="flex items-center gap-2">
                                 <Calendar size={10} /> Période
@@ -3958,11 +7066,27 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             setIsOpen={setIsPriorityFilterOpen} 
                             accentColor="text-red-500"
                           />
+
+                          {/* Deadline Alert Toggle */}
+                          <div className="space-y-2">
+                             <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2">
+                               <Clock size={10} /> Alertes
+                             </label>
+                             <button
+                               onClick={() => setFilterDeadlineAlert(!filterDeadlineAlert)}
+                               className={`w-full h-[42px] flex items-center justify-between px-3 rounded border transition-all ${filterDeadlineAlert ? 'bg-accent-yellow/20 border-accent-yellow text-accent-yellow' : 'bg-black/40 border-white/10 text-text-dim hover:border-white/20'}`}
+                             >
+                               <span className="text-[10px] font-black uppercase tracking-wider">Deadlines Proches</span>
+                               <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${filterDeadlineAlert ? 'border-accent-yellow bg-accent-yellow' : 'border-white/20'}`}>
+                                 {filterDeadlineAlert && <div className="w-1.5 h-1.5 bg-black rounded-full" />}
+                               </div>
+                             </button>
+                          </div>
                         </div>
 
                         {/* Quick Actions & Summary */}
                         <div className="flex flex-wrap items-center gap-3 mt-4">
-                          {(filterQuery || filterStatuses.length > 0 || filterProducts.length > 0 || filterColors.length > 0 || filterUniverses.length > 0 || filterSupports.length > 0 || filterArguments.length > 0 || filterPriorities.length > 0 || filterDateStart || filterDateEnd) && (
+                          {(filterQuery || filterStatuses.length > 0 || filterProducts.length > 0 || filterColors.length > 0 || filterUniverses.length > 0 || filterSupports.length > 0 || filterArguments.length > 0 || filterPriorities.length > 0 || filterDateStart || filterDateEnd || filterDeadlineAlert) && (
                             <button 
                               onClick={() => {
                                 setFilterQuery('');
@@ -3976,6 +7100,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                 setFilterDateStart('');
                                 setFilterDateEnd('');
                                 setFilterDateType('createdAt');
+                                setFilterDeadlineAlert(false);
                               }}
                               className="px-4 py-2 bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-black tracking-widest uppercase rounded hover:bg-red-500 hover:text-white transition-all flex items-center gap-2"
                             >
@@ -3994,7 +7119,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                   {/* Filter Chips Layer */}
                   <AnimatePresence>
-                    {(filterStatuses.length > 0 || filterProducts.length > 0 || filterUniverses.length > 0 || filterSupports.length > 0 || filterPriorities.length > 0 || filterDateStart || filterDateEnd) && (
+                    {(filterStatuses.length > 0 || filterProducts.length > 0 || filterUniverses.length > 0 || filterSupports.length > 0 || filterPriorities.length > 0 || filterDateStart || filterDateEnd || filterDeadlineAlert) && (
                       <motion.div 
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -4006,6 +7131,23 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           Filtres Actifs:
                         </div>
                         
+                        {filterDeadlineAlert && (
+                          <motion.div 
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="flex items-center gap-1.5 px-2 py-1 bg-accent-yellow/10 border border-accent-yellow/20 rounded text-[9px] text-accent-yellow hover:bg-accent-yellow/20 transition-all group"
+                          >
+                             <Clock size={10} />
+                             <span className="font-bold uppercase tracking-tighter">Deadline Proche</span>
+                             <button 
+                               onClick={() => setFilterDeadlineAlert(false)}
+                               className="p-0.5 hover:text-white transition-colors"
+                             >
+                               <X size={10} />
+                             </button>
+                          </motion.div>
+                        )}
+
                         {renderFilterChips('Statut', filterStatuses, setFilterStatuses)}
                         {renderFilterChips('Produit', filterProducts, setFilterProducts)}
                         {renderFilterChips('Couleur', filterColors, setFilterColors)}
@@ -4111,7 +7253,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setHiddenColumns(prev => [...prev, h.id]);
+                                          toggleColumnVisibility(h.id);
                                         }}
                                         className="opacity-0 group-hover:opacity-100 p-1 text-text-dim hover:text-white transition-all hover:scale-110"
                                         title="Masquer cette colonne"
@@ -4136,7 +7278,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   <AnimatePresence initial={false}>
                     {filteredMissions.length === 0 ? (
                       <tr>
-                        <td colSpan={1 + 18 - hiddenColumns.length} className="py-24 text-center">
+                        <td colSpan={21 - hiddenColumns.length} className="py-24 text-center">
                           <div className="flex flex-col items-center gap-4 opacity-20">
                             <Layers size={48} className="text-text-dim" />
                             <p className="text-xs uppercase tracking-[4px]">
@@ -4152,8 +7294,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           initial={{ opacity: 0, scale: 0.98 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, x: -10 }}
-                          onClick={() => setSelectedMissionId(m.id)}
-                          className={`hover:bg-white/[0.04] transition-colors group relative cursor-pointer ${selectedMissionIds.includes(m.id) ? 'bg-white/[0.06]' : ''} ${isDuplicate(m) ? 'border-l-2 border-l-red-500 bg-red-500/5' : ''}`}
+                          onDoubleClick={() => setSelectedMissionId(m.id)}
+                          className={`hover:bg-white/[0.04] transition-colors group relative cursor-pointer ${selectedMissionIds.includes(m.id) ? 'bg-white/[0.06]' : ''} ${(showDuplicateIndicators && isDuplicate(m)) ? 'border-l-2 border-l-red-500 bg-red-500/5' : ''}`}
                         >
                           <td className="py-4 px-3 text-center" onClick={(e) => toggleSelectMission(m.id, e)}>
                             <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all mx-auto ${
@@ -4184,25 +7326,128 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               )}
                             </td>
                           )}
-                          {!hiddenColumns.includes('product') && <td className="py-4 px-3 font-mono text-xs font-bold text-white/90">{m.product}</td>}
-                          {!hiddenColumns.includes('color') && <td className="py-4 px-3 text-xs text-text-dim">{m.color}</td>}
-                          {!hiddenColumns.includes('argumentType') && <td className="py-4 px-3 text-xs text-text-dim lowercase border-l border-white/5">{m.argumentType}</td>}
-                          {!hiddenColumns.includes('univers') && <td className="py-4 px-3 text-xs text-text-dim">{m.univers}</td>}
-                          {!hiddenColumns.includes('format') && <td className="py-4 px-3 text-xs text-text-dim">{m.format}</td>}
-                          {!hiddenColumns.includes('position') && <td className="py-4 px-3 text-xs text-text-dim">{m.position}</td>}
+                          {!hiddenColumns.includes('product') && (
+                            <td className="py-4 px-3">
+                              <input 
+                                type="text"
+                                value={m.product}
+                                onChange={(e) => updateMission(m.id, { product: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-transparent border-none p-0 w-full focus:ring-0 outline-none text-xs font-mono font-bold text-white/90 hover:bg-white/5 rounded transition-colors"
+                              />
+                            </td>
+                          )}
+                          {!hiddenColumns.includes('color') && (
+                            <td className="py-4 px-3">
+                              <select 
+                                value={m.color}
+                                onChange={(e) => updateMission(m.id, { color: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-transparent border-none p-0 w-full focus:ring-0 outline-none text-xs text-text-dim cursor-pointer hover:text-white transition-colors appearance-none"
+                              >
+                                {categories.find(c => c.id === 'color')?.items.map(c => (
+                                  <option key={c} value={c} className="bg-[#1A1A1A] text-white">{c}</option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
+                          {!hiddenColumns.includes('argumentType') && (
+                            <td className="py-4 px-3 border-l border-white/5">
+                              <select 
+                                value={m.argumentType}
+                                onChange={(e) => updateMission(m.id, { argumentType: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-transparent border-none p-0 w-full focus:ring-0 outline-none text-xs text-text-dim lowercase cursor-pointer hover:text-white transition-colors appearance-none"
+                              >
+                                {categories.find(c => c.id === 'argument')?.items.map(a => (
+                                  <option key={a} value={a} className="bg-[#1A1A1A] text-white">{a}</option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
+                          {!hiddenColumns.includes('univers') && (
+                            <td className="py-4 px-3">
+                              <select 
+                                value={m.univers}
+                                onChange={(e) => updateMission(m.id, { univers: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-transparent border-none p-0 w-full focus:ring-0 outline-none text-xs text-text-dim cursor-pointer hover:text-white transition-colors appearance-none uppercase"
+                              >
+                                {categories.find(c => c.id === 'univers')?.items.map(u => (
+                                  <option key={u} value={u} className="bg-[#1A1A1A] text-white">{u}</option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
+                          {!hiddenColumns.includes('format') && (
+                            <td className="py-4 px-3">
+                              <select 
+                                value={m.format}
+                                onChange={(e) => updateMission(m.id, { format: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-transparent border-none p-0 w-full focus:ring-0 outline-none text-xs text-text-dim cursor-pointer hover:text-white transition-colors appearance-none"
+                              >
+                                {categories.find(c => c.id === 'format')?.items.map(f => (
+                                  <option key={f} value={f} className="bg-[#1A1A1A] text-white">{f}</option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
+                          {!hiddenColumns.includes('position') && (
+                            <td className="py-4 px-3">
+                              <select 
+                                value={m.position}
+                                onChange={(e) => updateMission(m.id, { position: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-transparent border-none p-0 w-full focus:ring-0 outline-none text-xs text-text-dim cursor-pointer hover:text-white transition-colors appearance-none text-center"
+                              >
+                                {categories.find(c => c.id === 'position')?.items.map(p => (
+                                  <option key={p} value={p} className="bg-[#1A1A1A] text-white">{p}</option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
                           {!hiddenColumns.includes('support') && (
                             <td className="py-4 px-3 text-center border-l border-white/5">
                               <div className="flex flex-col items-center">
-                                <span className={`text-[10px] px-2 py-0.5 rounded text-white uppercase font-black tracking-tighter flex items-center gap-1.5 min-w-[75px] justify-center scale-90 transition-transform group-hover:scale-100 ${
-                                  m.support === 'video' ? 'bg-accent-pink/20 text-accent-pink border border-accent-pink/30 shadow-[0_0_10px_-4px_var(--color-accent-pink)]' : 
-                                  m.support === 'photo' ? 'bg-accent-blue/20 text-accent-blue border border-accent-blue/30 shadow-[0_0_10px_-4px_var(--color-accent-blue)]' :
-                                  'bg-accent-yellow/20 text-accent-yellow border border-accent-yellow/30 shadow-[0_0_10px_-4px_var(--color-accent-yellow)]'
-                                }`}>
-                                  {m.support === 'video' ? <Film size={10} /> : 
-                                   m.support === 'photo' ? <ImageIcon size={10} /> :
-                                   <Zap size={10} />}
-                                  {m.support}
-                                </span>
+                                <div className="relative group/support-select">
+                                  {(() => {
+                                    const cat = categories.find(c => c.id === 'support');
+                                    const colorRef = cat?.colorRef || 'accent';
+                                    const isHex = colorRef?.startsWith('#');
+                                    
+                                    const style = isHex ? {
+                                      color: colorRef,
+                                      borderColor: `${colorRef}40`,
+                                      backgroundColor: `${colorRef}10`,
+                                      boxShadow: `0 0 10px -4px ${colorRef}`
+                                    } : {};
+                                    
+                                    const colorClass = isHex ? 'border' : 
+                                      (m.support || '').includes('vid') ? 'bg-accent-pink/20 text-accent-pink border border-accent-pink/30 shadow-[0_0_10px_-4px_var(--color-accent-pink)]' : 
+                                      (m.support || '').includes('photo') ? 'bg-accent-blue/20 text-accent-blue border border-accent-blue/30 shadow-[0_0_10px_-4px_var(--color-accent-blue)]' :
+                                      'bg-accent-yellow/20 text-accent-yellow border border-accent-yellow/30 shadow-[0_0_10px_-4px_var(--color-accent-yellow)]';
+
+                                    return (
+                                      <span className={`text-[10px] px-2 py-0.5 rounded text-white uppercase font-black tracking-tighter flex items-center gap-1.5 min-w-[75px] justify-center scale-90 transition-transform group-hover:scale-100 ${colorClass}`} style={style}>
+                                        {(m.support || '').includes('vid') ? <Film size={10} /> : 
+                                         (m.support || '').includes('photo') ? <ImageIcon size={10} /> :
+                                         <Zap size={10} />}
+                                        {m.support}
+                                      </span>
+                                    );
+                                  })()}
+                                  <select 
+                                    value={m.support}
+                                    onChange={(e) => updateMission(m.id, { support: e.target.value })}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                  >
+                                    {categories.find(c => c.id === 'support')?.items.map(s => (
+                                      <option key={s} value={s} className="bg-[#1A1A1A] text-white">{s}</option>
+                                    ))}
+                                  </select>
+                                </div>
                               </div>
                             </td>
                           )}
@@ -4229,6 +7474,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                       m.priority === 'Medium priority' ? 'border-accent-red/50 text-accent-red bg-accent-red/5' :
                                       'border-white/10 text-text-dim bg-white/5'
                                     }`}
+                                    style={(() => {
+                                      const cat = categories.find(c => c.id === 'priority');
+                                      if (cat?.colorRef?.startsWith('#')) {
+                                        return { color: cat.colorRef, borderColor: `${cat.colorRef}40`, backgroundColor: `${cat.colorRef}10` };
+                                      }
+                                      return {};
+                                    })()}
                                   >
                                     {categories.find(c => c.id === 'priority')?.items.map(p => (
                                       <option key={p} value={p} className="bg-app-bg text-white">
@@ -4245,13 +7497,25 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           )}
                           {!hiddenColumns.includes('deadline') && (
                             <td className="py-4 px-3">
-                              <input 
-                                type="date"
-                                value={m.deadline && m.deadline.includes('/') ? m.deadline.split('/').reverse().join('-') : m.deadline}
-                                onChange={(e) => updateMission(m.id, { deadline: e.target.value })}
-                                onClick={(e) => e.stopPropagation()}
-                                className="bg-black/40 border border-white/5 rounded text-[9px] p-1 text-text-dim outline-none focus:border-accent/40 focus:text-white hover:border-white/10 transition-all font-mono w-full"
-                              />
+                              <div className="flex items-center gap-2">
+                                {isDeadlineApproaching(m.deadline) && m.status !== 'livré' && (
+                                  <motion.div
+                                    initial={{ scale: 0, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    className="text-accent-yellow animate-pulse shrink-0"
+                                    title={`Deadline proche (<= ${deadlineAlertThreshold} jours)`}
+                                  >
+                                    <AlertTriangle size={14} />
+                                  </motion.div>
+                                )}
+                                <input 
+                                  type="date"
+                                  value={m.deadline && m.deadline.includes('/') ? m.deadline.split('/').reverse().join('-') : m.deadline}
+                                  onChange={(e) => updateMission(m.id, { deadline: e.target.value })}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className={`bg-black/40 border rounded text-[9px] p-1 outline-none transition-all font-mono w-full ${isDeadlineApproaching(m.deadline) && m.status !== 'livré' ? 'border-red-500/50 text-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'border-white/5 text-text-dim focus:border-accent/40 focus:text-white hover:border-white/10'}`}
+                                />
+                              </div>
                             </td>
                           )}
                           {!hiddenColumns.includes('info') && (
@@ -4281,15 +7545,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           {!hiddenColumns.includes('rating') && (
                             <td className="py-4 px-3 text-center">
                               <div className="flex flex-col items-center justify-center gap-1">
-                                <div className="flex items-center gap-0.5">
-                                  {[1, 2, 3, 4, 5].map((star) => (
-                                    <Sparkles 
-                                      key={star} 
-                                      size={10} 
-                                      className={m.rating! >= star ? 'text-accent-yellow fill-accent-yellow' : m.rating! >= star - 0.5 ? 'text-accent-yellow fill-accent-yellow opacity-50' : 'text-white/5'} 
-                                    />
-                                  ))}
-                                </div>
+                                <InteractiveStarRating 
+                                  rating={m.rating} 
+                                  onRatingChange={(val) => updateMission(m.id, { rating: val })} 
+                                  size={10}
+                                />
                                 {m.rating ? <span className="text-[9px] font-mono font-bold text-accent-yellow">{m.rating}/5</span> : null}
                               </div>
                             </td>
@@ -4307,6 +7567,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     // Auto-sync progress
                                     switch (newStatus) {
                                       case 'livré': updates.progress = 100; break;
+                                      case 'En post-production': updates.progress = 85; break;
                                       case 'déja shooter': updates.progress = 75; break;
                                       case 'en cour de shoot': updates.progress = 50; break;
                                       case 'produit preparé': updates.progress = 25; break;
@@ -4319,12 +7580,24 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     updateMission(m.id, updates);
                                   }}
                                   className={`text-[10px] font-black px-2 py-1 rounded uppercase flex items-center gap-1.5 w-full border bg-transparent appearance-none cursor-pointer focus:ring-1 focus:ring-accent-blue/30 outline-none transition-all ${
-                                    m.status === 'livré' ? 'border-accent/40 text-accent bg-accent/5' :
-                                    m.status === 'en cour de shoot' ? 'border-accent-blue/40 text-accent-blue bg-accent-blue/5' :
-                                    m.status === 'produit preparé' ? 'border-accent-yellow/40 text-accent-yellow bg-accent-yellow/5' :
-                                    m.status === 'annuler' ? 'border-accent-purple/40 text-accent-purple bg-accent-purple/5' :
-                                    'border-white/10 text-text-dim bg-white/5'
+                                    (() => {
+                                      const cat = categories.find(c => c.id === 'status');
+                                      if (cat?.colorRef?.startsWith('#')) return 'border';
+                                      return m.status === 'livré' ? 'border-accent/40 text-accent bg-accent/5' :
+                                             m.status === 'En post-production' ? 'border-accent-orange/40 text-accent-orange bg-accent-orange/5' :
+                                             m.status === 'en cour de shoot' ? 'border-accent-blue/40 text-accent-blue bg-accent-blue/5' :
+                                             m.status === 'produit preparé' ? 'border-accent-yellow/40 text-accent-yellow bg-accent-yellow/5' :
+                                             m.status === 'annuler' ? 'border-accent-purple/40 text-accent-purple bg-accent-purple/5' :
+                                             'border-white/10 text-text-dim bg-white/5';
+                                    })()
                                   }`}
+                                  style={(() => {
+                                    const cat = categories.find(c => c.id === 'status');
+                                    if (cat?.colorRef?.startsWith('#')) {
+                                      return { color: cat.colorRef, borderColor: `${cat.colorRef}40`, backgroundColor: `${cat.colorRef}0A`, boxShadow: `0 0 15px -5px ${cat.colorRef}` };
+                                    }
+                                    return {};
+                                  })()}
                                 >
                                   {categories.find(c => c.id === 'status')?.items.map(s => (
                                     <option key={s} value={s} className="bg-app-bg text-white">{s}</option>
@@ -4390,7 +7663,14 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                 type="number"
                                 min="0"
                                 value={m.photoCountDelivered}
-                                onChange={(e) => updateMission(m.id, { photoCountDelivered: parseInt(e.target.value) || 0 })}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  let updates: Partial<Mission> = { photoCountDelivered: val };
+                                  if (val > 0) {
+                                    updates.status = 'livré';
+                                  }
+                                  updateMission(m.id, updates);
+                                }}
                                 onClick={(e) => e.stopPropagation()}
                                 className="w-16 bg-white/5 border border-white/10 rounded text-center text-[10px] text-accent-pink font-bold outline-none focus:border-accent-pink/50 h-8 relative z-20 cursor-text hover:bg-white/10 transition-colors"
                               />
@@ -4427,13 +7707,180 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               <MosaicView />
             )
           )}
-        </motion.div>
-      )}
+        </div>
+
+        {/* Secondary Missions Segment */}
+        <div className="space-y-6 pt-12 border-t border-white/5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-accent-blue/20 rounded-lg text-accent-blue">
+              <List size={18} />
+            </div>
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-[4px] text-white">Missions Secondaires</h2>
+              <p className="text-[9px] font-mono text-accent-blue/60 uppercase tracking-widest mt-1">Marketing, Studio, Logistique & Divers</p>
+            </div>
+          </div>
+          <div className="text-[10px] font-mono text-text-dim/60 uppercase">
+            {secondaryMissions.length} Missions Actives
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          <AnimatePresence initial={false}>
+            {secondaryMissions.length === 0 ? (
+              <div className="col-span-full py-12 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-4 opacity-30">
+                <PackageSearch size={40} className="text-text-dim" />
+                <p className="text-[10px] uppercase font-black tracking-widest">Aucune mission secondaire</p>
+              </div>
+            ) : (
+              secondaryMissions.map((sm) => (
+                <motion.div
+                  key={sm.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className={`bg-black/40 border p-6 rounded-2xl group hover:border-accent-blue/40 transition-all ${sm.enabled ? 'border-white/10' : 'border-red-500/20 opacity-50 grayscale'}`}
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex-1">
+                      <input 
+                        type="text"
+                        value={sm.title}
+                        onChange={(e) => updateSecondaryMission(sm.id, { title: e.target.value })}
+                        className="bg-transparent border-none text-white font-black uppercase text-xs tracking-wider outline-none w-full focus:ring-1 focus:ring-accent-blue/20 rounded px-1 -ml-1 transition-all"
+                      />
+                      <div className="flex items-center gap-3 mt-1.5 opacity-60">
+                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
+                          sm.priority === 'high' ? 'bg-red-500/20 text-red-500' : 
+                          sm.priority === 'medium' ? 'bg-accent-yellow/20 text-accent-yellow' : 
+                          'bg-accent-blue/20 text-accent-blue'
+                        }`}>
+                          {sm.priority || 'medium'}
+                        </span>
+                        <span className="text-[8px] font-mono font-bold text-white/40 bg-white/5 px-1.5 py-0.5 rounded uppercase">ID: {sm.id.toUpperCase()}</span>
+                        {sm.deadline && (
+                          <div className="flex items-center gap-1.5">
+                            {isDeadlineApproaching(sm.deadline) && sm.status !== 'Mission Accomplie' && sm.enabled && (
+                              <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                className="text-accent-yellow animate-pulse"
+                              >
+                                <AlertTriangle size={12} />
+                              </motion.div>
+                            )}
+                            <Calendar size={10} />
+                            <input 
+                              type="date" 
+                              value={sm.deadline} 
+                              onChange={(e) => updateSecondaryMission(sm.id, { deadline: e.target.value })}
+                              className={`bg-transparent border-none text-[8px] font-bold outline-none p-0 h-auto cursor-pointer transition-colors ${isDeadlineApproaching(sm.deadline) && sm.status !== 'Mission Accomplie' ? 'text-red-500 animate-pulse' : 'text-white/40 hover:text-white'}`}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                       <Toggle enabled={sm.enabled} onToggle={() => updateSecondaryMission(sm.id, { enabled: !sm.enabled })} />
+                       <button onClick={() => removeSecondaryMission(sm.id)} className="p-1.5 text-text-dim hover:text-red-500 transition-colors">
+                         <Trash2 size={14} />
+                       </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center px-1">
+                        <label className="text-[9px] font-black uppercase tracking-widest text-text-dim/60">Progression</label>
+                        <span className="text-[10px] font-mono font-black text-accent-blue">{sm.progress}%</span>
+                      </div>
+                      <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                        <motion.div 
+                          animate={{ width: `${sm.progress}%` }}
+                          className="h-full bg-accent-blue shadow-[0_0_10px_rgba(0,209,255,0.3)]"
+                        />
+                      </div>
+                      <input 
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="5"
+                        value={sm.progress}
+                        onChange={(e) => updateSecondaryMission(sm.id, { progress: parseInt(e.target.value) })}
+                        className="w-full h-1 bg-white/5 rounded-full appearance-none cursor-pointer accent-accent-blue"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black uppercase tracking-widest text-text-dim/60 block px-1">Priorité</label>
+                      <div className="flex gap-2">
+                        {(['low', 'medium', 'high'] as const).map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => updateSecondaryMission(sm.id, { priority: p })}
+                            className={`flex-1 py-1 rounded border text-[8px] font-bold uppercase transition-all ${
+                              sm.priority === p 
+                                ? (p === 'low' ? 'bg-accent-blue/20 border-accent-blue text-accent-blue' : p === 'medium' ? 'bg-accent-yellow/20 border-accent-yellow text-accent-yellow' : 'bg-red-500/20 border-red-500 text-red-500')
+                                : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black uppercase tracking-widest text-text-dim/60 block px-1">Notation</label>
+                      <div className="flex items-center gap-1.5">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                           <button
+                             key={star}
+                             onClick={() => updateSecondaryMission(sm.id, { rating: star })}
+                             className={`transition-all ${sm.rating >= star ? 'text-accent-yellow scale-110' : 'text-white/5 hover:text-white/10'}`}
+                           >
+                              <Sparkles size={14} fill={sm.rating >= star ? 'currentColor' : 'none'} />
+                           </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black uppercase tracking-widest text-text-dim/60 flex items-center gap-2 px-1">
+                        <MessageSquare size={10} /> Notes
+                      </label>
+                      <textarea 
+                        value={sm.note}
+                        onChange={(e) => updateSecondaryMission(sm.id, { note: e.target.value })}
+                        rows={3}
+                        placeholder="Consignes..."
+                        className="w-full bg-white/[0.03] border border-white/5 p-3 rounded-xl text-[10px] text-white/80 outline-none focus:border-accent-blue/40 resize-none transition-all placeholder:opacity-20"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
+                     <div className="flex items-center gap-2">
+                       <div className={`w-2 h-2 rounded-full ${sm.progress === 100 ? 'bg-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]' : 'bg-accent-blue animate-pulse'}`} />
+                       <span className="text-[8px] font-black uppercase tracking-widest text-white/40">
+                         {sm.progress === 100 ? 'Mission Accomplie' : 'Mission en Cours'}
+                       </span>
+                     </div>
+                     <span className="text-[8px] font-mono text-text-dim italic">
+                       Créé: {new Date(sm.createdAt).toLocaleDateString()}
+                     </span>
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </motion.div>
+  )}
     </AnimatePresence>
   </main>
-</div>
-</div>
-</div>
 
 
       {/* Bulk Action Bar */}
@@ -4523,11 +7970,107 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         )}
       </AnimatePresence>
 
-      {/* Bulk Delete Confirm Modal */}
+      {/* Modals and Overlays */}
       <AnimatePresence>
-        {isBulkDeleteModalOpen && (
-          <>
+        {/* Confirmation Modal for Cleaning Duplicates */}
+        {showCleanDuplicatesModal && (
+          <div key="clean-duplicates-modal-container" className="fixed inset-0 z-[700] flex items-center justify-center p-4">
             <motion.div 
+              key="clean-duplicates-backdrop"
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCleanDuplicatesModal(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              key="clean-duplicates-content"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-card-bg border border-white/10 p-8 rounded-3xl shadow-2xl max-w-2xl w-full"
+            >
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 rounded-2xl bg-red-500/20 flex items-center justify-center text-red-500">
+                    <Trash2 size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold font-serif italic text-red-500">Nettoyage des doublons</h2>
+                    <p className="text-xs text-text-dim uppercase tracking-widest mt-1">
+                      {missions.filter(isDuplicate).length} doublons identifiés pour suppression
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-black/20 rounded-xl border border-white/5 p-4 max-h-[300px] overflow-y-auto mb-8 custom-scrollbar">
+                  <div className="space-y-3">
+                    {missions.filter(isDuplicate).length > 0 ? (
+                      missions.filter(isDuplicate).map(m => (
+                        <div key={m.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/5">
+                          <div className="flex items-center gap-3">
+                            <span className="text-[10px] font-mono text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded">#{m.missionNo}</span>
+                            <div>
+                              <p className="text-xs font-bold text-white">{m.product}</p>
+                              <p className="text-[10px] text-text-dim">{m.refId} — {m.color} — {m.univers}</p>
+                              {m.info && (
+                                <p className="text-[9px] text-accent/60 italic mt-0.5 truncate max-w-[200px]">Note: {m.info}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                             <span className="text-[9px] text-text-dim block opacity-50">Créé le</span>
+                             <span className="text-[10px] text-accent-purple font-mono">{new Date(m.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-center py-8 text-text-dim text-xs uppercase tracking-widest opacity-30">Aucun doublon trouvé</p>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-xs text-text-dim mb-8 leading-relaxed">
+                  Cette action supprimera définitivement les versions les plus anciennes des missions ayant les mêmes caractéristiques (Produit, Couleur, Univers, Support, Format, Position, Argument, Note). <span className="text-red-400 font-bold">Voulez-vous continuer ?</span>
+                </p>
+
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setShowCleanDuplicatesModal(false)}
+                    className="flex-1 py-4 bg-white/5 text-white text-xs font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all border border-white/10"
+                  >
+                    Annuler
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const idsToDelete = missions.filter(isDuplicate).map(d => d.id);
+                      if (idsToDelete.length > 0) {
+                        setMissions(prev => prev.filter(m => !idsToDelete.includes(m.id)));
+                        setToast({ show: true, message: `${idsToDelete.length} doublons nettoyés`, type: 'task' });
+                        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                        
+                        const logEntry: GlobalLogEntry = {
+                          id: Math.random().toString(36).substring(2, 9),
+                          timestamp: Date.now(),
+                          message: `NETTOYAGE : ${idsToDelete.length} doublons ont été supprimés.`,
+                          type: 'mission'
+                        };
+                        setGlobalLogs(prev => [...prev, logEntry]);
+                      }
+                      setShowCleanDuplicatesModal(false);
+                    }}
+                    className="flex-2 py-4 bg-red-500 text-white text-xs font-black uppercase tracking-widest rounded-xl hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
+                    disabled={missions.filter(isDuplicate).length === 0}
+                  >
+                    Confirmer le nettoyage
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        {isBulkDeleteModalOpen && (
+          <div key="bulk-delete-modal-container">
+            <motion.div 
+              key="bulk-delete-backdrop"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -4535,6 +8078,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               className="fixed inset-0 bg-black/80 backdrop-blur-md z-[500]"
             />
             <motion.div 
+              key="bulk-delete-content"
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -4588,15 +8132,16 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </button>
               </div>
             </motion.div>
-          </>
+          </div>
         )}
       </AnimatePresence>
 
       {/* Advanced Sort Modal */}
       <AnimatePresence>
         {isAdvancedSortOpen && (
-          <>
+          <div key="advanced-sort-modal-container">
             <motion.div 
+              key="advanced-sort-backdrop"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -4604,6 +8149,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               className="fixed inset-0 bg-black/80 backdrop-blur-md z-[300]"
             />
             <motion.div 
+              key="advanced-sort-content"
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -4775,7 +8321,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </div>
               </div>
             </motion.div>
-          </>
+          </div>
         )}
       </AnimatePresence>
 
@@ -4789,6 +8335,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             onRemove={removeMission}
             refIdColor={refIdColor}
             allStatuses={categories.find(c => c.id === 'status')?.items || []}
+            pushToGoogleCalendar={pushToGoogleCalendar}
+            pushToGoogleTasks={pushToGoogleTasks}
           />
         )}
       </AnimatePresence>
@@ -5128,7 +8676,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '24px', marginBottom: '80px' }}>
           <div style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
             <p style={{ fontSize: '10px', color: '#888888', textTransform: 'uppercase', fontWeight: '900', letterSpacing: '2px', margin: '0 0 8px 0' }}>Total Missions</p>
-            <p style={{ fontSize: '36px', margin: 0, fontWeight: 'bold' }}>{missions.length}</p>
+            <p style={{ fontSize: '36px', margin: 0, fontWeight: 'bold' }}>{activeMissions.length}</p>
           </div>
           <div style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
             <p style={{ fontSize: '10px', color: '#888888', textTransform: 'uppercase', fontWeight: '900', letterSpacing: '2px', margin: '0 0 8px 0' }}>Progression</p>
@@ -5147,17 +8695,28 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         <div style={{ marginBottom: '80px' }}>
           <h2 style={{ fontSize: '24px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '4px', marginBottom: '32px', color: '#00FF94', borderLeft: '4px solid #00FF94', paddingLeft: '16px' }}>I. Production (Missions)</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            {missions.map(m => (
-              <div key={m.id} style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden', opacity: m.enabled ? 1 : 0.6 }}>
+            {activeMissions.map(m => (
+              <div key={m.id} style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
                 <div style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                     <span style={{ fontSize: '18px', fontWeight: 'bold', color: m.enabled ? '#00FF94' : '#888888' }}>#{m.missionNo} — {m.product}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                     <span style={{ fontSize: '18px', fontWeight: 'bold', color: m.enabled ? '#00FF94' : '#888888' }}>#{m.missionNo} — <span style={{ color: '#00D1FF' }}>[{m.refId}]</span> — {m.product}</span>
                      {!m.enabled && <span style={{ fontSize: '8px', padding: '2px 8px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#888888', borderRadius: '4px', textTransform: 'uppercase', fontWeight: '900' }}>Inactif</span>}
                   </div>
-                  <span style={{ fontSize: '10px', fontWeight: '900', padding: '4px 12px', borderRadius: '4px', border: m.status === 'livré' ? '1px solid #00FF94' : '1px solid rgba(255,255,255,0.2)', color: m.status === 'livré' ? '#00FF94' : '#FFFFFF', textTransform: 'uppercase' }}>{m.status}</span>
+                  <span style={{ 
+                    fontSize: '10px', 
+                    fontWeight: '900', 
+                    padding: '4px 12px', 
+                    borderRadius: '4px', 
+                    border: m.status === 'livré' ? '1px solid #00FF94' : 
+                            m.status === 'En post-production' ? '1px solid #FF9900' : '1px solid rgba(255,255,255,0.2)', 
+                    color: m.status === 'livré' ? '#00FF94' : 
+                           m.status === 'En post-production' ? '#FF9900' : '#FFFFFF', 
+                    textTransform: 'uppercase' 
+                  }}>{m.status}</span>
                 </div>
                 <div style={{ padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '11px', fontWeight: 'bold', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase' }}>
+                     <p style={{ margin: 0 }}>Référence: <span style={{ color: '#00D1FF' }}>{m.refId}</span></p>
                      <p style={{ margin: 0 }}>Couleur: <span style={{ color: '#FFFFFF' }}>{m.color}</span></p>
                      <p style={{ margin: 0 }}>Argument: <span style={{ color: '#FFFFFF' }}>{m.argumentType}</span></p>
                      <p style={{ margin: 0 }}>Univers: <span style={{ color: '#FFFFFF' }}>{m.univers}</span></p>
@@ -5187,39 +8746,207 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           </div>
         </div>
 
-        <div>
-           <h2 style={{ fontSize: '24px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '4px', marginBottom: '32px', color: '#00D1FF', borderLeft: '4px solid #00D1FF', paddingLeft: '16px' }}>II. Performance (Journal de Bord)</h2>
-           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {globalLogs.slice().reverse().slice(0, 50).map((log) => (
-                <div key={log.id} style={{ display: 'flex', gap: '20px', padding: '12px', borderBottom: '1px solid rgba(255,255,255,0.05)', backgroundColor: 'rgba(255,255,255,0.02)' }}>
-                  <div style={{ minWidth: '140px', fontSize: '10px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.4)' }}>
-                    {new Date(log.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+        {showSecondaryInReport && (
+          <div style={{ marginBottom: '80px' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '4px', marginBottom: '32px', color: '#00D1FF', borderLeft: '4px solid #00D1FF', paddingLeft: '16px' }}>II. Missions Secondaires</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
+              {secondaryMissions.map(m => (
+                <div key={m.id} style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                    <h3 style={{ fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>{m.title}</h3>
+                    <span style={{ fontSize: '9px', fontWeight: '900', padding: '2px 8px', borderRadius: '4px', backgroundColor: m.priority === 'high' ? 'rgba(239, 68, 68, 0.2)' : m.priority === 'medium' ? 'rgba(255, 215, 0, 0.2)' : 'rgba(0, 209, 255, 0.2)', color: m.priority === 'high' ? '#ef4444' : m.priority === 'medium' ? '#FFD700' : '#00D1FF', textTransform: 'uppercase' }}>{m.priority}</span>
                   </div>
-                  <div style={{ flex: 1 }}>
-                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                        <span style={{ 
-                          fontSize: '8px', 
-                          fontWeight: 'black', 
-                          textTransform: 'uppercase', 
-                          padding: '2px 8px', 
-                          border: '1px solid',
-                          borderColor: log.type === 'manual' ? '#00FF94' : log.type === 'instruction' ? '#A855F7' : '#00D1FF',
-                          color: log.type === 'manual' ? '#00FF94' : log.type === 'instruction' ? '#A855F7' : '#00D1FF',
-                          backgroundColor: 'rgba(255,255,255,0.05)'
-                        }}>
-                          {log.type}
-                        </span>
-                     </div>
-                     <p style={{ margin: 0, fontSize: '12px', color: log.type === 'instruction' ? '#A855F7' : '#FFFFFF', fontWeight: log.type === 'instruction' ? 'bold' : 'normal' }}>
-                       {log.message}
-                     </p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#888', marginBottom: '8px' }}>
+                    <span>Progression: {m.progress}%</span>
+                    <span>Note: {m.rating}/5</span>
+                  </div>
+                  <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '99px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', backgroundColor: '#00D1FF', width: `${m.progress}%` }} />
                   </div>
                 </div>
               ))}
-              {globalLogs.length > 50 && (
-                <p style={{ fontSize: '10px', color: '#888888', fontStyle: 'italic', marginTop: '16px' }}>... + {globalLogs.length - 50} autres entrées (limitées à 50 pour l'export JPEG)</p>
-              )}
             </div>
+          </div>
+        )}
+
+         <div style={{ marginTop: '80px' }}>
+           <h2 style={{ fontSize: '24px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '4px', marginBottom: '32px', color: '#EBFF00', borderLeft: '4px solid #EBFF00', paddingLeft: '16px' }}>III. Analyse Graphique</h2>
+           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
+             
+             {/* Chart 1: Evolution Hebdo */}
+             <div id="report-chart-timeline" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px', gridColumn: 'span 3', width: '1040px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '24px' }}>Évolution Hebdomadaire (7 Jours)</h3>
+                <div style={{ width: '1040px', height: '300px' }}>
+                  <ComposedChart width={1000} height={300} data={timelineData} margin={{ top: 10, right: 30, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <XAxis dataKey="name" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="left" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fill: 'rgba(0,255,148,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <Legend wrapperStyle={{ fontSize: '10px', textTransform: 'uppercase', opacity: 0.6 }} />
+                    <Bar yAxisId="left" dataKey="MissionsLivrees" name="Missions Livrées" fill="#00D1FF" radius={[4, 4, 0, 0]} maxBarSize={40} isAnimationActive={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" name="Progression Moyenne" stroke="#00FF94" strokeWidth={3} dot={{ fill: '#00FF94', r: 4 }} activeDot={{ r: 6 }} isAnimationActive={false} />
+                  </ComposedChart>
+                </div>
+             </div>
+
+             {/* Chart Supplemental: Tableau récapitulatif */}
+             <div style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px', gridColumn: 'span 3', width: '1040px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '16px' }}>Tableau Récapitulatif Production</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                      <th style={{ textAlign: 'left', padding: '12px', color: '#888' }}>ID</th>
+                      <th style={{ textAlign: 'left', padding: '12px', color: '#888' }}>Produit</th>
+                      <th style={{ textAlign: 'left', padding: '12px', color: '#888' }}>Support</th>
+                      <th style={{ textAlign: 'left', padding: '12px', color: '#888' }}>Priorité</th>
+                      <th style={{ textAlign: 'left', padding: '12px', color: '#888' }}>Status</th>
+                      <th style={{ textAlign: 'right', padding: '12px', color: '#888' }}>Progrès</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeMissions.slice(0, 15).map(m => (
+                      <tr key={m.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: '#00D1FF' }}>{m.refId}</td>
+                        <td style={{ padding: '12px' }}>{m.product}</td>
+                        <td style={{ padding: '12px' }}>{m.support}</td>
+                        <td style={{ padding: '12px', color: m.priority.includes('High') ? '#ef4444' : '#888' }}>{m.priority}</td>
+                        <td style={{ padding: '12px' }}>{m.status}</td>
+                        <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold' }}>{m.progress}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+             </div>
+
+             {/* Chart 2: Statut */}
+             <div id="report-chart-status" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px', gridColumn: 'span 2' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '24px' }}>Distribution par État</h3>
+                <div style={{ width: '660px', height: '260px' }}>
+                  <BarChart width={600} height={260} data={statusData} margin={{ top: 25, right: 10, left: 10, bottom: 0 }}>
+                    <XAxis dataKey="name" stroke="#444" fontSize={8} tickLine={false} axisLine={false} tick={{ fill: '#888', fontWeight: 'bold' }} dy={10} />
+                    <YAxis hide domain={[0, 'dataMax + 1']} />
+                    <Bar dataKey="value" name="Missions" fill="#00FF94" radius={[4, 4, 0, 0]} barSize={40} isAnimationActive={false}>
+                      <LabelList dataKey="value" position="top" fill="#00FF94" fontSize={11} fontWeight="black" offset={8} formatter={(val: number) => val > 0 ? val : ''} />
+                      {statusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} fillOpacity={0.8} />
+                      ))}
+                    </Bar>
+                    <Legend wrapperStyle={{ fontSize: '10px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)' }} />
+                  </BarChart>
+                </div>
+             </div>
+
+             {/* Chart 3: Support */}
+             <div id="report-chart-support" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '24px' }}>Répartition Supports</h3>
+                <div style={{ width: '310px', height: '260px' }}>
+                  <RPieChart width={300} height={260} margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Pie data={supportData} cx="50%" cy="50%" innerRadius={45} outerRadius={65} paddingAngle={5} dataKey="value" nameKey="name" isAnimationActive={false} label={({ name, value }) => value > 0 ? `${value}` : ''} labelLine={false}>
+                      {supportData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                      ))}
+                    </Pie>
+                    <Legend wrapperStyle={{ fontSize: '9px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)' }} />
+                  </RPieChart>
+                </div>
+             </div>
+
+             {/* Chart 4: Produits */}
+             <div id="report-chart-product" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '24px' }}>Répartition par Produit</h3>
+                <div style={{ width: '310px', height: '220px' }}>
+                  <BarChart width={300} height={220} data={productData} margin={{ top: 10, bottom: 20, left: -10, right: 20 }} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#333" horizontal={false} />
+                    <XAxis type="number" fontSize={10} tick={{ fill: '#888' }} axisLine={{ stroke: '#333' }} tickLine={false} />
+                    <YAxis type="category" dataKey="name" fontSize={9} tick={{ fill: '#ccc' }} axisLine={{ stroke: '#333' }} tickLine={false} width={80} />
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]} isAnimationActive={false} label={{ position: 'right', fill: '#888', fontSize: 10 }}>
+                      {productData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </div>
+             </div>
+
+             {/* Chart 5: Univers */}
+             <div id="report-chart-univers" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '24px' }}>Répartition par Univers</h3>
+                <div style={{ width: '310px', height: '220px' }}>
+                  <RPieChart width={300} height={220} margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Pie data={universData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={2} dataKey="value" nameKey="name" isAnimationActive={false} label={({ name, value }) => value > 0 ? `${value}` : ''} labelLine={false}>
+                      {universData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[(index + 4) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                      ))}
+                    </Pie>
+                    <Legend wrapperStyle={{ fontSize: '9px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)' }} />
+                  </RPieChart>
+                </div>
+             </div>
+
+             {/* Chart 6: Argument */}
+             <div id="report-chart-argument" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '24px' }}>Répartition par Argument</h3>
+                <div style={{ width: '310px', height: '220px' }}>
+                  <RPieChart width={300} height={220} margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Pie data={argumentData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={2} dataKey="value" nameKey="name" isAnimationActive={false} label={({ name, value }) => value > 0 ? `${value}` : ''} labelLine={false}>
+                      {argumentData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[(index + 5) % COLORS.length]} stroke="rgba(0,0,0,0.2)" />
+                      ))}
+                    </Pie>
+                    <Legend wrapperStyle={{ fontSize: '9px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)' }} />
+                  </RPieChart>
+                </div>
+             </div>
+
+             {/* Chart Supplemental: Poids Stratégique (Production vs Secondaire) */}
+             <div id="report-chart-poids" style={{ backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '24px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '24px' }}>Poids Stratégique</h3>
+                <div style={{ position: 'relative', height: '180px', width: '180px', margin: '0 auto' }}>
+                   {(() => {
+                     const prod = missions.length;
+                     const sec = secondaryMissions.length;
+                     const totalCount = prod + sec || 1;
+                     const prodP = (prod / totalCount) * 100;
+                     const secP = (sec / totalCount) * 100;
+                     return (
+                       <>
+                         <svg viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)', width: '100%', height: '100%' }}>
+                           <circle cx="50" cy="50" r="40" fill="transparent" stroke="rgba(255,255,255,0.1)" strokeWidth="12" />
+                           <circle 
+                             cx="50" cy="50" r="40" fill="transparent" stroke="#EBFF00" 
+                             strokeWidth="12" 
+                             strokeDasharray={`${prodP * 251.2 / 100} 251.2`} 
+                           />
+                           <circle 
+                             cx="50" cy="50" r="40" fill="transparent" stroke="#00D1FF" 
+                             strokeWidth="12" 
+                             strokeDasharray={`${secP * 251.2 / 100} 251.2`} 
+                             strokeDashoffset={`${-prodP * 251.2 / 100}`}
+                           />
+                         </svg>
+                         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                            <span style={{ fontSize: '10px', fontWeight: '900', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px' }}>TOTAL</span>
+                            <span style={{ fontSize: '24px', fontWeight: '900', color: '#fff' }}>{prod + sec}</span>
+                         </div>
+                       </>
+                     );
+                   })()}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ width: '10px', height: '10px', backgroundColor: '#EBFF00', borderRadius: '2px' }} />
+                      <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Production: {missions.length}</span>
+                      <span style={{ fontSize: '11px', color: '#fff', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((missions.length / (missions.length + secondaryMissions.length || 1)) * 100)}%</span>
+                   </div>
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ width: '10px', height: '10px', backgroundColor: '#00D1FF', borderRadius: '2px' }} />
+                      <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Secondaire: {secondaryMissions.length}</span>
+                      <span style={{ fontSize: '11px', color: '#fff', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((secondaryMissions.length / (missions.length + secondaryMissions.length || 1)) * 100)}%</span>
+                   </div>
+                </div>
+             </div>
+
+           </div>
          </div>
 
          <div style={{ marginTop: '80px', paddingTop: '40px', borderTop: '2px solid rgba(255,255,255,0.1)', textAlign: 'center' }}>
@@ -5285,14 +9012,20 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           background: #444444;
         }
       `}</style>
+      <FloatingAIChat missions={missions} googleToken={googleToken} />
+    </div>
+    </div>
+    </div>
     </div>
   );
 }
 
-function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, allStatuses }: { mission: Mission | null, onClose: () => void, onUpdate: (id: string, updates: Partial<Mission>) => void, onRemove: (id: string) => void, refIdColor: string, allStatuses: string[] }) {
+function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, allStatuses, pushToGoogleCalendar, pushToGoogleTasks }: { mission: Mission | null, onClose: () => void, onUpdate: (id: string, updates: Partial<Mission>) => void, onRemove: (id: string) => void, refIdColor: string, allStatuses: string[], pushToGoogleCalendar: (m: Mission | SecondaryMission) => void, pushToGoogleTasks: (m: Mission | SecondaryMission) => void }) {
   if (!mission) return null;
 
   const [isConfirming, setIsConfirming] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleDelete = () => {
     onRemove(mission.id);
@@ -5307,7 +9040,12 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
     
     let nextProgress = mission.progress;
     if (nextStatus === 'livré') nextProgress = 100;
-    if (nextStatus === 'annuler') nextProgress = 0;
+    else if (nextStatus === 'En post-production') nextProgress = 85;
+    else if (nextStatus === 'déja shooter') nextProgress = 75;
+    else if (nextStatus === 'en cour de shoot') nextProgress = 50;
+    else if (nextStatus === 'produit preparé') nextProgress = 25;
+    else if (nextStatus === 'en attente') nextProgress = 0;
+    else if (nextStatus === 'annuler') nextProgress = 0;
 
     onUpdate(mission.id, { 
       status: nextStatus,
@@ -5442,7 +9180,14 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                         type="number" 
                         min="0"
                         value={mission.photoCountDelivered}
-                        onChange={(e) => onUpdate(mission.id, { photoCountDelivered: parseInt(e.target.value) || 0 })}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          let updates: Partial<Mission> = { photoCountDelivered: val };
+                          if (val > 0) {
+                            updates.status = 'livré';
+                          }
+                          onUpdate(mission.id, updates);
+                        }}
                         className="w-full bg-black/40 border border-white/10 rounded p-1 text-xs text-accent-pink font-bold outline-none focus:border-accent-pink/50"
                       />
                     </div>
@@ -5452,30 +9197,11 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                       <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Qualification / Notation</span>
                       <span className="text-[14px] font-mono font-bold text-accent-yellow mt-1">{mission.rating || 0}/5</span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map(star => (
-                        <div key={star} className="relative flex items-center h-6 w-6">
-                          <button 
-                            onClick={() => {
-                              const newVal = star - 0.5;
-                              onUpdate(mission.id, { rating: mission.rating === newVal ? 0 : newVal });
-                            }}
-                            className="absolute left-0 w-1/2 h-full z-10 cursor-pointer"
-                          />
-                          <button 
-                            onClick={() => {
-                              onUpdate(mission.id, { rating: mission.rating === star ? 0 : star });
-                            }}
-                            className="absolute right-0 w-1/2 h-full z-10 cursor-pointer"
-                          />
-                          <Sparkles 
-                            size={16} 
-                            fill={mission.rating && mission.rating >= star ? 'currentColor' : 'none'} 
-                            className={`transition-all ${mission.rating && mission.rating >= star ? 'text-accent-yellow' : mission.rating && mission.rating >= star - 0.5 ? 'text-accent-yellow opacity-50' : 'text-white/10 hover:text-white/30'}`}
-                          />
-                        </div>
-                      ))}
-                    </div>
+                    <InteractiveStarRating 
+                      rating={mission.rating} 
+                      onRatingChange={(val) => onUpdate(mission.id, { rating: val })} 
+                      size={18}
+                    />
                   </div>
                 </div>
               </div>
@@ -5493,8 +9219,16 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                       type="date"
                       value={mission.deadline || ''}
                       onChange={(e) => onUpdate(mission.id, { deadline: e.target.value })}
-                      className="w-full bg-black/40 border border-white/10 rounded p-1 text-[11px] text-accent-yellow font-bold outline-none focus:border-accent-yellow/50"
+                      className="w-full bg-black/40 border border-white/10 rounded p-1 text-[11px] text-accent-yellow font-bold outline-none focus:border-accent-yellow/50 mb-2"
                     />
+                    <div className="flex items-center gap-2 mt-2">
+                       <button onClick={() => pushToGoogleCalendar(mission)} className="flex-1 flex items-center justify-center gap-2 py-1.5 bg-[#4285F4]/10 text-[#4285F4] border border-[#4285F4]/20 hover:bg-[#4285F4]/20 rounded text-[9px] font-black uppercase transition-all whitespace-nowrap">
+                         <Calendar size={10} /> Calendar
+                       </button>
+                       <button onClick={() => pushToGoogleTasks(mission)} className="flex-1 flex items-center justify-center gap-2 py-1.5 bg-[#F4B400]/10 text-[#F4B400] border border-[#F4B400]/20 hover:bg-[#F4B400]/20 rounded text-[9px] font-black uppercase transition-all whitespace-nowrap">
+                         <Check size={10} /> Tasks
+                       </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -5588,13 +9322,73 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
               </div>
 
               <div>
-                <h3 className="text-[11px] font-black uppercase tracking-widest text-text-dim mb-4 flex items-center gap-2 text-accent">
-                  <ImageIcon size={12} />
-                  Référence Visuelle
-                </h3>
-                <div className="aspect-video bg-white/5 border border-white/5 overflow-hidden flex items-center justify-center group relative">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[11px] font-black uppercase tracking-widest text-text-dim flex items-center gap-2 text-accent">
+                    <ImageIcon size={12} />
+                    Référence Visuelle
+                  </h3>
+                  {mission.imageUrl && (
+                    <div className="flex items-center gap-2">
+                       <span className="text-[8px] font-mono text-white/30 uppercase tracking-widest">Glisser pour recadrer</span>
+                       <button 
+                         onClick={() => onUpdate(mission.id, { imagePosition: '50% 50%' })}
+                         className="p-1 hover:bg-white/10 rounded transition-colors text-text-dim hover:text-white"
+                         title="Réinitialiser le centrage"
+                       >
+                         <RotateCcw size={10} />
+                       </button>
+                    </div>
+                  )}
+                </div>
+                <div 
+                  ref={containerRef}
+                  className={`aspect-video bg-white/5 border border-white/5 overflow-hidden flex items-center justify-center group relative select-none ${mission.imageUrl ? 'cursor-move' : ''}`}
+                  onMouseDown={(e) => {
+                    if (!mission.imageUrl) return;
+                    setIsDragging(true);
+                    const startX = e.clientX;
+                    const startY = e.clientY;
+                    
+                    const currentPos = mission.imagePosition || '50% 50%';
+                    const [currX, currY] = currentPos.split(' ').map(s => parseFloat(s));
+
+                    const handleMouseMove = (moveEvent: MouseEvent) => {
+                      if (!containerRef.current) return;
+                      const rect = containerRef.current.getBoundingClientRect();
+                      const dx = moveEvent.clientX - startX;
+                      const dy = moveEvent.clientY - startY;
+                      
+                      // Convert movement to percentage change
+                      // We invert the delta because if we drag right, the image "focal point" moves left (relatively)
+                      // No, if we drag right, we want to see the left part of the image, so the percentage should decrease?
+                      // Actually object-position defines where the image point is relative to the container.
+                      const newX = Math.max(0, Math.min(100, currX - (dx / rect.width) * 100));
+                      const newY = Math.max(0, Math.min(100, currY - (dy / rect.height) * 100));
+                      
+                      onUpdate(mission.id, { imagePosition: `${newX.toFixed(2)}% ${newY.toFixed(2)}%` });
+                    };
+
+                    const handleMouseUp = () => {
+                      setIsDragging(false);
+                      window.removeEventListener('mousemove', handleMouseMove);
+                      window.removeEventListener('mouseup', handleMouseUp);
+                    };
+
+                    window.addEventListener('mousemove', handleMouseMove);
+                    window.addEventListener('mouseup', handleMouseUp);
+                  }}
+                >
                    {mission.imageUrl ? (
-                     <img src={mission.imageUrl} alt="Reference" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                     <img 
+                       src={mission.imageUrl} 
+                       alt="Reference" 
+                       draggable={false}
+                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 pointer-events-none" 
+                       style={{ 
+                         objectPosition: mission.imagePosition || '50% 50%',
+                         transition: isDragging ? 'none' : 'object-position 0.2s ease-out, transform 0.5s ease-out'
+                       }} 
+                     />
                    ) : (
                      <div className="flex flex-col items-center gap-2 opacity-20">
                        <ImageIcon size={24} />
@@ -5629,9 +9423,11 @@ interface CategoryEditorProps {
   key?: React.Key;
   category: CategoryConfig;
   onUpdate: (updates: Partial<CategoryConfig>) => void;
+  isCollapsed?: boolean;
+  onToggle?: () => void;
 }
 
-function CategoryEditor({ category, onUpdate }: CategoryEditorProps) {
+function CategoryEditor({ category, onUpdate, isCollapsed, onToggle }: CategoryEditorProps) {
   const [newItem, setNewItem] = useState('');
 
   const availableColors = [
@@ -5661,7 +9457,32 @@ function CategoryEditor({ category, onUpdate }: CategoryEditorProps) {
     onUpdate({ items: updated });
   };
 
+  const getCategoryColor = () => {
+    if (category.colorRef?.startsWith('#')) return category.colorRef;
+    const accentMap: Record<string, string> = {
+      'accent': '#00FF94',
+      'accent-blue': '#00D1FF',
+      'accent-pink': '#FF007A',
+      'accent-purple': '#BD00FF',
+      'accent-orange': '#FF9900',
+      'accent-red': '#FF3B30',
+      'accent-yellow': '#EBFF00'
+    };
+    return accentMap[category.colorRef || 'accent'] || '#00FF94';
+  };
+
+  const getCategoryStyle = (type: 'text' | 'border' | 'bg') => {
+    const isHex = category.colorRef?.startsWith('#');
+    if (isHex) {
+      if (type === 'text') return { color: category.colorRef };
+      if (type === 'border') return { borderColor: category.colorRef };
+      if (type === 'bg') return { backgroundColor: category.colorRef };
+    }
+    return {};
+  };
+
   const colorClass = 
+    category.colorRef?.startsWith('#') ? '' :
     category.colorRef === 'accent' ? 'text-accent' :
     category.colorRef === 'accent-blue' ? 'text-accent-blue' :
     category.colorRef === 'accent-pink' ? 'text-accent-pink' :
@@ -5672,6 +9493,7 @@ function CategoryEditor({ category, onUpdate }: CategoryEditorProps) {
     'text-accent';
 
   const borderColorClass = 
+    category.colorRef?.startsWith('#') ? '' :
     category.colorRef === 'accent' ? 'hover:border-accent' :
     category.colorRef === 'accent-blue' ? 'hover:border-accent-blue' :
     category.colorRef === 'accent-pink' ? 'hover:border-accent-pink' :
@@ -5682,6 +9504,7 @@ function CategoryEditor({ category, onUpdate }: CategoryEditorProps) {
     'hover:border-accent';
 
   const focusBorderClass = 
+    category.colorRef?.startsWith('#') ? '' :
     category.colorRef === 'accent' ? 'focus:border-accent' :
     category.colorRef === 'accent-blue' ? 'focus:border-accent-blue' :
     category.colorRef === 'accent-pink' ? 'focus:border-accent-pink' :
@@ -5692,49 +9515,77 @@ function CategoryEditor({ category, onUpdate }: CategoryEditorProps) {
     'focus:border-accent';
 
   return (
-    <div className="p-6 bg-card-bg border border-border space-y-4">
-      <div className="flex items-center gap-4 border-b border-white/5 pb-4">
-        <div className="flex items-center gap-2 font-bold uppercase text-[11px] text-text-dim tracking-wider">
-          <category.icon size={14} className={colorClass} />
+    <div className={`p-6 bg-card-bg border border-border ${isCollapsed ? 'pb-6' : 'space-y-4'}`}>
+      <div className={`flex flex-col sm:flex-row sm:items-center gap-4 ${isCollapsed ? '' : 'border-b border-white/5 pb-4'}`}>
+        <div 
+          className="flex items-center gap-2 font-bold uppercase text-[11px] text-text-dim tracking-wider cursor-pointer group hover:text-white transition-colors"
+          onClick={onToggle}
+        >
+          {category.icon && <category.icon size={14} className={colorClass} style={getCategoryStyle('text')} />}
           <span>Modifier {category.name}</span>
+          <ChevronDown size={14} className={`ml-2 transition-transform ${isCollapsed ? '-rotate-90 text-text-dim/40' : (category.colorRef?.startsWith('#') ? '' : 'text-accent')}`} style={!isCollapsed ? getCategoryStyle('text') : {}} />
         </div>
         
         <div className="flex-1" />
         
-        <div className="flex items-center gap-1.5 bg-black/20 p-1 rounded-lg border border-white/5">
-          {availableColors.map((color) => (
-            <button
-              key={color.ref}
-              onClick={() => onUpdate({ colorRef: color.ref })}
-              title={color.name}
-              className={`w-4 h-4 rounded-full transition-all hover:scale-125 ${
-                color.ref === 'accent' ? 'bg-accent' :
-                color.ref === 'accent-blue' ? 'bg-accent-blue' :
-                color.ref === 'accent-pink' ? 'bg-accent-pink' :
-                color.ref === 'accent-purple' ? 'bg-accent-purple' :
-                color.ref === 'accent-orange' ? 'bg-accent-orange' :
-                color.ref === 'accent-red' ? 'bg-accent-red' :
-                'bg-accent-yellow'
-              } ${category.colorRef === color.ref ? 'ring-2 ring-white ring-offset-2 ring-offset-card-bg' : 'opacity-40 hover:opacity-100'}`}
-            />
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col items-end">
+            <span className="text-[7px] font-black text-white/30 uppercase tracking-[2px] mb-1">Colorimétrie</span>
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1 bg-black/20 p-1.5 rounded-lg border border-white/5">
+                {availableColors.slice(0, 4).map(c => (
+                  <button 
+                    key={c.ref}
+                    onClick={() => onUpdate({ colorRef: c.ref })}
+                    className={`w-3 h-3 rounded-full transition-all hover:scale-125 ${category.colorRef === c.ref ? 'ring-1 ring-white ring-offset-1 ring-offset-card-bg scale-110' : 'opacity-40 hover:opacity-100'}`}
+                    style={{ backgroundColor: 
+                      c.ref === 'accent' ? '#00FF94' : 
+                      c.ref === 'accent-blue' ? '#00D1FF' : 
+                      c.ref === 'accent-pink' ? '#FF007A' : 
+                      '#BD00FF' 
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="relative w-8 h-8 rounded-lg overflow-hidden border border-white/10 group cursor-pointer hover:border-white/30 transition-all bg-black/40 flex items-center justify-center p-0">
+                <input 
+                  type="color"
+                  value={getCategoryColor()}
+                  onChange={(e) => onUpdate({ colorRef: e.target.value.toUpperCase() })}
+                  className="absolute inset-0 w-[150%] h-[150%] -translate-x-1/4 -translate-y-1/4 cursor-pointer"
+                />
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center bg-black/10 group-hover:bg-transparent transition-colors">
+                  <Palette size={12} className="text-white/40 group-hover:text-white transition-colors" />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
         
-        <span className="text-[8px] opacity-40 font-black tracking-[2px] uppercase">Drag items to Reorder</span>
+        {!isCollapsed && <span className="text-[8px] opacity-40 font-black tracking-[2px] uppercase hidden sm:block">Drag items to Reorder</span>}
       </div>
       
-      <Reorder.Group 
-        axis="y" 
-        values={category.items} 
-        onReorder={(newItems) => onUpdate({ items: newItems })}
-        className="flex flex-col gap-2"
-      >
+      <AnimatePresence initial={false}>
+      {!isCollapsed && (
+        <motion.div
+           initial={{ height: 0, opacity: 0 }}
+           animate={{ height: 'auto', opacity: 1 }}
+           exit={{ height: 0, opacity: 0 }}
+           className="overflow-hidden space-y-4"
+        >
+          <Reorder.Group 
+            axis="y" 
+            values={category.items} 
+            onReorder={(newItems) => onUpdate({ items: newItems })}
+            className="flex flex-col gap-2"
+          >
         {category.items.map((item, idx) => (
           <Reorder.Item 
             key={item} 
             value={item}
             whileDrag={{ scale: 1.02, boxShadow: "0 20px 40px -10px rgba(0, 0, 0, 0.7)" }}
-            className={`flex items-center gap-3 px-4 py-3 bg-app-bg border border-border group ${borderColorClass} cursor-grab active:cursor-grabbing hover:bg-white/[0.02] relative z-10 rounded-md`}
+            className={`flex items-center gap-3 px-4 py-3 bg-app-bg border border-border group ${borderColorClass} cursor-grab active:cursor-grabbing hover:bg-white/[0.02] relative z-10 rounded-md transition-colors`}
+            style={getCategoryStyle('border')}
           >
             <div className="text-text-dim opacity-30 group-hover:opacity-100 transition-opacity shrink-0">
               <GripVertical size={16} />
@@ -5744,7 +9595,8 @@ function CategoryEditor({ category, onUpdate }: CategoryEditorProps) {
                 type="text" 
                 value={item} 
                 onChange={(e) => renameItem(idx, e.target.value)}
-                className={`bg-transparent border-none outline-none text-[13px] font-bold w-full text-white focus:${colorClass} cursor-text tracking-wide`}
+                className="bg-transparent border-none outline-none text-[13px] font-bold w-full text-white cursor-text tracking-wide"
+                style={category.colorRef?.startsWith('#') ? {} : { color: 'inherit' }}
                 onClick={(e) => e.stopPropagation()}
               />
             </div>
@@ -5766,15 +9618,20 @@ function CategoryEditor({ category, onUpdate }: CategoryEditorProps) {
           onChange={(e) => setNewItem(e.target.value)}
           placeholder="Nouvel élément..."
           onKeyDown={(e) => e.key === 'Enter' && addItem()}
-          className={`flex-1 px-4 py-2 bg-app-bg border border-border outline-none ${focusBorderClass} text-sm text-white`}
+          className={`flex-1 px-4 py-2 bg-app-bg border border-border outline-none ${focusBorderClass} text-sm text-white transition-colors`}
+          style={getCategoryStyle('border')}
         />
         <button 
           onClick={addItem}
           className={`px-4 py-2 border border-current ${colorClass} uppercase text-[10px] font-black tracking-widest hover:bg-white/5 transition-all`}
+          style={getCategoryStyle('text')}
         >
           Ajouter
         </button>
       </div>
+      </motion.div>
+      )}
+      </AnimatePresence>
     </div>
   );
 }

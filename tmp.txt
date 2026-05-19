@@ -1,0 +1,549 @@
+137-    />
+138-  </div>
+139-);
+140-
+141-function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen, setIsOpen, accentColor = "text-accent" }: any) {
+142:  return (
+143-    <div className="space-y-2 relative">
+144-      <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2">
+145-        <Icon size={10} /> {label} {selected.length > 0 && <span className="bg-accent text-black px-1 rounded text-[8px]">{selected.length}</span>}
+146-      </label>
+147-      
+148-      <div 
+149-        onClick={() => setIsOpen(!isOpen)}
+150-        className="w-full bg-black/40 border border-white/10 p-2.5 rounded text-[11px] text-white/70 outline-none focus:border-accent-blue transition-all cursor-pointer flex items-center justify-between group hover:border-white/30 h-[42px]"
+151-      >
+152-        <span className="truncate max-w-[80px]">
+153-          {selected.length === 0 ? `Tout` : 
+154-           selected.length === 1 ? selected[0] : 
+155-           `${selected.length} sel.`}
+156-        </span>
+157-        <ChevronRight size={14} className={`transition-transform shrink-0 ${isOpen ? 'rotate-90 text-accent' : 'text-text-dim'}`} />
+158-      </div>
+159-
+160-      <AnimatePresence>
+161-        {isOpen && (
+162-          <>
+--
+181-                {selected.length === 0 && <Check size={12} />}
+182-              </div>
+183-              <div className="h-[1px] bg-white/5 my-1" />
+184-              {items.map((s: string) => {
+185-                const isSelected = selected.includes(s);
+186:                return (
+187-                  <div 
+188-                    key={s}
+189-                    onClick={() => {
+190-                      setSelected((prev: string[]) => 
+191-                        isSelected ? prev.filter(item => item !== s) : [...prev, s]
+192-                      );
+193-                    }}
+194-                    className={`px-4 py-2 text-[10px] cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors ${isSelected ? 'text-white font-bold bg-white/5' : 'text-text-dim'}`}
+195-                  >
+196-                    <span className="truncate pr-2">{s}</span>
+197-                    {isSelected && <Check size={12} className={accentColor} />}
+198-                  </div>
+199-                );
+200-              })}
+201-            </motion.div>
+202-          </>
+203-        )}
+204-      </AnimatePresence>
+205-    </div>
+206-  );
+--
+893-    const interval = setInterval(() => {
+894-      performSave();
+895-      console.log('[SYSTEM] Auto-save completed at ' + new Date().toLocaleTimeString());
+896-    }, 60000); // Every 60 seconds
+897-    
+898:    return () => clearInterval(interval);
+899-  }, [performSave]);
+900-
+901-  // Initialize selections with first items if available
+902-  useEffect(() => {
+903-    if (!selectedProduct && categories[0].items.length > 0) setSelectedProduct(categories[0].items[0]);
+904-    if (!selectedColor && categories[1].items.length > 0) setSelectedColor(categories[1].items[0]);
+905-    if (!selectedArgument && categories[2].items.length > 0) setSelectedArgument(categories[2].items[0]);
+906-    if (!selectedUnivers && categories[3].items.length > 0) setSelectedUnivers(categories[3].items[0]);
+907-    if (!selectedFormat && categories[4].items.length > 0) setSelectedFormat(categories[4].items[0]);
+908-    if (!selectedPosition && categories[5].items.length > 0) setSelectedPosition(categories[5].items[0]);
+909-    if (selectedSupport.length === 0 && categories[6].items.length > 0) setSelectedSupport([categories[6].items[0]]);
+910-    if (!selectedPriority && categories[7].items.length > 0) setSelectedPriority(categories[7].items[0]);
+911-    if (!selectedStatus && categories[8].items.length > 0) setSelectedStatus(categories[8].items[0]);
+912-  }, [categories]);
+913-
+914-  const getInitialProgress = (status: string) => {
+915-    switch (status) {
+916-      case 'livré': return 100;
+917-      case 'déja shooter': return 75;
+918-      case 'en cour de shoot': return 50;
+--
+1445-    if (activeTab === 'journal') {
+1446-      // Small timeout to ensure DOM catchup for AnimatePresence
+1447-      const timer = setTimeout(() => {
+1448-        logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+1449-      }, 100);
+1450:      return () => clearTimeout(timer);
+1451-    }
+1452-  }, [globalLogs, activeTab]);
+1453-
+1454-  // New sub-components for Dashboard and Journal
+1455-  const WaveEffect = ({ progress, color, type, opacity }: { progress: number, color: string, type: 'liquid' | 'organic' | 'tech', opacity?: number }) => {
+1456-    const getPath = () => {
+1457-      switch(type) {
+1458-        case 'organic':
+1459-          return "M0,60 C200,20 400,100 600,60 S1000,100 1200,60 C1400,20 1600,100 1800,60 S2200,100 2400,60 L2400,120 L0,120 Z";
+1460-        case 'tech':
+1461-          return "M0,60 L150,20 L300,100 L450,20 L600,60 L750,20 L900,100 L1050,20 L1200,60 L1350,20 L1500,100 L1650,20 L1800,60 L1950,20 L2100,100 L2250,20 L2400,60 L2400,120 L0,120 Z";
+1462-        default: // liquid
+1463-          return "M0,60 C150,110 450,10 600,60 S1050,10 1200,60 C1350,110 1650,10 1800,60 S2250,10 2400,60 L2400,120 L0,120 Z";
+1464-      }
+1465-    };
+1466-
+1467-    const path = getPath();
+1468-    
+1469-    // Map properly to CSS variables or direct hex
+1470-    const getGradientColor = () => {
+--
+1477-      if (color === 'text-accent-red') return 'var(--color-accent-red)';
+1478-      if (color === 'text-accent-yellow') return 'var(--color-accent-yellow)';
+1479-      return 'currentColor';
+1480-    };
+1481-
+1482:    return (
+1483-      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden" style={{ opacity: opacity !== undefined ? opacity : 0.3 }}>
+1484-        <motion.div
+1485-          className="absolute bottom-0 left-0 w-[200%] h-[150%] flex flex-col"
+1486-          animate={{ y: `${100 - (progress > 100 ? 100 : progress) * 0.9}%` }}
+1487-          transition={{ type: 'spring', damping: 30, stiffness: 45 }}
+1488-        >
+1489-          <div className="relative w-full h-[150px]">
+1490-            <motion.svg
+1491-              viewBox="0 0 1200 120"
+1492-              preserveAspectRatio="none"
+1493-              className={`absolute top-0 left-0 w-full h-full ${!color.startsWith('#') ? color : ''}`}
+1494-              style={color.startsWith('#') ? { color } : {}}
+1495-              animate={{
+1496-                x: [0, -1200],
+1497-              }}
+1498-              transition={{
+1499-                duration: type === 'tech' ? 5 : 10,
+1500-                repeat: Infinity,
+1501-                ease: "linear"
+1502-              }}
+--
+1530-    );
+1531-  };
+1532-
+1533-  const MosaicView = () => {
+1534-    const allStatuses = categories.find(c => c.id === 'status')?.items || [];
+1535:    return (
+1536-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
+1537-        {filteredMissions.map((m, idx) => (
+1538-          <motion.div
+1539-            key={m.id}
+1540-            layout
+1541-            initial={{ opacity: 0, scale: 0.9 }}
+1542-            animate={{ opacity: 1, scale: 1 }}
+1543-            transition={{ delay: idx * 0.05 }}
+1544-            className={`cursor-pointer bg-black/40 border border-white/10 rounded-2xl overflow-hidden group hover:border-accent/40 transition-all shadow-xl flex flex-col relative ${
+1545-              selectedMissionIds.includes(m.id) ? 'ring-2 ring-accent border-accent' : ''
+1546-            }`}
+1547-            onClick={(e) => {
+1548-              if (e.shiftKey) {
+1549-                toggleSelectMission(m.id, e);
+1550-              } else {
+1551-                setSelectedMissionId(m.id);
+1552-              }
+1553-            }}
+1554-          >
+1555-            {/* Image/Placeholder */}
+--
+1912-    );
+1913-
+1914-    const completionRate = stats.total > 0 ? (stats.completed / stats.total) * 100 : 0;
+1915-    const productionRate = stats.total > 0 ? (stats.inProduction / stats.total) * 100 : 0;
+1916-
+1917:    return (
+1918-      <div className="space-y-6 mb-12">
+1919-        {/* Bilan Stratégique Header */}
+1920-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+1921-          <motion.div 
+1922-            initial={{ opacity: 0, y: 20 }}
+1923-            animate={{ opacity: 1, y: 0 }}
+1924-            className="lg:col-span-2 p-8 bg-gradient-to-br from-accent/10 via-black/40 to-black/60 border border-white/10 rounded-2xl relative overflow-hidden flex flex-col justify-between shadow-2xl"
+1925-          >
+1926-            <div className="absolute top-0 right-0 p-4 opacity-10">
+1927-              <Sparkles size={120} className="text-accent" />
+1928-            </div>
+1929-            <div className="relative z-10">
+1930-              <div className="flex items-center gap-3 mb-6">
+1931-                <div className="p-2 bg-accent/20 rounded-lg text-accent">
+1932-                  <TrendingUp size={18} />
+1933-                </div>
+1934-                <h2 className="text-sm font-black uppercase tracking-[4px] text-white">Bilan de Progrès Stratégique</h2>
+1935-              </div>
+1936-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+1937-                <div className="space-y-2">
+--
+2550-  };
+2551-
+2552-  const renderSystemView = () => {
+2553-    const analysis = getMovementAnalysis();
+2554-    
+2555:    return (
+2556-      <div className="space-y-8 max-w-6xl mx-auto pb-24 px-4 sm:px-10">
+2557-        {/* Navigation Sub-Tabs */}
+2558-        <div className="flex flex-wrap gap-4 p-2 bg-black/40 border border-white/10 rounded-2xl backdrop-blur-md mb-10 sticky top-24 z-30 shadow-2xl">
+2559-          {[
+2560-            { id: 'branding', label: 'Identité Visuelle', icon: Palette },
+2561-            { id: 'data', label: 'Structure & Data', icon: Database },
+2562-            { id: 'ai', label: 'Agent IA Gemini', icon: Cpu }
+2563-          ].map(tab => {
+2564-            const Icon = tab.icon;
+2565:            return (
+2566-              <button
+2567-                key={tab.id}
+2568-                onClick={() => setSystemSubTab(tab.id as any)}
+2569-                className={`flex-1 flex items-center justify-center gap-3 py-4 rounded-xl text-[10px] font-black uppercase tracking-[2px] transition-all ${
+2570-                  systemSubTab === tab.id 
+2571-                    ? 'bg-accent text-black shadow-[0_0_20px_rgba(0,255,148,0.3)]' 
+2572-                    : 'text-white/40 hover:text-white hover:bg-white/5'
+2573-                }`}
+2574-              >
+2575-                <Icon size={16} />
+2576-                {tab.label}
+2577-              </button>
+2578-            );
+2579-          })}
+2580-        </div>
+2581-
+2582-        <AnimatePresence mode="wait">
+2583-          {systemSubTab === 'ai' && (
+2584-            <motion.div
+2585-              key="ai"
+--
+3306-    }
+3307-    
+3308-    return 0;
+3309-  });
+3310-
+3311:  return (
+3312-    <div 
+3313-      id="app-root"
+3314-      className={`min-h-screen bg-app-bg flex flex-col ${appFont} ${appFontWeight} ${appTextCase === 'uppercase' ? 'uppercase' : ''}`}
+3315-      style={{ fontSize: `${appFontSize}%`, color: appTextColor }}
+3316-    >
+3317-      <style>{`
+3318-        #app-root, 
+3319-        #app-root h1, #app-root h2, #app-root h3, 
+3320-        #app-root .text-white, 
+3321-        #app-root .text-white\\/90, 
+3322-        #app-root .text-white\\/70, 
+3323-        #app-root .text-white\\/50 {
+3324-          color: ${appTextColor} !important;
+3325-        }
+3326-        
+3327-        /* Retenir le blanc pour les éléments sur fond coloré (badges, boutons accent) */
+3328-        #app-root [class*="bg-accent"] .text-white,
+3329-        #app-root [class*="bg-accent-blue"] .text-white,
+3330-        #app-root [class*="bg-accent-pink"] .text-white,
+3331-        #app-root [class*="bg-accent-purple"] .text-white,
+--
+3532-                cat.colorRef === 'accent-orange' ? 'text-accent-orange' :
+3533-                cat.colorRef === 'accent-red' ? 'text-accent-red' :
+3534-                cat.colorRef === 'accent-yellow' ? 'text-accent-yellow' :
+3535-                'text-accent';
+3536-
+3537:              return (
+3538-                <div key={cat.id} className="flex flex-col gap-3 group/cat">
+3539-                  <div 
+3540-                    className="flex items-center justify-between cursor-pointer group"
+3541-                    onClick={() => {
+3542-                      setCollapsedCategories(prev => 
+3543-                        prev.includes(cat.id) ? prev.filter(c => c !== cat.id) : [...prev, cat.id]
+3544-                      );
+3545-                    }}
+3546-                  >
+3547-                    <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2 group-hover:text-white transition-colors cursor-pointer">
+3548-                      <cat.icon size={12} className={iconColor} />
+3549-                      {cat.name}
+3550-                    </label>
+3551-                    <motion.div
+3552-                      animate={{ rotate: isCollapsed ? -90 : 0 }}
+3553-                      className="text-text-dim/40 group-hover:text-accent transition-colors"
+3554-                    >
+3555-                      <ChevronDown size={14} />
+3556-                    </motion.div>
+3557-                  </div>
+--
+3655-                          (cat.id === 'position' && selectedPosition === item) ||
+3656-                          (cat.id === 'support' && selectedSupport.includes(item)) ||
+3657-                          (cat.id === 'priority' && selectedPriority === item) ||
+3658-                          (cat.id === 'status' && selectedStatus === item);
+3659-
+3660:                        return (
+3661-                          <button
+3662-                            key={item}
+3663-                            onClick={() => {
+3664-                              if (cat.id === 'argument') setSelectedArgument(item);
+3665-                              if (cat.id === 'univers') setSelectedUnivers(item);
+3666-                              if (cat.id === 'format') setSelectedFormat(item);
+3667-                              if (cat.id === 'position') setSelectedPosition(item);
+3668-                              if (cat.id === 'support') setSelectedSupport(prev => prev.includes(item) ? prev.filter(x => x !== item) : [...prev, item]);
+3669-                              if (cat.id === 'priority') setSelectedPriority(item);
+3670-                              if (cat.id === 'status') setSelectedStatus(item);
+3671-                            }}
+3672-                            className={`text-left p-2.5 rounded-md text-[11px] font-medium transition-all active:scale-95 border lowercase ${
+3673-                              isSelected
+3674-                                ? activeColor
+3675-                                : 'bg-card-bg border-border text-text-dim hover:border-slate-500 hover:text-white'
+3676-                            }`}
+3677-                          >
+3678-                            {item}
+3679-                          </button>
+3680-                        );
+--
+3702-                  const isHalf = selectedRating + 0.5 === val;
+3703-                  
+3704-                  // We only render 5 star positions, but allow 10 increments
+3705-                  if (val % 1 !== 0) return null;
+3706-
+3707:                  return (
+3708-                    <div key={val} className="relative flex items-center group/star">
+3709-                      <button
+3710-                        onClick={() => setSelectedRating(val - 0.5)}
+3711-                        className="absolute left-0 w-1/2 h-full z-10 cursor-pointer"
+3712-                        title={`${val - 0.5}/5`}
+3713-                      />
+3714-                      <button
+3715-                        onClick={() => setSelectedRating(val)}
+3716-                        className="absolute right-0 w-1/2 h-full z-10 cursor-pointer"
+3717-                        title={`${val}/5`}
+3718-                      />
+3719-                      <div className={`transition-all ${selectedRating >= val ? 'text-accent-yellow scale-110' : selectedRating >= val - 0.5 ? 'text-accent-yellow/70 scale-105' : 'text-white/10'}`}>
+3720-                        <Sparkles 
+3721-                          size={20} 
+3722-                          fill={selectedRating >= val ? 'currentColor' : 'none'} 
+3723-                          className={selectedRating === val - 0.5 ? 'opacity-50' : ''}
+3724-                        />
+3725-                      </div>
+3726-                    </div>
+3727-                  );
+--
+4459-                                { id: 'ficha', label: 'Dossier', class: 'text-right text-accent-blue/80 w-24', sortable: false }
+4460-                              ].filter(h => !hiddenColumns.includes(h.id)).map((h) => {
+4461-                                const sort = sortConfigs.find(s => s.key === h.id);
+4462-                                const isSortable = h.sortable !== false;
+4463-                                
+4464:                                return (
+4465-                                  <th 
+4466-                                    key={h.id} 
+4467-                                    onClick={(e) => isSortable && toggleSort(h.id, e.shiftKey)}
+4468-                                    className={`py-5 px-3 border-r border-white/5 last:border-r-0 ${isSortable ? 'cursor-pointer hover:bg-white/5 transition-colors group' : ''} relative`}
+4469-                                  >
+4470-                                    <div className={`flex items-center gap-2 ${h.class.includes('text-right') ? 'justify-end' : h.class.includes('text-center') ? 'justify-center' : ''}`}>
+4471-                                      <span className="font-serif italic text-[11px] font-normal uppercase tracking-[2px] opacity-40 group-hover:opacity-100 transition-opacity whitespace-nowrap overflow-hidden text-ellipsis">
+4472-                                        {h.label}
+4473-                                      </span>
+4474-                                      
+4475-                                      {/* Individual Hide Button */}
+4476-                                      <button
+4477-                                        onClick={(e) => {
+4478-                                          e.stopPropagation();
+4479-                                          setHiddenColumns(prev => [...prev, h.id]);
+4480-                                        }}
+4481-                                        className="opacity-0 group-hover:opacity-100 p-1 text-text-dim hover:text-white transition-all hover:scale-110"
+4482-                                        title="Masquer cette colonne"
+4483-                                      >
+4484-                                        <Minimize size={10} />
+--
+5011-                      univers: 'CAT.UNIVERS',
+5012-                      format: 'DIM.FORMAT',
+5013-                      color: 'VAR.COULEUR'
+5014-                    }[config.key as any] || config.key;
+5015-
+5016:                    return (
+5017-                      <div key={`${config.key}-${idx}`} className="flex items-center justify-between p-4 bg-black/40 border border-white/5 rounded group hover:border-accent/30 transition-all relative">
+5018-                        <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent/40 scale-y-0 group-hover:scale-y-100 transition-transform origin-top" />
+5019-                        <div className="flex items-center gap-5">
+5020-                          <div className="flex flex-col items-center gap-0.5 min-w-[20px]">
+5021-                            <button 
+5022-                              onClick={() => {
+5023-                                if (idx === 0) return;
+5024-                                const newConfigs = [...sortConfigs];
+5025-                                [newConfigs[idx], newConfigs[idx-1]] = [newConfigs[idx-1], newConfigs[idx]];
+5026-                                setSortConfigs(newConfigs);
+5027-                              }}
+5028-                              className="text-white/20 hover:text-accent disabled:opacity-0 transition-all p-0.5"
+5029-                              disabled={idx === 0}
+5030-                            >
+5031-                              <ChevronUp size={12} />
+5032-                            </button>
+5033-                            <span className="text-[9px] font-mono font-black text-accent/60">{String(idx + 1).padStart(2, '0')}</span>
+5034-                            <button 
+5035-                              onClick={() => {
+5036-                                if (idx === sortConfigs.length - 1) return;
+--
+5096-                      { id: 'univers', label: 'UNIVERS' },
+5097-                      { id: 'format', label: 'FORMAT' },
+5098-                      { id: 'color', label: 'COULEUR' }
+5099-                    ].map((opt) => {
+5100-                      const isActive = sortConfigs.some(s => s.key === opt.id);
+5101:                      return (
+5102-                        <button
+5103-                          key={opt.id}
+5104-                          disabled={isActive}
+5105-                          onClick={() => setSortConfigs([...sortConfigs, { key: opt.id, order: 'asc' }])}
+5106-                          className={`p-2.5 rounded text-[9px] font-bold text-left transition-all border ${
+5107-                            isActive 
+5108-                              ? 'bg-white/5 border-white/10 opacity-30 cursor-not-allowed text-white/50' 
+5109-                              : 'bg-black/60 border-white/10 text-white/80 hover:border-accent hover:text-accent'
+5110-                          }`}
+5111-                        >
+5112-                          <span className="opacity-40 font-mono mr-2">+</span>
+5113-                          {opt.label}
+5114-                        </button>
+5115-                      );
+5116-                    })}
+5117-                  </div>
+5118-                </div>
+5119-
+5120-                <div className="flex items-center justify-between pt-4">
+5121-                  <div className="flex items-center gap-2 px-3 py-2 bg-accent/5 border border-accent/20 rounded">
+--
+5240-                         const cat = categories.find(c => c.id === catId);
+5241-                         if (!cat) return null;
+5242-                         const CatIcon = cat.icon;
+5243-                         const fieldKey = catId === 'argument' ? 'argumentType' : catId;
+5244-                         
+5245:                         return (
+5246-                           <div key={catId} className="space-y-1.5">
+5247-                             <label className="text-[9px] font-black uppercase tracking-widest text-text-dim flex items-center gap-2 capitalize">
+5248-                               <CatIcon size={10} strokeWidth={2.5} /> {cat.name}
+5249-                             </label>
+5250-                             <select 
+5251-                               value={item[fieldKey as keyof any]}
+5252-                               onChange={(e) => updatePendingItem(item.tempId, { [fieldKey]: e.target.value })}
+5253-                               className="w-full bg-black/60 border border-white/10 rounded-lg px-4 py-2.5 text-[10px] text-white focus:border-white/30 outline-none transition-all uppercase font-bold appearance-none cursor-pointer"
+5254-                             >
+5255-                               {cat.items.map(opt => (
+5256-                                 <option key={opt} value={opt} className="bg-app-bg text-white">{opt}</option>
+5257-                               ))}
+5258-                             </select>
+5259-                           </div>
+5260-                         );
+5261-                       })}
+5262-
+5263-                       {/* Instructions */}
+5264-                       <div className="space-y-1.5 md:col-span-2 lg:col-span-1">
+5265-                         <label className="text-[9px] font-black uppercase tracking-widest text-text-dim flex items-center gap-2">
+--
+5373-                          { id: 'suggestion', icon: Sparkles, label: 'Idée', color: 'text-accent' },
+5374-                          { id: 'bug', icon: Bug, label: 'Bug', color: 'text-red-500' },
+5375-                          { id: 'praise', icon: MessageCircle, label: 'Note', color: 'text-accent-blue' }
+5376-                        ].map((t) => {
+5377-                          const Icon = t.icon;
+5378:                          return (
+5379-                            <button
+5380-                              key={t.id}
+5381-                              onClick={() => setFeedbackType(t.id as any)}
+5382-                              className={`flex flex-col items-center justify-center gap-2 py-3 border rounded-xl transition-all ${feedbackType === t.id ? `bg-white/5 border-white/20 ${t.color}` : 'border-white/5 text-white/40 hover:border-white/10'}`}
+5383-                            >
+5384-                              <Icon size={16} />
+5385-                              <span className="text-[9px] font-black uppercase tracking-tighter">{t.label}</span>
+5386-                            </button>
+5387-                          );
+5388-                        })}
+5389-                      </div>
+5390-                    </div>
+5391-
+5392-                    <div className="space-y-3">
+5393-                      <label className="text-[9px] font-black uppercase tracking-widest text-text-dim">Titre du Signal</label>
+5394-                      <input 
+5395-                        type="text"
+5396-                        value={feedbackTitle}
+5397-                        onChange={(e) => setFeedbackTitle(e.target.value)}
+5398-                        placeholder="Ex: Amélioration du dashboard..."
+--
+5758-      status: nextStatus,
+5759-      progress: nextProgress
+5760-    });
+5761-  };
+5762-
+5763:  return (
+5764-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+5765-      <motion.div 
+5766-         initial={{ opacity: 0 }}
+5767-         animate={{ opacity: 1 }}
+5768-         exit={{ opacity: 0 }}
+5769-         onClick={onClose}
+5770-         className="absolute inset-0 bg-black/90 backdrop-blur-md"
+5771-      />
+5772-      <motion.div 
+5773-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+5774-        animate={{ scale: 1, opacity: 1, y: 0 }}
+5775-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+5776-        className="bg-card-bg w-full max-w-4xl border border-white/10 shadow-2xl relative z-10 overflow-hidden rounded-none mission-sheet-print"
+5777-      >
+5778-        {/* Header decoration */}
+5779-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent via-accent-blue to-accent-purple" />
+5780-        
+5781-        <div className="max-h-[85vh] overflow-y-auto p-10 custom-scrollbar" id="mission-detail-content">
+5782-          <div className="flex justify-between items-start mb-8 print:mb-12 border-b border-white/5 pb-8">
+5783-            <div className="flex items-center gap-6">
+--
+6055-    </div>
+6056-  );
+6057-}
+6058-
+6059-function DetailItem({ label, value, color, colorOverride }: { label: string, value: string | number, color?: string, colorOverride?: string }) {
+6060:  return (
+6061-    <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+6062-      <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">{label}</span>
+6063-      <span 
+6064-        className={`text-[11px] font-mono font-medium ${color || 'text-white'} group-hover/item:scale-105 transition-transform`}
+6065-        style={colorOverride ? { color: colorOverride } : {}}
+6066-      >
+6067-        {value}
+6068-      </span>
+6069-    </div>
+6070-  );
+6071-}
+6072-
+6073-interface CategoryEditorProps {
+6074-  key?: React.Key;
+6075-  category: CategoryConfig;
+6076-  onUpdate: (updates: Partial<CategoryConfig>) => void;
+6077-  isCollapsed?: boolean;
+6078-  onToggle?: () => void;
+6079-}
+6080-
+--
+6136-    category.colorRef === 'accent-orange' ? 'focus:border-accent-orange' :
+6137-    category.colorRef === 'accent-red' ? 'focus:border-accent-red' :
+6138-    category.colorRef === 'accent-yellow' ? 'focus:border-accent-yellow' :
+6139-    'focus:border-accent';
+6140-
+6141:  return (
+6142-    <div className={`p-6 bg-card-bg border border-border ${isCollapsed ? 'pb-6' : 'space-y-4'}`}>
+6143-      <div className={`flex flex-col sm:flex-row sm:items-center gap-4 ${isCollapsed ? '' : 'border-b border-white/5 pb-4'}`}>
+6144-        <div 
+6145-          className="flex items-center gap-2 font-bold uppercase text-[11px] text-text-dim tracking-wider cursor-pointer group hover:text-white transition-colors"
+6146-          onClick={onToggle}
+6147-        >
+6148-          <category.icon size={14} className={colorClass} />
+6149-          <span>Modifier {category.name}</span>
+6150-          <ChevronDown size={14} className={`ml-2 transition-transform ${isCollapsed ? '-rotate-90 text-text-dim/40' : 'text-accent'}`} />
+6151-        </div>
+6152-        
+6153-        <div className="flex-1" />
+6154-        
+6155-        <div className="flex items-center gap-1.5 bg-black/20 p-1 rounded-lg border border-white/5">
+6156-          {availableColors.map((color) => (
+6157-            <button
+6158-              key={color.ref}
+6159-              onClick={() => onUpdate({ colorRef: color.ref })}
+6160-              title={color.name}
+6161-              className={`w-4 h-4 rounded-full transition-all hover:scale-125 ${
