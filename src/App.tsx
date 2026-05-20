@@ -1979,6 +1979,141 @@ LISTE DES COMMANDES :
   
   downloadFullExportRef.current = downloadFullExport;
 
+  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = new Uint8Array(event.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        
+        let sheetName = "";
+        if (workbook.SheetNames.includes("Production (Missions)")) {
+          sheetName = "Production (Missions)";
+        } else if (workbook.SheetNames.includes("Missions Production")) {
+          sheetName = "Missions Production";
+        } else {
+          sheetName = workbook.SheetNames[0]; // fallback
+        }
+        
+        const worksheet = workbook.Sheets[sheetName];
+        if (!worksheet) {
+          setToast({ show: true, message: 'Le fichier Excel est invalide ou vide.', type: 'alert' });
+          return;
+        }
+
+        const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        // rows[0] is typically the header row
+        if (rows.length <= 1) {
+          setToast({ show: true, message: 'Aucune donnée trouvée dans le fichier Excel.', type: 'alert' });
+          return;
+        }
+
+        const newMissions: Mission[] = [];
+        let maxMissionNo = missionCounter;
+        let maxRefCounter = refCounter;
+        
+        // Start from index 1 (skipping header)
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          // Valid row must have at least some data
+          if (!row || row.length === 0 || (!row[0] && !row[5])) continue;
+          
+          const missionNo = parseInt(String(row[0]), 10) || maxMissionNo;
+          const refId = row[1] ? String(row[1]) : `${refPrefix}-${maxRefCounter}`;
+          
+          const isEnabled = String(row[4]).toUpperCase() === 'OUI' || row[4] === true;
+          
+          const product = row[5] ? String(row[5]) : '';
+          const color = row[6] ? String(row[6]) : '';
+          const argumentType = row[7] ? String(row[7]) : '';
+          const univers = row[8] ? String(row[8]) : '';
+          const format = row[9] ? String(row[9]) : '';
+          const position = row[10] ? String(row[10]) : '';
+          const supportStr = row[11] ? String(row[11]) : '';
+          
+          const photoCountRequested = parseInt(String(row[12]), 10) || 1;
+          const photoCountDelivered = parseInt(String(row[13]), 10) || 0;
+          
+          const priority = row[14] ? String(row[14]) : 'Medium priority';
+          const deadlineRaw = row[15] === '-' ? '' : row[15] ? String(row[15]) : '';
+          const status = row[16] ? String(row[16]) : 'en attente';
+          const progress = parseInt(String(row[17]), 10) || 0;
+          const rating = parseFloat(String(row[18])) || 0;
+          
+          const info = row[21] === '-' ? '' : row[21] ? String(row[21]) : '';
+
+          if (missionNo >= maxMissionNo) maxMissionNo = missionNo + 1;
+          const parsedRefNum = parseInt(refId.split('-')[1], 10);
+          if (!isNaN(parsedRefNum) && parsedRefNum >= maxRefCounter) maxRefCounter = parsedRefNum + 1;
+          
+          const newMission: Mission = {
+            id: Math.random().toString(36).substring(2, 9),
+            missionNo,
+            refId,
+            product,
+            color,
+            argumentType,
+            univers,
+            format,
+            position,
+            support: supportStr,
+            priority,
+            status,
+            progress,
+            photoCountRequested,
+            photoCountDelivered,
+            rating,
+            info,
+            deadline: deadlineRaw,
+            createdAt: Date.now(), // Create new date for imported ones for simplicity
+            history: [],
+            enabled: isEnabled
+          };
+          
+          // Basic duplicate check (optional, but good for clean import)
+          if (!isDuplicate(newMission)) {
+             newMissions.push(newMission);
+          }
+        }
+
+        setMissions(prev => {
+          const merged = [...prev, ...newMissions];
+          // deduplicate just in case
+          const uniqueIds = new Set();
+          return merged.filter(m => {
+            if (uniqueIds.has(m.id)) return false;
+            uniqueIds.add(m.id);
+            return true;
+          });
+        });
+        
+        setMissionCounter(maxMissionNo);
+        setRefCounter(maxRefCounter);
+        
+        setGlobalLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: Date.now(),
+          message: `SYSTÈME : Importation de ${newMissions.length} missions depuis Excel.`,
+          type: 'system'
+        }]);
+
+        setToast({ show: true, message: `${newMissions.length} missions importées avec succès !`, type: 'task' });
+        setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+      } catch (err: any) {
+        setToast({ show: true, message: `Erreur import Excel: ${err.message}`, type: 'alert' });
+        setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 4000);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    
+    // reset file input
+    if (e.target) e.target.value = '';
+  };
+
   const pushToGoogleSheets = async () => {
     if (!googleToken) {
       setToast({ show: true, message: 'Connectez Workspace d\'abord !', type: 'alert' });
@@ -3833,6 +3968,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     id: "chart-status",
                     title: "Distribution par État", 
                     subtitle: "Data Flow Analysis", 
+                    onExport: exportChartAsJPEG,
                     className: "lg:col-span-2", 
                     delay: 0.1,
                     rightElement: (
@@ -3901,6 +4037,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     id: "chart-support",
                     title: "Répartition Supports", 
                     subtitle: "Asset Allocation", 
+                    onExport: exportChartAsJPEG,
                     delay: 0.2,
                     rightElement: (
                       <button 
@@ -3959,6 +4096,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     id: "chart-product",
                     title: "Produits", 
                     subtitle: "Répartition par Produit", 
+                    onExport: exportChartAsJPEG,
                     delay: 0.3,
                     rightElement: (
                       <button 
@@ -3996,6 +4134,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     id: "chart-univers",
                     title: "Univers", 
                     subtitle: "Répartition par Univers", 
+                    onExport: exportChartAsJPEG,
                     delay: 0.4,
                     rightElement: (
                       <button 
@@ -4052,6 +4191,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     id: "chart-argument",
                     title: "Type d'Argument", 
                     subtitle: "Répartition par Argument", 
+                    onExport: exportChartAsJPEG,
                     delay: 0.5,
                     rightElement: (
                       <button 
@@ -4108,6 +4248,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     id: "chart-poids",
                     title: "Poids Stratégique", 
                     subtitle: "Production vs Secondaire", 
+                    onExport: exportChartAsJPEG,
                     delay: 0.6,
                     rightElement: (
                       <button 
@@ -6589,6 +6730,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <span className="text-[11px] font-bold uppercase tracking-wider">Auto-Sauvegarde (Browser)</span>
                 <Save size={14} />
               </button>
+              <button 
+                onClick={() => document.getElementById('excel-sys-import')?.click()}
+                className="w-full flex items-center justify-between p-3 border border-border rounded-md text-text-dim hover:text-white hover:border-accent-blue transition-colors"
+              >
+                <span className="text-[11px] font-bold uppercase tracking-wider text-accent-blue">Import Excel</span>
+                <Upload size={14} className="text-accent-blue" />
+              </button>
                <button 
                 onClick={copyToExcel}
                 disabled={missions.length === 0}
@@ -6801,6 +6949,22 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   {isCapturing ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
                   {isCapturing ? 'Batch...' : 'Tout Exporter'}
                 </button>
+
+                <button 
+                  onClick={() => document.getElementById('excel-sys-import')?.click()}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed"
+                  title="Importer des données depuis un fichier Excel"
+                >
+                  <Upload size={12} />
+                  Import Excel
+                </button>
+                <input 
+                  id="excel-sys-import"
+                  type="file"
+                  accept=".xlsx, .xls"
+                  className="hidden"
+                  onChange={handleExcelImport}
+                />
 
                 <button 
                   onClick={downloadFullExport}
@@ -8896,7 +9060,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       </div>
 
       {/* Export Template (Hidden) - Hardcoded colors for capture reliability */}
-      <div id="global-report-container" style={{ position: 'fixed', top: '-9999px', left: '-9999px', backgroundColor: '#0A0A0A', color: '#FFFFFF', padding: '80px', width: '1200px', display: 'none', fontFamily: 'sans-serif' }}>
+      <div id="global-report-container" style={{ position: 'absolute', top: '-9999px', left: '-9999px', backgroundColor: '#0A0A0A', color: '#FFFFFF', padding: '80px', width: '1200px', fontFamily: 'sans-serif' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '64px', borderBottom: '2px solid rgba(255,255,255,0.1)', paddingBottom: '40px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
