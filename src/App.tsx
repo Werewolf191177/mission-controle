@@ -94,6 +94,137 @@ import {
 import { initAuth, googleSignIn, logout, getAccessToken } from './services/firebaseAuth';
 import type { User } from 'firebase/auth';
 
+// --- STABLE SUB-COMPONENTS ---
+
+const StatCard = ({ label, value, subValue, icon: Icon, color, delay = 0, breakdown }: any) => (
+  <motion.div 
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay }}
+    className="bg-black/40 border border-white/10 p-6 rounded-2xl relative overflow-hidden group hover:border-accent/40 transition-all shadow-xl flex flex-col justify-between"
+  >
+    <div className="absolute top-0 right-0 w-24 h-24 bg-white/[0.02] rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl group-hover:bg-white/[0.05] transition-all" />
+    <div className="flex justify-between items-start relative z-10">
+      <div className={`p-2.5 rounded-xl bg-white/5 border border-white/10 ${color}`}>
+        <Icon size={20} strokeWidth={2.5} />
+      </div>
+      {breakdown && (
+        <div className="flex flex-col items-end gap-1">
+          {Object.entries(breakdown).map(([support, count]: any) => (
+            count > 0 && (
+              <div key={support} className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
+                <span className="text-[7px] font-black uppercase text-text-dim tracking-wider font-mono">{support}</span>
+                <span className="text-[9px] font-black text-white leading-none">{count}</span>
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </div>
+    <div className="mt-4 relative z-10">
+      <div className="flex items-baseline gap-2">
+        <span className="text-4xl font-mono font-black tracking-tighter text-white tabular-nums">{value}</span>
+        {subValue && <span className="text-xs font-bold text-text-dim/60">{subValue}</span>}
+      </div>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-text-dim/60 mt-1">{label}</p>
+    </div>
+  </motion.div>
+);
+
+const ChartCard = ({ title, subtitle, children, delay = 0, className = "", rightElement, id, onExport }: any) => (
+  <motion.div 
+    id={id}
+    initial={{ opacity: 0, scale: 0.95 }}
+    animate={{ opacity: 1, scale: 1 }}
+    transition={{ delay }}
+    className={`bg-black/40 border border-white/10 p-6 rounded-2xl shadow-xl flex flex-col group/chart ${className}`}
+  >
+    <div className="flex justify-between items-start mb-6">
+      <div>
+        <h4 className="text-[11px] font-black uppercase tracking-[2px] text-white">{title}</h4>
+        <p className="text-[8px] font-mono text-accent/60 uppercase tracking-widest mt-0.5">{subtitle}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        {id && onExport && (
+          <button 
+            onClick={() => onExport(id, title)}
+            className="p-1 px-1.5 bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 hover:border-white/30 rounded transition-all opacity-0 group-hover/chart:opacity-100"
+            title="Exporter ce graphique"
+          >
+            <Download size={12} />
+          </button>
+        )}
+        {rightElement ? rightElement : <Activity size={14} className="text-white/20" />}
+      </div>
+    </div>
+    <div className="flex-1 min-h-[150px]">
+      {children}
+    </div>
+  </motion.div>
+);
+
+const WaveEffect = ({ progress, color, type, opacity }: { progress: number, color: string, type: 'liquid' | 'organic' | 'tech', opacity?: number }) => {
+  const getPath = () => {
+    switch(type) {
+      case 'organic':
+        return "M0,60 C200,20 400,100 600,60 S1000,100 1200,60 C1400,20 1600,100 1800,60 S2200,100 2400,60 L2400,120 L0,120 Z";
+      case 'tech':
+        return "M0,60 L150,20 L300,100 L450,20 L600,60 L750,20 L900,100 L1050,20 L1200,60 L1350,20 L1500,100 L1650,20 L1800,60 L1950,20 L2100,100 L2250,20 L2400,60 L2400,120 L0,120 Z";
+      default: // liquid
+        return "M0,60 C150,110 450,10 600,60 S1050,10 1200,60 C1350,110 1650,10 1800,60 S2250,10 2400,60 L2400,120 L0,120 Z";
+    }
+  };
+
+  const path = getPath();
+  
+  return (
+    <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden" style={{ opacity: opacity !== undefined ? opacity : 0.3 }}>
+      <motion.div
+        className="absolute bottom-0 left-0 w-[200%] h-[150%] flex flex-col"
+        animate={{ y: `${100 - (progress > 100 ? 100 : progress) * 0.9}%` }}
+        transition={{ type: 'spring', damping: 30, stiffness: 45 }}
+      >
+        <div className="relative w-full h-[150px]">
+          <motion.svg
+            viewBox="0 0 1200 120"
+            preserveAspectRatio="none"
+            className={`absolute top-0 left-0 w-full h-full ${!color.startsWith('#') ? color : ''}`}
+            style={color.startsWith('#') ? { color } : {}}
+            animate={{
+              x: [0, -1200],
+            }}
+            transition={{
+              duration: type === 'tech' ? 5 : 10,
+              repeat: Infinity,
+              ease: "linear"
+            }}
+          >
+            <path d={path} fill="currentColor" />
+          </motion.svg>
+          <motion.svg
+            viewBox="0 0 1200 120"
+            preserveAspectRatio="none"
+            className={`absolute top-0 left-0 w-full h-full opacity-40 ${!color.startsWith('#') ? color : ''}`}
+            style={color.startsWith('#') ? { color } : {}}
+            animate={{
+              x: [-1200, 0],
+            }}
+            transition={{
+              duration: type === 'tech' ? 8 : 15,
+              repeat: Infinity,
+              ease: "linear"
+            }}
+          >
+            <path d={path} fill="currentColor" />
+          </motion.svg>
+        </div>
+        <div className={`flex-1 w-full ${!color.startsWith('#') ? color : ''}`} style={color.startsWith('#') ? { backgroundColor: color } : { backgroundColor: 'currentColor' }} />
+      </motion.div>
+    </div>
+  );
+};
+
+
 interface CategoryConfig {
   id: string;
   name: string;
@@ -278,26 +409,25 @@ function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen,
 
       <AnimatePresence>
         {isOpen && (
-          <motion.div
-            key="filter-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-transparent cursor-default" 
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsOpen(false);
-            }} 
-          />
-        )}
-        {isOpen && (
-          <motion.div
-            key="filter-menu"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="absolute top-full left-0 right-0 mt-1 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-2xl z-[70] py-1 max-h-60 overflow-y-auto custom-scrollbar"
-          >
+          <div key="filter-container">
+            <motion.div
+              key="filter-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-transparent cursor-default" 
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+              }} 
+            />
+            <motion.div
+              key="filter-menu"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="absolute top-full left-0 right-0 mt-1 bg-[#1A1A1A] border border-white/10 rounded-lg shadow-2xl z-[70] py-1 max-h-60 overflow-y-auto custom-scrollbar"
+            >
               <div 
                 onClick={() => setSelected([])}
                 className={`px-4 py-2 text-[10px] cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors ${selected.length === 0 ? 'text-accent font-bold' : 'text-text-dim'}`}
@@ -307,13 +437,13 @@ function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen,
               </div>
               <div className="h-[1px] bg-white/5 my-1" />
               {items.map((s: string) => {
-                const isSelected = selected.includes(s);
+                const isSelected = (selected || []).includes(s);
                 return (
                   <div 
-                    key={s}
+                    key={`opt-${s}`}
                     onClick={() => {
                       setSelected((prev: string[]) => 
-                        isSelected ? prev.filter(item => item !== s) : [...prev, s]
+                        (prev || []).includes(s) ? (prev || []).filter(item => item !== s) : [...(prev || []), s]
                       );
                     }}
                     className={`px-4 py-2 text-[10px] cursor-pointer flex items-center justify-between hover:bg-white/5 transition-colors ${isSelected ? 'text-white font-bold bg-white/5' : 'text-text-dim'}`}
@@ -324,6 +454,7 @@ function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen,
                 );
               })}
             </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>
@@ -2714,85 +2845,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  // New sub-components for Dashboard and Journal
-  const WaveEffect = ({ progress, color, type, opacity }: { progress: number, color: string, type: 'liquid' | 'organic' | 'tech', opacity?: number }) => {
-    const getPath = () => {
-      switch(type) {
-        case 'organic':
-          return "M0,60 C200,20 400,100 600,60 S1000,100 1200,60 C1400,20 1600,100 1800,60 S2200,100 2400,60 L2400,120 L0,120 Z";
-        case 'tech':
-          return "M0,60 L150,20 L300,100 L450,20 L600,60 L750,20 L900,100 L1050,20 L1200,60 L1350,20 L1500,100 L1650,20 L1800,60 L1950,20 L2100,100 L2250,20 L2400,60 L2400,120 L0,120 Z";
-        default: // liquid
-          return "M0,60 C150,110 450,10 600,60 S1050,10 1200,60 C1350,110 1650,10 1800,60 S2250,10 2400,60 L2400,120 L0,120 Z";
-      }
-    };
-
-    const path = getPath();
-    
-    // Map properly to CSS variables or direct hex
-    const getGradientColor = () => {
-      if (color.startsWith('#')) return color;
-      if (color === 'text-accent') return 'var(--color-accent)';
-      if (color === 'text-accent-blue') return 'var(--color-accent-blue)';
-      if (color === 'text-accent-purple') return 'var(--color-accent-purple)';
-      if (color === 'text-accent-orange') return 'var(--color-accent-orange)';
-      if (color === 'text-accent-pink') return 'var(--color-accent-pink)';
-      if (color === 'text-accent-red') return 'var(--color-accent-red)';
-      if (color === 'text-accent-yellow') return 'var(--color-accent-yellow)';
-      return 'currentColor';
-    };
-
-    return (
-      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden" style={{ opacity: opacity !== undefined ? opacity : 0.3 }}>
-        <motion.div
-          className="absolute bottom-0 left-0 w-[200%] h-[150%] flex flex-col"
-          animate={{ y: `${100 - (progress > 100 ? 100 : progress) * 0.9}%` }}
-          transition={{ type: 'spring', damping: 30, stiffness: 45 }}
-        >
-          <div className="relative w-full h-[150px]">
-            <motion.svg
-              viewBox="0 0 1200 120"
-              preserveAspectRatio="none"
-              className={`absolute top-0 left-0 w-full h-full ${!color.startsWith('#') ? color : ''}`}
-              style={color.startsWith('#') ? { color } : {}}
-              animate={{
-                x: [0, -1200],
-              }}
-              transition={{
-                duration: type === 'tech' ? 5 : 10,
-                repeat: Infinity,
-                ease: "linear"
-              }}
-            >
-              <path d={path} fill="currentColor" />
-            </motion.svg>
-            
-            <motion.svg
-              viewBox="0 0 1200 120"
-              preserveAspectRatio="none"
-              className={`absolute top-0 left-0 w-full h-full ${!color.startsWith('#') ? color : ''} opacity-30`}
-              style={color.startsWith('#') ? { color } : {}}
-              animate={{
-                x: [-1200, 0],
-              }}
-              transition={{
-                duration: type === 'tech' ? 7 : 14,
-                repeat: Infinity,
-                ease: "linear"
-              }}
-            >
-              <path d={path} fill="currentColor" />
-            </motion.svg>
-          </div>
-          <div 
-            className={`flex-1 w-full ${!color.startsWith('#') ? color.replace('text-', 'bg-') : ''}`}
-            style={color.startsWith('#') ? { backgroundColor: color } : {}}
-          />
-        </motion.div>
-      </div>
-    );
-  };
-
   const MosaicView = () => {
     const allStatuses = categories.find(c => c.id === 'status')?.items || [];
     
@@ -3264,72 +3316,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       return acc;
     }, []).filter(g => g.length > 1);
 
-    const StatCard = ({ label, value, subValue, icon: Icon, color, delay = 0, breakdown }: any) => (
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay }}
-        className="bg-black/40 border border-white/10 p-6 rounded-2xl relative overflow-hidden group hover:border-accent/40 transition-all shadow-xl flex flex-col justify-between"
-      >
-        <div className="absolute top-0 right-0 w-24 h-24 bg-white/[0.02] rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl group-hover:bg-white/[0.05] transition-all" />
-        <div className="flex justify-between items-start relative z-10">
-          <div className={`p-2.5 rounded-xl bg-white/5 border border-white/10 ${color}`}>
-            <Icon size={20} strokeWidth={2.5} />
-          </div>
-          {breakdown && (
-            <div className="flex flex-col items-end gap-1">
-              {Object.entries(breakdown).map(([support, count]: any) => (
-                count > 0 && (
-                  <div key={support} className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
-                    <span className="text-[7px] font-black uppercase text-text-dim tracking-wider font-mono">{support}</span>
-                    <span className="text-[9px] font-black text-white leading-none">{count}</span>
-                  </div>
-                )
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="mt-4 relative z-10">
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl font-mono font-black tracking-tighter text-white tabular-nums">{value}</span>
-            {subValue && <span className="text-xs font-bold text-text-dim/60">{subValue}</span>}
-          </div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-text-dim/60 mt-1">{label}</p>
-        </div>
-      </motion.div>
-    );
 
-    const ChartCard = ({ title, subtitle, children, delay = 0, className = "", rightElement, id }: any) => (
-      <motion.div 
-        id={id}
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay }}
-        className={`bg-black/40 border border-white/10 p-6 rounded-2xl shadow-xl flex flex-col group/chart ${className}`}
-      >
-        <div className="flex justify-between items-start mb-6">
-          <div>
-            <h4 className="text-[11px] font-black uppercase tracking-[2px] text-white">{title}</h4>
-            <p className="text-[8px] font-mono text-accent/60 uppercase tracking-widest mt-0.5">{subtitle}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {id && (
-              <button 
-                onClick={() => exportChartAsJPEG(id, title)}
-                className="p-1 px-1.5 bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 hover:border-white/30 rounded transition-all opacity-0 group-hover/chart:opacity-100"
-                title="Exporter ce graphique"
-              >
-                <Download size={12} />
-              </button>
-            )}
-            {rightElement ? rightElement : <Activity size={14} className="text-white/20" />}
-          </div>
-        </div>
-        <div className="flex-1 min-h-[150px]">
-          {children}
-        </div>
-      </motion.div>
-    );
 
     const completionRate = stats.total > 0 ? (stats.completed / stats.total) * 100 : 0;
     const productionRate = stats.total > 0 ? (stats.inProduction / stats.total) * 100 : 0;
@@ -3657,15 +3644,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                className="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-md text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all shadow-sm"
              >
                {isMiddleTierVisible ? (
-                 <>
+                 <span key="retract" className="flex items-center gap-2">
                    <Minimize size={10} />
                    Rétracter les Vecteurs
-                 </>
+                 </span>
                ) : (
-                 <>
+                 <span key="deploy" className="flex items-center gap-2">
                    <Maximize size={10} />
                    Déployer l'Intelligence
-                 </>
+                 </span>
                )}
              </button>
           </div>
@@ -3764,7 +3751,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       </button>
                     ),
                     children: (
-                      <>
+                      <div key="status-velocity-chart" className="flex flex-col h-full">
                         <div style={{ width: '100%', height: 260 }}>
                           <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-3' : 'anim-4'}>
                             <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -3800,7 +3787,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             </div>
                           ))}
                         </div>
-                      </>
+                      </div>
                     )
                   })}
                 </div>
@@ -3859,7 +3846,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       </button>
                     ),
                     children: (
-                      <>
+                      <div key="univers-distribution-chart" className="flex flex-col h-full">
                         <div style={{ width: '100%', height: 260 }}>
                           <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-7' : 'anim-8'}>
                             <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -3895,7 +3882,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             </div>
                           ))}
                         </div>
-                      </>
+                      </div>
                     )
                   })}
 
@@ -3915,7 +3902,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       </button>
                     ),
                     children: (
-                      <>
+                      <div key="argument-distribution-chart" className="flex flex-col h-full">
                         <div style={{ width: '100%', height: 260 }}>
                           <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'anim-9' : 'anim-10'}>
                             <RPieChart margin={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -3951,7 +3938,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             </div>
                           ))}
                         </div>
-                      </>
+                      </div>
                     )
                   })}
 
@@ -4237,15 +4224,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       className={`group flex items-center justify-center gap-4 px-10 py-5 rounded-2xl border-2 transition-all active:scale-95 ${copiedAiPrompt ? 'bg-green-500/20 border-green-500 text-green-500 shadow-[0_0_30px_rgba(34,197,94,0.3)]' : 'bg-accent text-black border-accent hover:bg-black hover:text-accent font-black shadow-[0_0_30px_rgba(0,255,148,0.2)]'}`}
                     >
                       {copiedAiPrompt ? (
-                        <>
+                        <div key="copied" className="flex items-center gap-2">
                           <Check size={20} className="animate-bounce" />
                           <span className="uppercase tracking-widest text-[13px]">Prompt Copié !</span>
-                        </>
+                        </div>
                       ) : (
-                        <>
+                        <div key="copy" className="flex items-center gap-2">
                           <Copy size={20} className="group-hover:translate-x-1 transition-transform" />
                           <span className="uppercase tracking-[4px] text-[13px]">Injecter dans Gemini</span>
-                        </>
+                        </div>
                       )}
                     </button>
                     <p className="text-[9px] font-mono text-center uppercase text-white/30 tracking-widest">Le rapport inclura votre bilan de progrès</p>
@@ -5544,11 +5531,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
   const renderFilterChips = (label: string, selected: string[], setSelected: (val: any) => void) => {
     if (selected.length === 0) return null;
-    return selected.map((val, idx) => (
+    return selected.map((val) => (
       <motion.div 
-        key={`${label}-${val}-${idx}`}
+        key={`${label}-${val}`}
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.8, opacity: 0 }}
         className="flex items-center gap-1.5 px-2 py-1 bg-white/5 border border-white/10 rounded text-[9px] text-white hover:border-white/30 transition-all group"
       >
         <span className="text-text-dim select-none">{label}:</span>
@@ -5574,7 +5562,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     const matchesStatus = filterStatuses.length === 0 || filterStatuses.includes(m.status);
     const matchesProduct = filterProducts.length === 0 || filterProducts.includes(m.product);
     const matchesUniverse = filterUniverses.length === 0 || filterUniverses.includes(m.univers);
-    const matchesSupport = filterSupports.length === 0 || filterSupports.includes(m.support);
+    const matchesSupport = filterSupports.length === 0 || (() => {
+      const missionSupports = (m.support || '').split(', ').map(s => s === 'video' ? 'vidéo' : s);
+      return filterSupports.some(fs => missionSupports.includes(fs));
+    })();
     const matchesColor = filterColors.length === 0 || filterColors.includes(m.color);
     const matchesArgument = filterArguments.length === 0 || filterArguments.includes(m.argumentType);
     const matchesPriority = filterPriorities.length === 0 || filterPriorities.includes(m.priority);
@@ -6242,9 +6233,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
             <div className="pt-2">
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2">
-                  {(selectedSupport || []).includes('vidéo') ? <Film size={10} className="text-accent-purple" /> : <ImageIcon size={10} className="text-accent-purple" />}
-                  {(selectedSupport || []).includes('vidéo') ? 'Séquences Vidéo' : (selectedSupport || []).includes('graphisme') ? 'Visuels Graphiques' : 'Photos Requises'}
+                <label className="text-[10px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2 min-h-[1.5rem]">
+                  <span key="support-icon" className="flex items-center">
+                    {(selectedSupport || []).includes('vidéo') ? <Film size={10} className="text-accent-purple" /> : (selectedSupport || []).includes('graphisme') ? <ImageIcon size={10} className="text-accent-purple" /> : <ImageIcon size={10} className="text-accent-purple" />}
+                  </span>
+                  <span key="support-text">
+                    {(selectedSupport || []).includes('vidéo') ? 'Séquences Vidéo' : (selectedSupport || []).includes('graphisme') ? 'Visuels Graphiques' : 'Photos Requises'}
+                  </span>
                 </label>
                 <input 
                   type="number"
@@ -6268,15 +6263,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 onClick={() => document.getElementById('image-upload')?.click()}
               >
                 {selectedImage ? (
-                  <>
+                  <motion.div key="image-preview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0">
                     <img src={selectedImage} alt="Preview" className="w-full h-full object-cover" />
                     <button 
                       onClick={(e) => { e.stopPropagation(); setSelectedImage(null); }}
-                      className="absolute top-2 right-2 p-1 bg-black/60 rounded-full text-white hover:bg-red-500 scale-90 transition-all"
+                      className="absolute top-2 right-2 p-1 bg-black/60 rounded-full text-white hover:bg-red-500 scale-90 transition-all z-10"
                     >
                       <X size={14} />
                     </button>
-                  </>
+                  </motion.div>
                 ) : (
                   <>
                     <ImageIcon size={24} className="text-text-dim" />
@@ -6457,7 +6452,17 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <div className="flex flex-col">
                   <div className="bg-accent-purple/90 p-3 rounded shadow-[0_0_20px_rgba(191,122,240,0.3)]">
                     <h2 className="font-display text-3xl font-black uppercase leading-[0.8] tracking-tighter text-black">
-                      {activeTab === 'table' ? <>TABLEAU<br/>DE BORD</> : activeTab === 'dashboard' ? <>MONITEUR<br/>SYSTÈME</> : activeTab === 'journal' ? <>JOURNAL<br/>DE BORD</> : <>CONFIG<br/>SYSTÈME</>}
+                      <motion.div key={activeTab} className="flex flex-col items-start leading-[0.8]">
+                        {activeTab === 'table' ? (
+                          <span key="tab-table">TABLEAU<br/>DE BORD</span>
+                        ) : activeTab === 'dashboard' ? (
+                          <span key="tab-dash">MONITEUR<br/>SYSTÈME</span>
+                        ) : activeTab === 'journal' ? (
+                          <span key="tab-journal">JOURNAL<br/>DE BORD</span>
+                        ) : (
+                          <span key="tab-config">CONFIG<br/>SYSTÈME</span>
+                        )}
+                      </motion.div>
                     </h2>
                   </div>
                   <div className="flex items-center gap-2 mt-2">
