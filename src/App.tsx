@@ -745,7 +745,7 @@ export default function App() {
     { 
       id: 'status', 
       name: 'État d\'avancement', 
-      items: ['en attente', 'produit preparé', 'en cour de shoot', 'déja shooter', 'En post-production', 'livré', 'annuler'],
+      items: ['en attente', 'produit préparé', 'en cours de shoot', 'shooté', 'En post-production', 'livré', 'annuler'],
       icon: ClipboardCheck,
       displayType: 'buttons',
       colorRef: 'accent'
@@ -2109,9 +2109,9 @@ LISTE DES COMMANDES :
     switch (status) {
       case 'livré': return 100;
       case 'En post-production': return 85;
-      case 'déja shooter': return 75;
-      case 'en cour de shoot': return 50;
-      case 'produit preparé': return 25;
+      case 'shooté': return 75;
+      case 'en cours de shoot': return 50;
+      case 'produit préparé': return 25;
       default: return 0;
     }
   };
@@ -2124,7 +2124,8 @@ LISTE DES COMMANDES :
     if (!refPrefix || refCounter === undefined || refCounter === null) errors.push("Référence ou compteur manquant.");
 
     if (!Number.isInteger(photoRequested) || photoRequested <= 0) {
-      errors.push("Photos requises doit être un entier positif (suppérieur à 0).");
+      const supportLabel = (selectedSupport || []).includes('vidéo') ? 'Vidéos' : (selectedSupport || []).includes('graphisme') ? 'Visuels' : 'Photos';
+      errors.push(`${supportLabel} requis(es) doit être un entier positif (supérieur à 0).`);
     }
 
     const dateRegex = /^(\d{2}[\/\-]\d{2}[\/\-]\d{4})|(\d{4}[\/\-]\d{2}[\/\-]\d{2})$/;
@@ -2628,14 +2629,20 @@ LISTE DES COMMANDES :
 
     setMissions(prev => prev.map(m => {
       if (m.id === id) {
-        let history = m.history ? [...m.history] : [];
+        let history = updates.history !== undefined ? [...updates.history] : (m.history ? [...m.history] : []);
         const now = Date.now();
         
         // Helper to update or push history to avoid bloat
         const addHistoryEntry = (msg: string) => {
           const lastH = history.length > 0 ? history[history.length - 1] : null;
           // If the last entry has the same start (like 'Notes :') and is recent, replace it
-          const msgPrefix = msg.split(':')[0];
+          let msgPrefix = msg.split(':')[0];
+          
+          if (msg.startsWith('Progression')) msgPrefix = 'Progression';
+          if (msg.startsWith('Note mise à jour')) msgPrefix = 'Note';
+          if (msg.startsWith('Priorité changée')) msgPrefix = 'Priorité';
+          if (msg.startsWith('Produit')) msgPrefix = 'Produit';
+
           if (lastH && lastH.message.startsWith(msgPrefix) && now - lastH.timestamp < 30000) {
             history[history.length - 1] = { timestamp: now, message: msg };
           } else {
@@ -2674,12 +2681,12 @@ LISTE DES COMMANDES :
         if (updates.status) {
           switch (updates.status) {
             case 'livré': 
-              updated.progress = Math.max(100, (updated.photoCountDelivered || 0) * 100); 
+              updated.progress = 100; 
               break;
             case 'En post-production': updated.progress = 85; break;
-            case 'déja shooter': updated.progress = 75; break;
-            case 'en cour de shoot': updated.progress = 50; break;
-            case 'produit preparé': updated.progress = 25; break;
+            case 'shooté': updated.progress = 75; break;
+            case 'en cours de shoot': updated.progress = 50; break;
+            case 'produit préparé': updated.progress = 25; break;
             case 'en attente': updated.progress = 0; break;
             case 'annuler': 
               updated.progress = 0; 
@@ -2903,7 +2910,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   <div className="flex items-center gap-4">
                     <div className={`w-2 h-2 rounded-full ${
                       status === 'livré' ? 'bg-accent' : 
-                      status === 'en cour de shoot' ? 'bg-accent-blue' : 
+                      status === 'en cours de shoot' ? 'bg-accent-blue' : 
                       status === 'annuler' ? 'bg-red-500' :
                       'bg-white/20'
                     }`} />
@@ -3029,7 +3036,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     }}
                                     className={`text-[9px] font-black uppercase tracking-tighter truncate w-full text-left flex items-center justify-between group-hover/status:text-white transition-colors ${
                                       m.status === 'livré' ? 'text-accent' : 
-                                      m.status === 'en cour de shoot' ? 'text-accent-blue' : 
+                                      m.status === 'en cours de shoot' ? 'text-accent-blue' : 
                                       'text-text-dim'
                                     }`}
                                   >
@@ -3138,7 +3145,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   const COLORS = ['#00FF94', '#00D1FF', '#BD00FF', '#FF9900', '#FF007A', '#FF3B30', '#EBFF00'];
 
   const supportCounts = missions.reduce((acc: any, m) => {
-    if (m.support) acc[m.support] = (acc[m.support] || 0) + 1;
+    if (m.support) {
+      const supports = m.support.split(', ');
+      supports.forEach(s => {
+        const key = s === 'video' ? 'vidéo' : s;
+        acc[key] = (acc[key] || 0) + 1;
+      });
+    }
     return acc;
   }, {});
   const supportData = Object.entries(supportCounts).map(([name, value]) => ({
@@ -3226,8 +3239,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     const stats = {
       total: activeMissions.length,
       completed: activeMissions.filter(m => m.status === 'livré').length,
-      inProduction: activeMissions.filter(m => ['en cour de shoot', 'déja shooter', 'En post-production'].includes(m.status)).length,
-      pending: activeMissions.filter(m => m.status === 'en attente' || m.status === 'produit preparé').length,
+      inProduction: activeMissions.filter(m => ['en cours de shoot', 'shooté', 'En post-production'].includes(m.status)).length,
+      pending: activeMissions.filter(m => m.status === 'en attente' || m.status === 'produit préparé').length,
       urgent: activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length,
       bugs: activeMissions.filter(m => m.status === 'livré' && m.progress < 100).length,
     };
@@ -5448,9 +5461,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         switch (newStatus) {
           case 'livré': progress = 100; break;
           case 'En post-production': progress = 85; break;
-          case 'déja shooter': progress = 75; break;
-          case 'en cour de shoot': progress = 50; break;
-          case 'produit preparé': progress = 25; break;
+          case 'shooté': progress = 75; break;
+          case 'en cours de shoot': progress = 50; break;
+          case 'produit préparé': progress = 25; break;
           case 'en attente': progress = 0; break;
         }
         
@@ -7323,7 +7336,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           </tr>
                         </thead>
 
-                <tbody className="divide-y divide-white/5">
+                <Reorder.Group axis="y" values={filteredMissions} onReorder={setMissions} as="tbody" className="divide-y divide-white/5">
                   <AnimatePresence initial={false}>
                     {filteredMissions.length === 0 ? (
                       <motion.tr
@@ -7343,13 +7356,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       </motion.tr>
                     ) : (
                       filteredMissions.map((m) => (
-                        <motion.tr 
+                        <Reorder.Item 
                           key={m.id}
+                          value={m}
+                          as="tr"
                           initial={{ opacity: 0, scale: 0.98 }}
                           animate={{ opacity: 1, scale: 1 }}
                           exit={{ opacity: 0, x: -10 }}
                           onDoubleClick={() => setSelectedMissionId(m.id)}
-                          className={`hover:bg-white/[0.04] transition-colors group relative cursor-pointer ${selectedMissionIds.includes(m.id) ? 'bg-white/[0.06]' : ''} ${(showDuplicateIndicators && isDuplicate(m)) ? 'border-l-2 border-l-red-500 bg-red-500/5' : ''}`}
+                          className={`hover:bg-white/[0.04] transition-colors group relative cursor-grab active:cursor-grabbing ${selectedMissionIds.includes(m.id) ? 'bg-white/[0.06]' : ''} ${(showDuplicateIndicators && isDuplicate(m)) ? 'border-l-2 border-l-red-500 bg-red-500/5' : ''}`}
                         >
                           <td className="py-4 px-3 text-center" onClick={(e) => toggleSelectMission(m.id, e)}>
                             <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all mx-auto ${
@@ -7622,9 +7637,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     switch (newStatus) {
                                       case 'livré': updates.progress = 100; break;
                                       case 'En post-production': updates.progress = 85; break;
-                                      case 'déja shooter': updates.progress = 75; break;
-                                      case 'en cour de shoot': updates.progress = 50; break;
-                                      case 'produit preparé': updates.progress = 25; break;
+                                      case 'shooté': updates.progress = 75; break;
+                                      case 'en cours de shoot': updates.progress = 50; break;
+                                      case 'produit préparé': updates.progress = 25; break;
                                       case 'en attente': updates.progress = 0; break;
                                       case 'annuler': 
                                         updates.progress = 0;
@@ -7639,8 +7654,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                       if (cat?.colorRef?.startsWith('#')) return 'border';
                                       return m.status === 'livré' ? 'border-accent/40 text-accent bg-accent/5' :
                                              m.status === 'En post-production' ? 'border-accent-orange/40 text-accent-orange bg-accent-orange/5' :
-                                             m.status === 'en cour de shoot' ? 'border-accent-blue/40 text-accent-blue bg-accent-blue/5' :
-                                             m.status === 'produit preparé' ? 'border-accent-yellow/40 text-accent-yellow bg-accent-yellow/5' :
+                                             m.status === 'en cours de shoot' ? 'border-accent-blue/40 text-accent-blue bg-accent-blue/5' :
+                                             m.status === 'produit préparé' ? 'border-accent-yellow/40 text-accent-yellow bg-accent-yellow/5' :
                                              m.status === 'annuler' ? 'border-accent-purple/40 text-accent-purple bg-accent-purple/5' :
                                              'border-white/10 text-text-dim bg-white/5';
                                     })()
@@ -7689,12 +7704,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                   type="range"
                                   min="0"
                                   max="100"
-                                  step="5"
+                                  step="1"
                                   value={m.progress}
                                   onClick={(e) => e.stopPropagation()}
                                   onDoubleClick={(e) => e.stopPropagation()}
                                   onChange={(e) => updateMission(m.id, { progress: parseInt(e.target.value) })}
-                                  className="w-full h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent transition-all hover:h-1.5 focus:h-1.5"
+                                  className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent shadow-none hover:h-2 transition-all"
                                 />
                               </div>
                             </td>
@@ -7750,11 +7765,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               </div>
                             </td>
                           )}
-                        </motion.tr>
+                        </Reorder.Item>
                       ))
                     )}
                   </AnimatePresence>
-                </tbody>
+                </Reorder.Group>
               </table>
             </div>
             ) : (
@@ -9106,9 +9121,9 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
     let nextProgress = mission.progress;
     if (nextStatus === 'livré') nextProgress = 100;
     else if (nextStatus === 'En post-production') nextProgress = 85;
-    else if (nextStatus === 'déja shooter') nextProgress = 75;
-    else if (nextStatus === 'en cour de shoot') nextProgress = 50;
-    else if (nextStatus === 'produit preparé') nextProgress = 25;
+    else if (nextStatus === 'shooté') nextProgress = 75;
+    else if (nextStatus === 'en cours de shoot') nextProgress = 50;
+    else if (nextStatus === 'produit préparé') nextProgress = 25;
     else if (nextStatus === 'en attente') nextProgress = 0;
     else if (nextStatus === 'annuler') nextProgress = 0;
 
@@ -9230,7 +9245,9 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                   <DetailItem label="Support" value={mission.support} color="text-accent-pink" />
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-3 bg-white/5 border border-white/10 rounded-lg">
-                      <label className="text-[9px] font-black uppercase tracking-widest text-text-dim block mb-1">Photos Demandées</label>
+                      <label className="text-[9px] font-black uppercase tracking-widest text-text-dim block mb-1">
+                        {(mission.support || '').includes('vidéo') ? 'Vidéos Demandées' : (mission.support || '').includes('graphisme') ? 'Visuels Demandés' : 'Photos Demandées'}
+                      </label>
                       <input 
                         type="number" 
                         min="0"
@@ -9240,7 +9257,9 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                       />
                     </div>
                     <div className="p-3 bg-white/5 border border-white/10 rounded-lg">
-                      <label className="text-[9px] font-black uppercase tracking-widest text-text-dim block mb-1">Photos Livrées</label>
+                      <label className="text-[9px] font-black uppercase tracking-widest text-text-dim block mb-1">
+                        {(mission.support || '').includes('vidéo') ? 'Vidéos Livrées' : (mission.support || '').includes('graphisme') ? 'Visuels Livrés' : 'Photos Livrées'}
+                      </label>
                       <input 
                         type="number" 
                         min="0"
@@ -9248,8 +9267,11 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                         onChange={(e) => {
                           const val = parseInt(e.target.value) || 0;
                           let updates: Partial<Mission> = { photoCountDelivered: val };
-                          if (val > 0) {
+                          if (val >= mission.photoCountRequested && mission.photoCountRequested > 0) {
                             updates.status = 'livré';
+                            updates.progress = 100;
+                          } else if (val > 0) {
+                            updates.status = 'En post-production';
                           }
                           onUpdate(mission.id, updates);
                         }}
@@ -9346,12 +9368,21 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                       className="h-full bg-accent"
                     />
                   </div>
+                  <input 
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={mission.progress}
+                    onChange={(e) => onUpdate(mission.id, { progress: parseInt(e.target.value) })}
+                    className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent"
+                  />
                   <div className="pt-2">
                     <button 
                       onClick={cycleStatus}
-                      className={`text-[10px] font-black px-3 py-1.5 uppercase rounded border transition-all hover:scale-105 active:scale-95 ${
+                      className={`text-[10px] font-black px-3 py-1.5 uppercase rounded border transition-all hover:scale-105 active:scale-95 cursor-pointer ${
                         mission.status === 'livré' ? 'border-accent text-accent bg-accent/5 shadow-[0_0_15px_rgba(0,255,148,0.1)]' :
-                        mission.status === 'en cour de shoot' ? 'border-accent-blue text-accent-blue bg-accent-blue/5' :
+                        mission.status === 'en cours de shoot' ? 'border-accent-blue text-accent-blue bg-accent-blue/5' :
                         mission.status === 'annuler' ? 'border-accent-purple text-accent-purple bg-accent-purple/5' :
                         'border-white/20 text-white/50 hover:border-white/40 hover:text-white'
                       }`}
@@ -9365,10 +9396,18 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
               </div>
 
               <div>
-                <h3 className="text-[11px] font-black uppercase tracking-widest text-text-dim mb-4 flex items-center gap-2 text-accent-purple">
-                  <Clock size={12} />
-                  Historique des Changements
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[11px] font-black uppercase tracking-widest text-text-dim flex items-center gap-2 text-accent-purple">
+                    <Clock size={12} />
+                    Historique des Changements
+                  </h3>
+                  <button 
+                    onClick={() => onUpdate(mission.id, { history: [] })}
+                    className="text-[9px] font-black uppercase tracking-widest text-white/30 hover:text-red-500 transition-colors flex items-center gap-1.5 px-2 py-1 rounded border border-white/5 hover:border-red-500/30"
+                  >
+                    <RotateCcw size={10} /> Reset
+                  </button>
+                </div>
                 <div className="space-y-3 max-h-[200px] overflow-y-auto custom-scrollbar pr-2">
                   {mission.history?.map((log, i) => (
                     <div key={i} className="flex gap-4 items-start pl-2 border-l border-accent-purple/30 group">
