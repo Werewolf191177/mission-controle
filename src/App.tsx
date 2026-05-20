@@ -1083,6 +1083,102 @@ export default function App() {
     // Reset input
     e.target.value = '';
   };
+
+  const backupToGoogleDrive = async () => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Google Auth requis pour sauvegarder sur Drive.', type: 'alert' });
+      return;
+    }
+    const confirmed = window.confirm('Voulez-vous sauvegarder les données actuelles dans votre Google Drive ?');
+    if (!confirmed) return;
+
+    setToast({ show: true, message: 'Sauvegarde vers Drive...', type: 'task' });
+    try {
+      const json = generateFullDataJson();
+      const base64Data = 'data:application/json;base64,' + btoa(unescape(encodeURIComponent(json)));
+      const fileName = `MissionControle_Backup_${new Date().toISOString().split('T')[0]}.json`;
+
+      const res = await fetch('/api/drive/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          tokens: { access_token: googleToken }, 
+          pdfBase64: base64Data, 
+          fileName,
+          mimeType: 'application/json'
+        })
+      });
+
+      if (!res.ok) throw new Error('Erreur upload Drive');
+      setToast({ show: true, message: 'Sauvegardé sur Google Drive avec succès !', type: 'task' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    } catch (err) {
+      console.error(err);
+      setToast({ show: true, message: 'Erreur lors de la sauvegarde sur Drive.', type: 'alert' });
+    }
+  };
+
+  const pushMissionsToTasks = async (ids: string[]) => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Google Auth requis pour Tasks.', type: 'alert' });
+      return;
+    }
+    const confirmed = window.confirm(`Voulez-vous ajouter les ${ids.length} missions à Google Tasks ?`);
+    if (!confirmed) return;
+
+    setToast({ show: true, message: 'Création de tâches en cours...', type: 'task' });
+    for (const id of ids) {
+      const mission = missions.find(m => m.id === id);
+      if (!mission) continue;
+      try {
+        await fetch('/api/tasks/task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tokens: { access_token: googleToken },
+            title: `[Mission ${mission.refId}] - ${mission.product}`,
+            notes: `Infos: ${mission.info}\nFormat: ${mission.format}\nStatus: ${mission.status}`,
+            due: mission.deadline ? new Date(mission.deadline).toISOString() : undefined
+          })
+        });
+      } catch(err) {
+        console.error('Task sync err', err);
+      }
+    }
+    setToast({ show: true, message: `${ids.length} missions envoyées sur Google Tasks !`, type: 'task' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const pushMissionsToCalendar = async (ids: string[]) => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Google Auth requis pour l\'Agenda.', type: 'alert' });
+      return;
+    }
+    const confirmed = window.confirm(`Voulez-vous programmer ces ${ids.length} missions dans Google Agenda ?`);
+    if (!confirmed) return;
+
+    setToast({ show: true, message: 'Création des événements...', type: 'task' });
+    for (const id of ids) {
+      const mission = missions.find(m => m.id === id);
+      if (!mission) continue;
+      try {
+        await fetch('/api/calendar/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tokens: { access_token: googleToken },
+            summary: `[Shoot] ${mission.refId} - ${mission.product}`,
+            description: `Mission info: ${mission.info}\nCouleur: ${mission.color}\nUnivers: ${mission.univers}`,
+            dueDate: mission.deadline || new Date().toISOString()
+          })
+        });
+      } catch(err) {
+        console.error('Calendar sync err', err);
+      }
+    }
+    setToast({ show: true, message: `${ids.length} missions ajoutées à Google Agenda !`, type: 'task' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
   
   // AI Agent Config State
   const defaultAiInstructions = `Analyse mon flux de production, détecte les goulots d'étranglement et propose des optimisations basées sur les priorités et les délais.
@@ -5265,6 +5361,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       </button>
 
                       <button 
+                         onClick={backupToGoogleDrive}
+                         disabled={!googleToken}
+                         className={`py-4 bg-[#4285F4]/10 border border-[#4285F4]/30 text-[9px] font-black uppercase tracking-[2px] ${googleToken ? 'text-[#4285F4] hover:bg-[#4285F4]/20 cursor-pointer' : 'text-text-dim opacity-50 cursor-not-allowed'} transition-all rounded-xl flex items-center justify-center gap-3`}
+                         title={googleToken ? "Sauvegarder le fichier .json directement sur votre Google Drive" : "Veuillez connecter Google en haut à droite d'abord"}
+                      >
+                         <Upload size={14} /> Drive Sync
+                      </button>
+
+                      <button 
                         onClick={() => jsonFileInputRef.current?.click()}
                         className="py-4 bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-[2px] text-white hover:bg-white/10 transition-all rounded-xl flex items-center justify-center gap-3"
                         title="Charger un fichier de sauvegarde .json"
@@ -8304,6 +8409,24 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               >
                 <Activity size={12} />
                 Changer Statut
+              </button>
+
+              <button 
+                onClick={() => pushMissionsToTasks(selectedMissionIds)}
+                className={`flex items-center gap-2 px-4 py-2 bg-[#4285F4]/20 border border-[#4285F4]/30 rounded-full text-[9px] font-black uppercase tracking-widest ${googleToken ? 'text-[#4285F4] hover:bg-[#4285F4]/30' : 'text-[#4285F4]/50 cursor-not-allowed'} transition-all`}
+                title={googleToken ? "Créer des tâches Google Tasks pour ces missions" : "Connectez-vous à Google pour synchroniser"}
+              >
+                <Database size={12} />
+                + Tasks
+              </button>
+
+              <button 
+                onClick={() => pushMissionsToCalendar(selectedMissionIds)}
+                className={`flex items-center gap-2 px-4 py-2 bg-[#34A853]/20 border border-[#34A853]/30 rounded-full text-[9px] font-black uppercase tracking-widest ${googleToken ? 'text-[#34A853] hover:bg-[#34A853]/30' : 'text-[#34A853]/50 cursor-not-allowed'} transition-all`}
+                title={googleToken ? "Créer des événements Agenda pour ces missions" : "Connectez-vous à Google pour synchroniser"}
+              >
+                <Calendar size={12} />
+                + Agenda
               </button>
               
               <button 

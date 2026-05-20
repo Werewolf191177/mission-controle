@@ -91,13 +91,14 @@ async function startServer() {
       const buffer = Buffer.from(pdfBase64.split(',')[1], 'base64');
       const stream = Readable.from(buffer);
       
+      const mimeType = req.body.mimeType || 'application/pdf';
       const response = await drive.files.create({
         requestBody: {
           name: fileName || 'Mission_Fiche.pdf',
-          mimeType: 'application/pdf',
+          mimeType: mimeType,
         },
         media: {
-          mimeType: 'application/pdf',
+          mimeType: mimeType,
           body: stream,
         },
         fields: 'id, webViewLink',
