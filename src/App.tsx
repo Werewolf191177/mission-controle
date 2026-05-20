@@ -84,7 +84,7 @@ import {
   Send
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
-import { toJpeg } from 'html-to-image';
+import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
@@ -1502,16 +1502,14 @@ LISTE DES COMMANDES :
       // Wait for re-render
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      const dataUrl = await toJpeg(reportElement, {
-        quality: 0.9,
+      const canvas = await html2canvas(reportElement, {
+        scale: 2,
+        useCORS: true,
         backgroundColor: '#0A0A0A',
-        skipFonts: true,
-        style: {
-          display: 'block',
-          visibility: 'visible',
-          transform: 'none',
-        }
+        logging: false,
+        width: 1200
       });
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
 
       const now = new Date();
       const dateStr = now.toISOString().split('T')[0];
@@ -1561,18 +1559,16 @@ LISTE DES COMMANDES :
         throw new Error('Element has no visible dimensions');
       }
 
-      const dataUrl = await toJpeg(element, {
-        quality: options.quality || 0.95,
-        backgroundColor: '#0A0A0A',
-        pixelRatio: options.pixelRatio || 2,
+      const canvas = await html2canvas(element, {
+        scale: options.pixelRatio || 2,
         width: width,
         height: height,
-        skipFonts: true,
-        style: {
-          transform: 'none',
-          transition: 'none'
-        }
+        useCORS: true,
+        backgroundColor: '#0A0A0A',
+        logging: false
       });
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', options.quality || 0.95);
 
       if (!dataUrl || dataUrl === 'data:,' || dataUrl.length < 500) {
         throw new Error('Generated image is empty');
