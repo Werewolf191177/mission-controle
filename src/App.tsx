@@ -489,7 +489,7 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
       if (customKey) {
         headers['x-gemini-api-key'] = customKey;
       }
-      const res = await fetch('https://mission-controle.onrender.com/api/chat', {
+      const res = await fetch(getApiUrl('/api/chat'), {
         method: 'POST',
         headers,
         body: JSON.stringify({ 
@@ -592,6 +592,11 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
       </button>
     </motion.div>
   );
+};
+
+const getApiUrl = (endpoint: string) => {
+  const isPreview = window.location.hostname === 'localhost' || window.location.hostname.includes('run.app');
+  return isPreview ? endpoint : `https://mission-controle.onrender.com${endpoint}`;
 };
 
 export default function App() {
@@ -1098,7 +1103,7 @@ export default function App() {
       const base64Data = 'data:application/json;base64,' + btoa(unescape(encodeURIComponent(json)));
       const fileName = `MissionControle_Backup_${new Date().toISOString().split('T')[0]}.json`;
 
-      const res = await fetch('/api/drive/upload', {
+      const res = await fetch(getApiUrl('/api/drive/upload'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -1131,7 +1136,7 @@ export default function App() {
       const mission = missions.find(m => m.id === id);
       if (!mission) continue;
       try {
-        await fetch('/api/tasks/task', {
+        await fetch(getApiUrl('/api/tasks/task'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1162,7 +1167,7 @@ export default function App() {
       const mission = missions.find(m => m.id === id);
       if (!mission) continue;
       try {
-        await fetch('/api/calendar/event', {
+        await fetch(getApiUrl('/api/calendar/event'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2260,7 +2265,7 @@ LISTE DES COMMANDES :
       const now = new Date();
       const title = `Mission_Controle_Rapport_Global_${now.toISOString().split('T')[0]}_${now.getHours()}h${now.getMinutes().toString().padStart(2, '0')}`;
       
-      const res = await fetch('/api/sheets/export', {
+      const res = await fetch(getApiUrl('/api/sheets/export'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2301,7 +2306,7 @@ LISTE DES COMMANDES :
       setToast({ show: true, message: 'Création de l\'évent...', type: 'task' });
       const summary = 'missionNo' in mission ? `[Mission] ${mission.refId} - ${mission.product}` : `[Secondaire] ${mission.title}`;
       const description = 'info' in mission ? (mission.info || '') : ('note' in mission ? (mission.note || '') : '');
-      const res = await fetch('/api/calendar/event', {
+      const res = await fetch(getApiUrl('/api/calendar/event'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2332,7 +2337,7 @@ LISTE DES COMMANDES :
       setToast({ show: true, message: 'Création de la tâche...', type: 'task' });
       const title = 'missionNo' in mission ? `Mission: ${mission.refId} - ${mission.product}` : `Secondaire: ${mission.title}`;
       const notes = 'info' in mission ? (mission.info || '') : ('note' in mission ? (mission.note || '') : '');
-      const res = await fetch('/api/tasks/task', {
+      const res = await fetch(getApiUrl('/api/tasks/task'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
