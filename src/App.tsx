@@ -1521,6 +1521,23 @@ LISTE DES COMMANDES :
     }
   };
 
+  const getCurrentWeekNumber = () => {
+    const d = new Date();
+    const date = new Date(d.getTime());
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+    const week1 = new Date(date.getFullYear(), 0, 4);
+    return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+  };
+
+  const getDayMonthYear = () => {
+    const d = new Date();
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
   const exportAllCharts = async () => {
     const reportElement = document.getElementById('global-report-container');
     if (!reportElement) {
@@ -1529,6 +1546,7 @@ LISTE DES COMMANDES :
     }
 
     const charts = [
+      { id: 'report-dashboard-strategic', name: 'Dashboard Performance Strategique' },
       { id: 'report-chart-timeline', name: 'Evolution Hebdomadaire' },
       { id: 'report-chart-status', name: 'Distribution par État' },
       { id: 'report-chart-support', name: 'Répartition Supports' },
@@ -1907,6 +1925,18 @@ LISTE DES COMMANDES :
 
     const workbook = XLSX.utils.book_new();
     
+    // 0. Metadata Sheet
+    const metaHeaders = ['Clé de Contrôle', 'Valeur'];
+    const metaData = [
+      ['Rapport', 'Mission Contrôle Suite V4.0'],
+      ['Semaine d\'Export', `S${getCurrentWeekNumber()}`],
+      ['Date d\'Export', getDayMonthYear()],
+      ['Heure d\'Export', new Date().toLocaleTimeString()],
+      ['Généré par', 'Système AIS-MD-V3']
+    ];
+    const metaSheet = XLSX.utils.aoa_to_sheet([metaHeaders, ...metaData]);
+    XLSX.utils.book_append_sheet(workbook, metaSheet, "Infos Export");
+
     // Add Mission Sheet
     const missionSheet = XLSX.utils.aoa_to_sheet([missionHeaders, ...missionData]);
     XLSX.utils.book_append_sheet(workbook, missionSheet, "Production (Missions)");
@@ -1920,9 +1950,10 @@ LISTE DES COMMANDES :
     XLSX.utils.book_append_sheet(workbook, secondarySheet, "Missions Secondaires");
     
     const now = new Date();
+    const weekNum = getCurrentWeekNumber();
     const dateStr = now.toISOString().split('T')[0];
     const timeStr = `${now.getHours()}h${now.getMinutes().toString().padStart(2, '0')}`;
-    XLSX.writeFile(workbook, `Mission_Controle_Rapport_Global_${dateStr}_${timeStr}.xlsx`);
+    XLSX.writeFile(workbook, `Mission_Controle_Rapport_Global_S${weekNum}_${dateStr}_${timeStr}.xlsx`);
 
     setToast({ show: true, message: 'Rapport Global généré ! (Production + Performance)', type: 'task' });
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
@@ -2671,17 +2702,25 @@ LISTE DES COMMANDES :
 
         const updated = { ...m, ...updates, history, updatedAt: now };
         
-        // Photos drive progress (1 ph = 100%, 3 ph = 300%)
+        // Photos drive progress (Efficience = Delivered / Requested * 100)
         if (updates.photoCountRequested !== undefined || updates.photoCountDelivered !== undefined) {
           const del = updated.photoCountDelivered || 0;
-          updated.progress = del * 100;
+          const req = updated.photoCountRequested || 1;
+          updated.progress = Math.round((del / req) * 100);
         }
         
         // Sync progress if status changes manually
         if (updates.status) {
           switch (updates.status) {
             case 'livré': 
-              updated.progress = 100; 
+              // Only force 100% if we don't have a specific delivery count already driving progress
+              if ((updated.photoCountDelivered || 0) === 0) {
+                updated.progress = 100;
+              } else {
+                const del = updated.photoCountDelivered || 0;
+                const req = updated.photoCountRequested || 1;
+                updated.progress = Math.round((del / req) * 100);
+              }
               break;
             case 'En post-production': updated.progress = 85; break;
             case 'shooté': updated.progress = 75; break;
@@ -2817,7 +2856,83 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     setCategories(prev => prev.map(c => c.id === catId ? { ...c, ...updates } : c));
   };
 
-  const activeMissions = missions.filter(m => m.enabled);
+  const activeMissions = useMemo(() => missions.filter(m => m.enabled), [missions]);
+
+  const dashboardStats = useMemo(() => {
+    const stats = {
+      total: activeMissions.length,
+      completed: activeMissions.filter(m => m.status === 'livré').length,
+      inProduction: activeMissions.filter(m => ['en cours de shoot', 'shooté', 'En post-production'].includes(m.status)).length,
+      pending: activeMissions.filter(m => m.status === 'en attente' || m.status === 'produit préparé').length,
+      urgent: activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length,
+      bugs: activeMissions.filter(m => m.status === 'livré' && m.progress < 100).length,
+    };
+
+    const secondaryMissionsFiltered = secondaryMissions.filter(m => m.enabled);
+    const secondaryStats = {
+      total: secondaryMissionsFiltered.length,
+      completed: secondaryMissionsFiltered.filter(m => m.progress >= 100).length,
+      avgProgress: secondaryMissionsFiltered.length > 0
+        ? secondaryMissionsFiltered.reduce((acc, m) => acc + m.progress, 0) / secondaryMissionsFiltered.length
+        : 0
+    };
+
+    const requestedBySupport = activeMissions.reduce((acc: any, m) => {
+      const supports = (m.support || '').split(', ');
+      supports.forEach(s => {
+        const key = s === 'video' ? 'vidéo' : s; 
+        acc[key] = (acc[key] || 0) + (m.photoCountRequested || 1);
+      });
+      return acc;
+    }, {});
+
+    const deliveredBySupport = activeMissions.reduce((acc: any, m) => {
+      const supports = (m.support || '').split(', ');
+      supports.forEach(s => {
+        const key = s === 'video' ? 'vidéo' : s; 
+        acc[key] = (acc[key] || 0) + (m.photoCountDelivered || 0);
+      });
+      return acc;
+    }, {});
+
+    const totalRequested = Object.values(requestedBySupport).reduce((a, b) => (a as any) + (b as any), 0) as number;
+    const totalDelivered = Object.values(deliveredBySupport).reduce((a, b) => (a as any) + (b as any), 0) as number;
+
+    const photoRate = (requestedBySupport['photo'] || 0) > 0 ? ((deliveredBySupport['photo'] || 0) / (requestedBySupport['photo'] || 1)) * 100 : 0;
+    const videoRate = (requestedBySupport['vidéo'] || 0) > 0 ? ((deliveredBySupport['vidéo'] || 0) / (requestedBySupport['vidéo'] || 1)) * 100 : 0;
+    const graphicRate = (requestedBySupport['graphisme'] || 0) > 0 ? ((deliveredBySupport['graphisme'] || 0) / (requestedBySupport['graphisme'] || 1)) * 100 : 0;
+
+    const involvedSupports = [
+      (requestedBySupport['photo'] || 0) > 0 ? photoRate : null,
+      (requestedBySupport['vidéo'] || 0) > 0 ? videoRate : null,
+      (requestedBySupport['graphisme'] || 0) > 0 ? graphicRate : null
+    ].filter(v => v !== null && !isNaN(v)) as number[];
+
+    let finalEfficiencyScore = involvedSupports.length > 0 
+      ? involvedSupports.reduce((a, b) => a + b, 0) / involvedSupports.length 
+      : (totalRequested > 0 ? (totalDelivered / totalRequested) * 100 : 0);
+    
+    if (involvedSupports.length === 0 && totalRequested === 0) finalEfficiencyScore = 0;
+    if (isNaN(finalEfficiencyScore)) finalEfficiencyScore = 0;
+
+    const bugRate = activeMissions.length > 0 ? (stats.bugs / activeMissions.length) * 100 : 0;
+    const stabilityScore = 100 - bugRate;
+
+    const completionRate = stats.total > 0 ? (stats.completed / stats.total) * 100 : 0;
+    const productionRate = stats.total > 0 ? (stats.inProduction / stats.total) * 100 : 0;
+
+    const avgRating = activeMissions.length > 0
+      ? (activeMissions.reduce((acc, m) => acc + (m.rating || 0), 0) / activeMissions.length).toFixed(1)
+      : '0.0';
+
+    return { 
+      stats, secondaryStats, requestedBySupport, deliveredBySupport, 
+      finalEfficiencyScore, stabilityScore, completionRate, productionRate,
+      avgRating
+    };
+  }, [activeMissions, secondaryMissions]);
+
+  const avgRating = dashboardStats.avgRating;
 
   const avgProgress = activeMissions.length > 0 
     ? Math.round(activeMissions.reduce((acc, m) => acc + m.progress, 0) / activeMissions.length) 
@@ -2845,10 +2960,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       setFeedbackRating(5);
     }, 2000);
   };
-
-  const avgRating = activeMissions.length > 0
-    ? (activeMissions.reduce((acc, m) => acc + (m.rating || 0), 0) / activeMissions.length).toFixed(1)
-    : '0.0';
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -3082,11 +3193,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               <div className="space-y-1.5 pt-1">
                                 <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest">
                                   <span className="text-text-dim">Progress</span>
-                                  <span className={m.progress === 100 ? 'text-accent' : 'text-white'}>{m.progress}%</span>
+                                  <span className={m.progress >= 100 ? 'text-accent' : 'text-white'}>{m.progress}%</span>
                                 </div>
                                 <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                                   <motion.div 
-                                    className={`h-full ${m.progress === 100 ? 'bg-accent' : 'bg-accent-blue'}`}
+                                    className={`h-full ${m.progress >= 100 ? 'bg-accent' : 'bg-accent-blue'}`}
                                     initial={{ width: 0 }}
                                     animate={{ width: `${m.progress}%` }}
                                     transition={{ duration: 0.8 }}
@@ -3236,14 +3347,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   });
 
   const renderDashboardView = () => {
-    const stats = {
-      total: activeMissions.length,
-      completed: activeMissions.filter(m => m.status === 'livré').length,
-      inProduction: activeMissions.filter(m => ['en cours de shoot', 'shooté', 'En post-production'].includes(m.status)).length,
-      pending: activeMissions.filter(m => m.status === 'en attente' || m.status === 'produit préparé').length,
-      urgent: activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length,
-      bugs: activeMissions.filter(m => m.status === 'livré' && m.progress < 100).length,
-    };
+    const { 
+      stats, secondaryStats, requestedBySupport, deliveredBySupport, 
+      finalEfficiencyScore, stabilityScore, completionRate, productionRate,
+      avgRating
+    } = dashboardStats;
 
     const dashboardProductionMissions = [...activeMissions].sort((a, b) => {
       const priorityMap: Record<string, number> = { 'High priority': 3, 'Medium priority': 2, 'Low priority': 1 };
@@ -3252,14 +3360,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       if (pA !== pB) return pB - pA;
       return b.createdAt - a.createdAt;
     }).slice(0, 15);
-
-    const secondaryStats = {
-      total: secondaryMissions.filter(m => m.enabled).length,
-      completed: secondaryMissions.filter(m => m.enabled && m.progress === 100).length,
-      avgProgress: secondaryMissions.filter(m => m.enabled).length > 0
-        ? secondaryMissions.filter(m => m.enabled).reduce((acc, m) => acc + m.progress, 0) / secondaryMissions.filter(m => m.enabled).length
-        : 0
-    };
 
     const dashboardSecondaryMissions = [...secondaryMissions]
       .filter(m => m.enabled)
@@ -3270,46 +3370,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         if (pA !== pB) return pB - pA;
         return b.createdAt - a.createdAt;
       });
-
-    const requestedBySupport = activeMissions.reduce((acc: any, m) => {
-      const supports = (m.support || '').split(', ');
-      supports.forEach(s => {
-        const key = s === 'video' ? 'vidéo' : s; 
-        acc[key] = (acc[key] || 0) + (m.photoCountRequested || 1);
-      });
-      return acc;
-    }, {});
-
-    const deliveredBySupport = activeMissions.reduce((acc: any, m) => {
-      const supports = (m.support || '').split(', ');
-      supports.forEach(s => {
-        const key = s === 'video' ? 'vidéo' : s; 
-        acc[key] = (acc[key] || 0) + (m.photoCountDelivered || 0);
-      });
-      return acc;
-    }, {});
-
-    const totalRequested = Object.values(requestedBySupport).reduce((a, b) => (a as any) + (b as any), 0) as number;
-    const totalDelivered = Object.values(deliveredBySupport).reduce((a, b) => (a as any) + (b as any), 0) as number;
-
-    const photoRate = (requestedBySupport['photo'] || 0) > 0 ? ((deliveredBySupport['photo'] || 0) / (requestedBySupport['photo'] || 1)) * 100 : 0;
-    const videoRate = (requestedBySupport['vidéo'] || 0) > 0 ? ((deliveredBySupport['vidéo'] || 0) / (requestedBySupport['vidéo'] || 1)) * 100 : 0;
-    const graphicRate = (requestedBySupport['graphisme'] || 0) > 0 ? ((deliveredBySupport['graphisme'] || 0) / (requestedBySupport['graphisme'] || 1)) * 100 : 0;
-
-    const involvedSupports = [
-      (requestedBySupport['photo'] || 0) > 0 ? photoRate : null,
-      (requestedBySupport['vidéo'] || 0) > 0 ? videoRate : null,
-      (requestedBySupport['graphisme'] || 0) > 0 ? graphicRate : null
-    ].filter(v => v !== null && !isNaN(v)) as number[];
-
-    let finalEfficiencyScore = involvedSupports.length > 0 
-      ? involvedSupports.reduce((a, b) => a + b, 0) / involvedSupports.length 
-      : (totalRequested > 0 ? (totalDelivered / totalRequested) * 100 : 0);
-    
-    if (isNaN(finalEfficiencyScore)) finalEfficiencyScore = 0;
-
-    const bugRate = activeMissions.length > 0 ? (stats.bugs / activeMissions.length) * 100 : 0;
-    const stabilityScore = 100 - bugRate;
 
     const duplicateGroups = activeMissions.reduce((acc: Mission[][], m) => {
       const matchIdx = acc.findIndex(group => 
@@ -3329,16 +3389,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       return acc;
     }, []).filter(g => g.length > 1);
 
-
-
-    const completionRate = stats.total > 0 ? (stats.completed / stats.total) * 100 : 0;
-    const productionRate = stats.total > 0 ? (stats.inProduction / stats.total) * 100 : 0;
-
     return (
       <div className="space-y-6 mb-12">
         {/* Bilan Stratégique Header */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <motion.div 
+            id="strategic-performance-card"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="lg:col-span-3 p-8 bg-black/40 border border-white/10 rounded-2xl relative overflow-hidden flex flex-col justify-between shadow-2xl group hover:border-accent/30 transition-all"
@@ -3357,21 +3413,35 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     <p className="text-[9px] font-mono text-accent/60 uppercase tracking-widest mt-1">Status: Operational // Engine-ID: AIS-MD-V3</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <div className="flex flex-col items-end">
-                    <span className="text-[8px] font-black text-white/40 uppercase tracking-[2px]">Moy. Note</span>
-                    <span className="text-sm font-mono text-accent-yellow">{avgRating}/5</span>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-4 mr-2">
+                    <div className="flex flex-col items-end">
+                      <span className="text-[8px] font-black text-white/40 uppercase tracking-[2px]">Semaine {getCurrentWeekNumber()} // {getDayMonthYear()}</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <span className="text-[8px] font-black text-white/40 uppercase tracking-[2px]">Moy. Note</span>
+                      <span className="text-sm font-mono text-accent-yellow">{avgRating}/5</span>
+                    </div>
                   </div>
-                  <button 
-                    onClick={handleRefreshScore}
-                    className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
-                    title="Rafraichir le tableau de bord"
-                  >
-                    <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button 
+                      onClick={() => captureElementToJpeg('strategic-performance-card', 'Analyse_Performance_Strategique')}
+                      className="p-1.5 bg-white/5 border border-white/10 text-white/60 hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all group/dl"
+                      title="Exporter en JPEG"
+                    >
+                      <Download size={14} className="group-hover/dl:scale-110 transition-transform" />
+                    </button>
+                    <button 
+                      onClick={handleRefreshScore}
+                      className="p-1.5 bg-white/5 border border-white/10 text-white/60 hover:text-accent hover:bg-white/10 hover:border-accent/30 rounded transition-all"
+                      title="Rafraichir le tableau de bord"
+                    >
+                      <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                    </button>
+                  </div>
                 </div>
               </div>
-              <div className={`grid grid-cols-1 md:grid-cols-4 gap-10 ${isRefreshingScore ? 'animate-pulse' : ''}`}>
+              <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-8 ${isRefreshingScore ? 'animate-pulse' : ''}`}>
                 <div className="space-y-3">
                   <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Taux de Livraison</span>
                   <div className="flex items-baseline gap-2">
@@ -3400,12 +3470,74 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   </div>
                 </div>
                 <div className="space-y-3">
+                   <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Efficience Réelle</span>
+                   <div className="flex items-baseline gap-2">
+                     <span className="text-4xl font-display font-black text-white italic tracking-tighter">{finalEfficiencyScore.toFixed(1)}%</span>
+                   </div>
+                   <div className="h-1 bg-white/5 rounded-full overflow-hidden line-clamp-1">
+                    <motion.div 
+                      initial={{ width: 0 }} 
+                      animate={{ width: `${Math.min(finalEfficiencyScore, 100)}%` }} 
+                      className={`h-full ${finalEfficiencyScore >= 100 ? 'bg-accent shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'bg-accent-blue shadow-[0_0_10px_rgba(0,209,255,0.3)]'}`} 
+                    />
+                  </div>
+                </div>
+                <div className="space-y-3">
                    <span className="text-[9px] font-black uppercase tracking-widest text-text-dim">Missions Totales</span>
                    <div className="flex items-baseline gap-2">
                      <span className="text-4xl font-display font-black text-white italic tracking-tighter">{stats.total}</span>
                      <span className="text-xs font-mono text-white/20">UNIT</span>
                    </div>
                    <div className="h-1 bg-white/5 rounded-full" />
+                </div>
+              </div>
+
+              <div className="mt-10 pt-6 border-t border-white/5">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <Zap size={14} className="text-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
+                    <span className="text-[10px] font-black uppercase tracking-[2px] text-white">Moniteur d'Efficience par Support</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-[9px] font-mono text-text-dim uppercase tracking-widest">Base: livraisons / requêtes</span>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                   {['photo', 'vidéo', 'graphisme', 'autre'].map((support, idx) => {
+                     const requested = requestedBySupport[support] || 0;
+                     const delivered = deliveredBySupport[support] || 0;
+                     const rate = requested > 0 ? (delivered / requested) * 100 : 0;
+                     const colors = [
+                       'text-accent border-accent/20 bg-accent/5',
+                       'text-accent-blue border-accent-blue/20 bg-accent-blue/5',
+                       'text-accent-purple border-accent-purple/20 bg-accent-purple/5',
+                       'text-white/40 border-white/10 bg-white/5'
+                     ];
+                     const barColors = ['bg-accent', 'bg-accent-blue', 'bg-accent-purple', 'bg-white/20'];
+                     
+                     if (requested === 0 && delivered === 0) return null;
+
+                     return (
+                       <div key={support} className={`p-4 border rounded-xl transition-all hover:bg-white/[0.05] ${colors[idx] || colors[3]}`}>
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-[9px] font-black uppercase tracking-widest opacity-60">{support}</span>
+                            <span className="text-xs font-mono font-black">{rate.toFixed(1)}%</span>
+                          </div>
+                          <div className="h-1 bg-white/5 rounded-full overflow-hidden mb-3">
+                            <motion.div 
+                              initial={{ width: 0 }} 
+                              animate={{ width: `${Math.min(rate, 100)}%` }} 
+                              className={`h-full ${barColors[idx] || barColors[3]}`} 
+                            />
+                          </div>
+                          <div className="flex justify-between text-[7px] font-black uppercase tracking-wider opacity-30">
+                             <span>Livrées: {delivered}</span>
+                             <span>Req: {requested}</span>
+                          </div>
+                       </div>
+                     );
+                   })}
                 </div>
               </div>
               
@@ -5459,7 +5591,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       if (selectedMissionIds.includes(m.id)) {
         let progress = m.progress;
         switch (newStatus) {
-          case 'livré': progress = 100; break;
+          case 'livré': 
+            if ((m.photoCountDelivered || 0) > 0) {
+              progress = Math.round(((m.photoCountDelivered || 0) / (m.photoCountRequested || 1)) * 100);
+            } else {
+              progress = 100;
+            }
+            break;
           case 'En post-production': progress = 85; break;
           case 'shooté': progress = 75; break;
           case 'en cours de shoot': progress = 50; break;
@@ -7635,7 +7773,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     let updates: Partial<Mission> = { status: newStatus };
                                     // Auto-sync progress
                                     switch (newStatus) {
-                                      case 'livré': updates.progress = 100; break;
+                                      case 'livré': 
+                                        if ((m.photoCountDelivered || 0) > 0) {
+                                          updates.progress = Math.round(((m.photoCountDelivered || 0) / (m.photoCountRequested || 1)) * 100);
+                                        } else {
+                                          updates.progress = 100;
+                                        }
+                                        break;
                                       case 'En post-production': updates.progress = 85; break;
                                       case 'shooté': updates.progress = 75; break;
                                       case 'en cours de shoot': updates.progress = 50; break;
@@ -7683,13 +7827,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               <div className="space-y-1.5 min-w-[120px]">
                                 <div className="flex justify-between items-center px-0.5">
                                   <span className={`text-[9px] font-mono font-bold ${
-                                    m.progress === 100 ? 'text-accent' : 
+                                    m.progress >= 100 ? 'text-accent' : 
                                     m.progress >= 50 ? 'text-accent-blue' : 
                                     'text-text-dim'
                                   }`}>
                                     {m.progress}%
                                   </span>
-                                  {m.progress === 100 && <Check size={10} className="text-accent" />}
+                                  {m.progress >= 100 && <Check size={10} className="text-accent" />}
                                 </div>
                                 <div className="h-1 bg-white/5 rounded-full overflow-hidden border border-white/5">
                                   <motion.div 
@@ -7934,13 +8078,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     </div>
                   </div>
 
-                  <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
-                     <div className="flex items-center gap-2">
-                       <div className={`w-2 h-2 rounded-full ${sm.progress === 100 ? 'bg-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]' : 'bg-accent-blue animate-pulse'}`} />
-                       <span className="text-[8px] font-black uppercase tracking-widest text-white/40">
-                         {sm.progress === 100 ? 'Mission Accomplie' : 'Mission en Cours'}
-                       </span>
-                     </div>
+                      <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
+                         <div className="flex items-center gap-2">
+                           <div className={`w-2 h-2 rounded-full ${sm.progress >= 100 ? 'bg-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]' : 'bg-accent-blue animate-pulse'}`} />
+                           <span className="text-[8px] font-black uppercase tracking-widest text-white/40">
+                             {sm.progress >= 100 ? 'Mission Accomplie' : 'Mission en Cours'}
+                           </span>
+                         </div>
                      <span className="text-[8px] font-mono text-text-dim italic">
                        Créé: {new Date(sm.createdAt).toLocaleDateString()}
                      </span>
@@ -8748,8 +8892,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             <p style={{ fontSize: '12px', color: '#00FF94', fontWeight: '900', letterSpacing: '8px', textTransform: 'uppercase', margin: 0 }}>Mission Contrôle Suite V4.0</p>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <p style={{ fontSize: '10px', fontWeight: '900', color: '#888888', textTransform: 'uppercase', letterSpacing: '2px', margin: '0 0 4px 0' }}>Date d'Export</p>
-            <p style={{ fontSize: '20px', color: '#FFFFFF', margin: '0 0 16px 0' }}>{new Date().toLocaleString()}</p>
+            <p style={{ fontSize: '10px', fontWeight: '900', color: '#888888', textTransform: 'uppercase', letterSpacing: '2px', margin: '0 0 4px 0' }}>Semaine / Date d'Export</p>
+            <p style={{ fontSize: '20px', color: '#FFFFFF', margin: '0 0 4px 0' }}>S{getCurrentWeekNumber()} — {getDayMonthYear()}</p>
+            <p style={{ fontSize: '10px', color: '#888888', margin: 0 }}>{new Date().toLocaleTimeString()}</p>
           </div>
         </div>
 
@@ -8848,6 +8993,93 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             </div>
           </div>
         )}
+
+        <div style={{ marginBottom: '80px' }}>
+          <h2 style={{ fontSize: '24px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '4px', marginBottom: '32px', color: '#00FF94', borderLeft: '4px solid #00FF94', paddingLeft: '16px' }}>IV. Analyse de Performance Stratégique</h2>
+          <div id="report-dashboard-strategic" style={{ backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.1)', padding: '40px', borderRadius: '24px', width: '1040px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ padding: '8px', backgroundColor: 'rgba(0, 255, 148, 0.1)', borderRadius: '8px', color: '#00FF94' }}>
+                  <TrendingUp size={24} />
+                </div>
+                <h3 style={{ fontSize: '20px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#FFFFFF', margin: 0 }}>Analyse de Performance</h3>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', display: 'block' }}>Semaine {getCurrentWeekNumber()} // {getDayMonthYear()}</span>
+                <span style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', display: 'block', marginTop: '4px' }}>Moy. Note</span>
+                <span style={{ fontSize: '24px', fontWeight: 'black', color: '#EBFF00' }}>{dashboardStats.avgRating}/5</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '24px', marginBottom: '40px' }}>
+              <div>
+                <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Taux Livraison</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.completionRate.toFixed(1)}%</p>
+                <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', backgroundColor: '#00FF94', width: `${dashboardStats.completionRate}%` }} />
+                </div>
+              </div>
+              <div>
+                <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Production Active</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.productionRate.toFixed(1)}%</p>
+                <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', backgroundColor: '#00D1FF', width: `${dashboardStats.productionRate}%` }} />
+                </div>
+              </div>
+              <div>
+                <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Indices Qualité</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.stabilityScore.toFixed(0)}%</p>
+                <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', backgroundColor: '#BD00FF', width: `${dashboardStats.stabilityScore}%` }} />
+                </div>
+              </div>
+              <div>
+                <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Efficience Réelle</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.finalEfficiencyScore.toFixed(1)}%</p>
+                <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', backgroundColor: '#00FF94', width: `${Math.min(dashboardStats.finalEfficiencyScore, 100)}%` }} />
+                </div>
+              </div>
+              <div>
+                <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Missions Totales</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.stats.total}</p>
+              </div>
+            </div>
+
+            <div style={{ paddingTop: '32px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
+                <Zap size={16} color="#00FF94" />
+                <h4 style={{ fontSize: '12px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#FFFFFF', margin: 0 }}>Moniteur d'Efficience par Support</h4>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+                {['photo', 'vidéo', 'graphisme', 'autre'].map((support, idx) => {
+                  const requested = dashboardStats.requestedBySupport[support] || 0;
+                  const delivered = dashboardStats.deliveredBySupport[support] || 0;
+                  const rate = requested > 0 ? (delivered / requested) * 100 : 0;
+                  const accentColor = idx === 0 ? '#00FF94' : idx === 1 ? '#00D1FF' : idx === 2 ? '#BD00FF' : '#888';
+                  
+                  if (requested === 0 && delivered === 0) return null;
+
+                  return (
+                    <div key={support} style={{ padding: '20px', border: `1px solid rgba(255,255,255,0.1)`, borderRadius: '12px', backgroundColor: 'rgba(255,255,255,0.02)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', color: '#888' }}>{support}</span>
+                        <span style={{ fontSize: '12px', fontWeight: '900', color: accentColor }}>{rate.toFixed(1)}%</span>
+                      </div>
+                      <div style={{ height: '3px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '3px', marginBottom: '12px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', backgroundColor: accentColor, width: `${Math.min(rate, 100)}%` }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', fontWeight: '900', color: '#444', textTransform: 'uppercase' }}>
+                        <span>Livrées: {delivered}</span>
+                        <span>Req: {requested}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
 
          <div style={{ marginTop: '80px' }}>
            <h2 style={{ fontSize: '24px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '4px', marginBottom: '32px', color: '#EBFF00', borderLeft: '4px solid #EBFF00', paddingLeft: '16px' }}>III. Analyse Graphique</h2>
@@ -9119,7 +9351,13 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
     const nextStatus = allStatuses[nextIndex];
     
     let nextProgress = mission.progress;
-    if (nextStatus === 'livré') nextProgress = 100;
+    if (nextStatus === 'livré') {
+      if ((mission.photoCountDelivered || 0) > 0) {
+        nextProgress = Math.round(((mission.photoCountDelivered || 0) / (mission.photoCountRequested || 1)) * 100);
+      } else {
+        nextProgress = 100;
+      }
+    }
     else if (nextStatus === 'En post-production') nextProgress = 85;
     else if (nextStatus === 'shooté') nextProgress = 75;
     else if (nextStatus === 'en cours de shoot') nextProgress = 50;
@@ -9269,7 +9507,7 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                           let updates: Partial<Mission> = { photoCountDelivered: val };
                           if (val >= mission.photoCountRequested && mission.photoCountRequested > 0) {
                             updates.status = 'livré';
-                            updates.progress = 100;
+                            updates.progress = Math.round((val / mission.photoCountRequested) * 100);
                           } else if (val > 0) {
                             updates.status = 'En post-production';
                           }
