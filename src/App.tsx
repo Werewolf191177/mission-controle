@@ -595,6 +595,18 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
 };
 
 export default function App() {
+  const safeFormatDate = (timestamp: any) => {
+    if (!timestamp) return '-';
+    const dates = new Date(timestamp);
+    return isNaN(dates.getTime()) ? '-' : dates.toLocaleDateString();
+  };
+
+  const safeFormatTime = (timestamp: any) => {
+    if (!timestamp) return '-';
+    const dates = new Date(timestamp);
+    return isNaN(dates.getTime()) ? '-' : dates.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  };
+
   const [googleUser, setGoogleUser] = useState<User | null>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -1392,9 +1404,11 @@ LISTE DES COMMANDES :
       const dataUrl = await toJpeg(reportElement, {
         quality: 0.9,
         backgroundColor: '#0A0A0A',
+        skipFonts: true,
         style: {
           display: 'block',
           visibility: 'visible',
+          transform: 'none',
         }
       });
 
@@ -1452,6 +1466,7 @@ LISTE DES COMMANDES :
         pixelRatio: options.pixelRatio || 2,
         width: width,
         height: height,
+        skipFonts: true,
         style: {
           transform: 'none',
           transition: 'none'
@@ -1880,83 +1895,86 @@ LISTE DES COMMANDES :
   };
 
   const downloadFullExport = () => {
-    // 1. Mission Data Sheet
-    const missionHeaders = [
-      'Mission #', 'Ref ID', 'Date Entrée', 'Heure Entrée', 'Activé', 'Produit', 'Couleur', 'Argument', 
-      'Univers', 'Format', 'Position', 'Support', 'Photos Demandées', 'Photos Délivrées', 'Priorité', 
-      'Deadline', 'Statut', 'Progression %', 'Notation (Flux)', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle', 'Notes / Infos'
-    ];
-    
-    const globalEfficiency = (Math.max(0, (missions.reduce((acc, m) => acc + m.progress, 0) / (missions.length || 1)) - (missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
-
-    const missionData = missions.map(m => {
-      const individualEfficiency = (Math.max(0, m.progress - (m.priority === 'High priority' ? 10 : 0))).toFixed(1);
-      const createdDate = new Date(m.createdAt);
-      return [
-        m.missionNo, m.refId, createdDate.toLocaleDateString(), createdDate.toLocaleTimeString(), m.enabled ? 'OUI' : 'NON', m.product, m.color, m.argumentType,
-        m.univers, m.format, m.position, m.support, m.photoCountRequested,
-        m.photoCountDelivered, m.priority, m.deadline || '-', m.status,
-        m.progress, m.rating || 0, individualEfficiency, globalEfficiency, m.info || '-'
+    try {
+      // 1. Mission Data Sheet
+      const missionHeaders = [
+        'Mission #', 'Ref ID', 'Date Entrée', 'Heure Entrée', 'Activé', 'Produit', 'Couleur', 'Argument', 
+        'Univers', 'Format', 'Position', 'Support', 'Photos Demandées', 'Photos Délivrées', 'Priorité', 
+        'Deadline', 'Statut', 'Progression %', 'Notation (Flux)', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle', 'Notes / Infos'
       ];
-    });
+      
+      const globalEfficiency = (Math.max(0, (missions.reduce((acc, m) => acc + m.progress, 0) / (missions.length || 1)) - (missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
 
-    // 2. Journal Data Sheet
-    const journalHeaders = ['Date', 'Heure', 'Type', 'Message', 'ID Log'];
-    const journalData = globalLogs.map(log => {
-      const date = new Date(log.timestamp);
-      return [
-        date.toLocaleDateString(),
-        date.toLocaleTimeString([], { hour12: false }),
-        log.type.toUpperCase(),
-        log.message,
-        log.id
+      const missionData = missions.map(m => {
+        const individualEfficiency = (Math.max(0, m.progress - (m.priority === 'High priority' ? 10 : 0))).toFixed(1);
+        return [
+          m.missionNo, m.refId, safeFormatDate(m.createdAt), safeFormatTime(m.createdAt), m.enabled ? 'OUI' : 'NON', m.product, m.color, m.argumentType,
+          m.univers, m.format, m.position, m.support, m.photoCountRequested,
+          m.photoCountDelivered, m.priority, m.deadline || '-', m.status,
+          m.progress, m.rating || 0, individualEfficiency, globalEfficiency, m.info || '-'
+        ];
+      });
+
+      // 2. Journal Data Sheet
+      const journalHeaders = ['Date', 'Heure', 'Type', 'Message', 'ID Log'];
+      const journalData = globalLogs.map(log => {
+        return [
+          safeFormatDate(log.timestamp),
+          safeFormatTime(log.timestamp),
+          log.type.toUpperCase(),
+          log.message,
+          log.id
+        ];
+      });
+
+      // 3. Secondary Mission Data Sheet
+      const secondaryHeaders = ['ID', 'Titre', 'Priorité', 'Status', 'Avancement %', 'Notation', 'Date Création', 'Deadline', 'Note/Info'];
+      const secondaryData = secondaryMissions.map(sm => {
+        return [
+          sm.id, sm.title, sm.priority, sm.status, sm.progress, sm.rating,
+          safeFormatDate(sm.createdAt), sm.deadline || '-', sm.note || '-'
+        ];
+      });
+
+      const workbook = XLSX.utils.book_new();
+      
+      // 0. Metadata Sheet
+      const metaHeaders = ['Clé de Contrôle', 'Valeur'];
+      const metaData = [
+        ['Rapport', 'Mission Contrôle Suite V4.0'],
+        ['Semaine d\'Export', `S${getCurrentWeekNumber()}`],
+        ['Date d\'Export', getDayMonthYear()],
+        ['Heure d\'Export', new Date().toLocaleTimeString()],
+        ['Généré par', 'Système AIS-MD-V3']
       ];
-    });
+      const metaSheet = XLSX.utils.aoa_to_sheet([metaHeaders, ...metaData]);
+      XLSX.utils.book_append_sheet(workbook, metaSheet, "Infos Export");
 
-    // 3. Secondary Mission Data Sheet
-    const secondaryHeaders = ['ID', 'Titre', 'Priorité', 'Status', 'Avancement %', 'Notation', 'Date Création', 'Deadline', 'Note/Info'];
-    const secondaryData = secondaryMissions.map(sm => {
-      const createdDate = new Date(sm.createdAt);
-      return [
-        sm.id, sm.title, sm.priority, sm.status, sm.progress, sm.rating,
-        createdDate.toLocaleDateString(), sm.deadline || '-', sm.note || '-'
-      ];
-    });
+      // Add Mission Sheet
+      const missionSheet = XLSX.utils.aoa_to_sheet([missionHeaders, ...missionData]);
+      XLSX.utils.book_append_sheet(workbook, missionSheet, "Production (Missions)");
+      
+      // Add Journal Sheet
+      const journalSheet = XLSX.utils.aoa_to_sheet([journalHeaders, ...journalData]);
+      XLSX.utils.book_append_sheet(workbook, journalSheet, "Performance (Journal)");
 
-    const workbook = XLSX.utils.book_new();
-    
-    // 0. Metadata Sheet
-    const metaHeaders = ['Clé de Contrôle', 'Valeur'];
-    const metaData = [
-      ['Rapport', 'Mission Contrôle Suite V4.0'],
-      ['Semaine d\'Export', `S${getCurrentWeekNumber()}`],
-      ['Date d\'Export', getDayMonthYear()],
-      ['Heure d\'Export', new Date().toLocaleTimeString()],
-      ['Généré par', 'Système AIS-MD-V3']
-    ];
-    const metaSheet = XLSX.utils.aoa_to_sheet([metaHeaders, ...metaData]);
-    XLSX.utils.book_append_sheet(workbook, metaSheet, "Infos Export");
+      // Add Secondary Mission Sheet
+      const secondarySheet = XLSX.utils.aoa_to_sheet([secondaryHeaders, ...secondaryData]);
+      XLSX.utils.book_append_sheet(workbook, secondarySheet, "Missions Secondaires");
+      
+      const now = new Date();
+      const weekNum = getCurrentWeekNumber();
+      const dateStr = now.toISOString().split('T')[0];
+      const timeStr = `${now.getHours()}h${now.getMinutes().toString().padStart(2, '0')}`;
+      XLSX.writeFile(workbook, `Mission_Controle_Rapport_Global_S${weekNum}_${dateStr}_${timeStr}.xlsx`);
 
-    // Add Mission Sheet
-    const missionSheet = XLSX.utils.aoa_to_sheet([missionHeaders, ...missionData]);
-    XLSX.utils.book_append_sheet(workbook, missionSheet, "Production (Missions)");
-    
-    // Add Journal Sheet
-    const journalSheet = XLSX.utils.aoa_to_sheet([journalHeaders, ...journalData]);
-    XLSX.utils.book_append_sheet(workbook, journalSheet, "Performance (Journal)");
-
-    // Add Secondary Mission Sheet
-    const secondarySheet = XLSX.utils.aoa_to_sheet([secondaryHeaders, ...secondaryData]);
-    XLSX.utils.book_append_sheet(workbook, secondarySheet, "Missions Secondaires");
-    
-    const now = new Date();
-    const weekNum = getCurrentWeekNumber();
-    const dateStr = now.toISOString().split('T')[0];
-    const timeStr = `${now.getHours()}h${now.getMinutes().toString().padStart(2, '0')}`;
-    XLSX.writeFile(workbook, `Mission_Controle_Rapport_Global_S${weekNum}_${dateStr}_${timeStr}.xlsx`);
-
-    setToast({ show: true, message: 'Rapport Global généré ! (Production + Performance)', type: 'task' });
-    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      setToast({ show: true, message: 'Rapport Global généré ! (Production + Performance)', type: 'task' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    } catch (exportErr: any) {
+      console.error('Error in downloadFullExport:', exportErr);
+      setToast({ show: true, message: `Erreur d'export Excel : ${exportErr.message}`, type: 'alert' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+    }
   };
   
   downloadFullExportRef.current = downloadFullExport;
@@ -1977,9 +1995,8 @@ LISTE DES COMMANDES :
     const globalEfficiency = (Math.max(0, (missions.reduce((acc, m) => acc + m.progress, 0) / (missions.length || 1)) - (missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
     const missionData = missions.map(m => {
       const individualEfficiency = (Math.max(0, m.progress - (m.priority === 'High priority' ? 10 : 0))).toFixed(1);
-      const createdDate = new Date(m.createdAt);
       return [
-        m.missionNo, m.refId, createdDate.toLocaleDateString(), createdDate.toLocaleTimeString(), m.enabled ? 'OUI' : 'NON', m.product, m.color, m.argumentType,
+        m.missionNo, m.refId, safeFormatDate(m.createdAt), safeFormatTime(m.createdAt), m.enabled ? 'OUI' : 'NON', m.product, m.color, m.argumentType,
         m.univers, m.format, m.position, m.support, m.photoCountRequested,
         m.photoCountDelivered, m.priority, m.deadline || '-', m.status,
         m.progress, m.rating || 0, individualEfficiency, globalEfficiency, m.info || '-'
@@ -1989,10 +2006,9 @@ LISTE DES COMMANDES :
     // 2. Journal Data Sheet
     const journalHeaders = ['Date', 'Heure', 'Type', 'Message', 'ID Log'];
     const journalData = globalLogs.map(log => {
-      const date = new Date(log.timestamp);
       return [
-        date.toLocaleDateString(),
-        date.toLocaleTimeString([], { hour12: false }),
+        safeFormatDate(log.timestamp),
+        safeFormatTime(log.timestamp),
         log.type.toUpperCase(),
         log.message,
         log.id
@@ -2002,10 +2018,9 @@ LISTE DES COMMANDES :
     // 3. Secondary Mission Data Sheet
     const secondaryHeaders = ['ID', 'Titre', 'Priorité', 'Status', 'Avancement %', 'Notation', 'Date Création', 'Deadline', 'Note/Info'];
     const secondaryData = secondaryMissions.map(sm => {
-      const createdDate = new Date(sm.createdAt);
       return [
         sm.id, sm.title, sm.priority, sm.status, sm.progress, sm.rating,
-        createdDate.toLocaleDateString(), sm.deadline || '-', sm.note || '-'
+        safeFormatDate(sm.createdAt), sm.deadline || '-', sm.note || '-'
       ];
     });
 
@@ -2789,26 +2804,27 @@ LISTE DES COMMANDES :
   const copyToExcel = async () => {
     if (missions.length === 0) return;
 
-    // Excel headers
-    const headers = ['N° Mission', 'Ref ID', 'Activé', 'Date Entrée', 'Heure Entrée', 'Produit', 'Couleur', 'Type Argument', 'Univers', 'Format', 'Position', 'Support', 'Priorité', 'Échéance', 'Statut', 'Photos Demandées', 'Photos Délivrées', 'Progression', 'Notes / Infos'];
-    const rows = missions.map(m => {
-      const createdDate = new Date(m.createdAt);
-      return [
-        m.missionNo, m.refId, m.enabled ? 'OUI' : 'NON', createdDate.toLocaleDateString(), createdDate.toLocaleTimeString(), m.product, m.color, m.argumentType, 
-        m.univers, m.format, m.position, m.support, m.priority, m.deadline || '-', m.status, 
-        m.photoCountRequested, m.photoCountDelivered,
-        `${m.progress}%`, m.info || '-'
-      ];
-    });
-    
-    const tsv = [headers, ...rows].map(row => row.join('\t')).join('\n');
-
     try {
+      // Excel headers
+      const headers = ['N° Mission', 'Ref ID', 'Activé', 'Date Entrée', 'Heure Entrée', 'Produit', 'Couleur', 'Type Argument', 'Univers', 'Format', 'Position', 'Support', 'Priorité', 'Échéance', 'Statut', 'Photos Demandées', 'Photos Délivrées', 'Progression', 'Notes / Infos'];
+      const rows = missions.map(m => {
+        return [
+          m.missionNo, m.refId, m.enabled ? 'OUI' : 'NON', safeFormatDate(m.createdAt), safeFormatTime(m.createdAt), m.product, m.color, m.argumentType, 
+          m.univers, m.format, m.position, m.support, m.priority, m.deadline || '-', m.status, 
+          m.photoCountRequested, m.photoCountDelivered,
+          `${m.progress}%`, m.info || '-'
+        ];
+      });
+      
+      const tsv = [headers, ...rows].map(row => row.join('\t')).join('\n');
+
       await navigator.clipboard.writeText(tsv);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to copy: ', err);
+      setToast({ show: true, message: `Erreur de copie presse-papier : ${err.message}`, type: 'alert' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
     }
   };
 
@@ -5435,10 +5451,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   >
                     <div className="flex flex-col items-center pt-0.5 min-w-[85px]">
                       <span className="text-[9px] font-mono text-white/60 mb-0.5">
-                        {new Date(log.timestamp).toLocaleDateString()}
+                        {safeFormatDate(log.timestamp)}
                       </span>
                       <span className="text-[10px] font-mono text-white/40 group-hover:text-white transition-colors">
-                        {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        {safeFormatTime(log.timestamp)}
                       </span>
                     </div>
 
@@ -8086,7 +8102,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                            </span>
                          </div>
                      <span className="text-[8px] font-mono text-text-dim italic">
-                       Créé: {new Date(sm.createdAt).toLocaleDateString()}
+                       Créé: {safeFormatDate(sm.createdAt)}
                      </span>
                   </div>
                 </motion.div>
@@ -8239,7 +8255,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           </div>
                           <div className="text-right">
                              <span className="text-[9px] text-text-dim block opacity-50">Créé le</span>
-                             <span className="text-[10px] text-accent-purple font-mono">{new Date(m.createdAt).toLocaleDateString()}</span>
+                             <span className="text-[10px] text-accent-purple font-mono">{safeFormatDate(m.createdAt)}</span>
                           </div>
                         </div>
                       ))
