@@ -10,7 +10,8 @@ import {
   Trash2, 
   Settings, 
   Copy, 
-  Check, 
+  Check,
+  CheckSquare,
   ChevronRight,
   ArrowUpDown,
   RotateCcw,
@@ -772,6 +773,8 @@ export default function App() {
   // State for missions
   const [missions, setMissions] = useState<Mission[]>([]);
   const [secondaryMissions, setSecondaryMissions] = useState<SecondaryMission[]>([]);
+  const [secondaryViewMode, setSecondaryViewMode] = useState<'grid' | 'task' | 'calendar'>('grid');
+  const [calendarDate, setCalendarDate] = useState(new Date());
   const [sidebarTab, setSidebarTab] = useState<'production' | 'secondary'>('production');
   const [filterDuplicates, setFilterDuplicates] = useState(false);
   const [showDuplicateIndicators, setShowDuplicateIndicators] = useState(true);
@@ -839,7 +842,8 @@ export default function App() {
   const [toast, setToast] = useState<{ show: boolean, message: string, type: string }>({ show: false, message: '', type: 'calendar' });
   const [isCapturing, setIsCapturing] = useState(false);
   const [activeTab, setActiveTab] = useState<'table' | 'dashboard' | 'journal' | 'system'>('table');
-  const [viewMode, setViewMode] = useState<'table' | 'mosaic' | 'grid'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'mosaic' | 'grid' | 'task' | 'calendar'>('table');
+  const [primaryCalendarDate, setPrimaryCalendarDate] = useState(new Date());
   const [isAdvancedSortOpen, setIsAdvancedSortOpen] = useState(false);
   
   // Selection & Bulk Actions
@@ -950,6 +954,9 @@ export default function App() {
   const [collapsedCategories, setCollapsedCategories] = useState<string[]>([]);
   const [collapsedSettingsSections, setCollapsedSettingsSections] = useState<string[]>([]);
   const [collapsedMosaicGroups, setCollapsedMosaicGroups] = useState<string[]>([]);
+  const [retractedMosaics, setRetractedMosaics] = useState<boolean>(() => {
+    return localStorage.getItem('retractedMosaics') === 'true';
+  });
   
   // Journal State
   const [systemDataJson, setSystemDataJson] = useState('');
@@ -1011,11 +1018,9 @@ export default function App() {
 
   const generateFullDataJson = useCallback(() => {
     const data = {
-      missions,
-      secondaryMissions,
-      missionCounter,
       refPrefix,
       refCounter,
+      appLogo,
       headerBgColor,
       refIdColor,
       accentColor,
@@ -1028,11 +1033,10 @@ export default function App() {
       waveOpacity,
       headerBgImage,
       headerBgOpacity,
-      globalLogs,
       categories: categories.map(({ icon, ...rest }) => rest)
     };
     return JSON.stringify(data, null, 2);
-  }, [missions, secondaryMissions, missionCounter, refPrefix, refCounter, headerBgColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, waveOpacity, headerBgImage, headerBgOpacity, globalLogs, categories]);
+  }, [refPrefix, refCounter, appLogo, headerBgColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, waveOpacity, headerBgImage, headerBgOpacity, categories]);
 
   const copySystemJson = () => {
     const json = generateFullDataJson();
@@ -1370,7 +1374,9 @@ LISTE DES COMMANDES :
           if (val !== null) setRefCounter(val);
         }
         const savedHeaderBgColor = localStorage.getItem('headerBgColor');
+        const savedAppLogo = localStorage.getItem('appLogo');
         if (savedHeaderBgColor) setHeaderBgColor(savedHeaderBgColor);
+        if (savedAppLogo) setAppLogo(savedAppLogo);
         
         if (savedHeaderBg) setHeaderBgImage(savedHeaderBg);
         if (savedHeaderOpacity) setHeaderBgOpacity(parseFloat(savedHeaderOpacity));
@@ -1782,6 +1788,7 @@ LISTE DES COMMANDES :
       if (data.refPrefix) setRefPrefix(data.refPrefix);
       if (data.refCounter) setRefCounter(data.refCounter);
       if (data.headerBgColor) setHeaderBgColor(data.headerBgColor);
+      if (data.appLogo) setAppLogo(data.appLogo);
       if (data.refIdColor) setRefIdColor(data.refIdColor);
       if (data.accentColor) setAccentColor(data.accentColor);
       if (data.accentBlueColor) setAccentBlueColor(data.accentBlueColor);
@@ -1803,12 +1810,13 @@ LISTE DES COMMANDES :
       }
 
       // Force save to localStorage
-      localStorage.setItem('missions', JSON.stringify(data.missions || []));
-      localStorage.setItem('secondaryMissions', JSON.stringify(data.secondaryMissions || []));
-      localStorage.setItem('missionCounter', JSON.stringify(data.missionCounter || 1));
+      if (data.missions !== undefined) localStorage.setItem('missions', JSON.stringify(data.missions));
+      if (data.secondaryMissions !== undefined) localStorage.setItem('secondaryMissions', JSON.stringify(data.secondaryMissions));
+      if (data.missionCounter !== undefined) localStorage.setItem('missionCounter', JSON.stringify(data.missionCounter));
       if (data.refPrefix) localStorage.setItem('refPrefix', data.refPrefix);
       if (data.refCounter) localStorage.setItem('refCounter', data.refCounter.toString());
       if (data.headerBgColor) localStorage.setItem('headerBgColor', data.headerBgColor);
+      if (data.appLogo) localStorage.setItem('appLogo', data.appLogo);
       if (data.refIdColor) localStorage.setItem('refIdColor', data.refIdColor);
       if (data.accentColor) localStorage.setItem('accentColor', data.accentColor);
       if (data.accentBlueColor) localStorage.setItem('accentBlueColor', data.accentBlueColor);
@@ -1820,9 +1828,11 @@ LISTE DES COMMANDES :
       if (data.waveOpacity !== undefined) localStorage.setItem('waveOpacity', data.waveOpacity.toString());
       if (data.headerBgImage) localStorage.setItem('headerBgImage', data.headerBgImage);
       if (data.headerBgOpacity !== undefined) localStorage.setItem('headerBgOpacity', data.headerBgOpacity.toString());
-      if (data.globalLogs) localStorage.setItem('globalLogs', JSON.stringify(data.globalLogs));
-      const catsToSave = (data.categories || []).map(({ icon, ...rest }: any) => rest);
-      localStorage.setItem('categories', JSON.stringify(catsToSave));
+      if (data.globalLogs !== undefined) localStorage.setItem('globalLogs', JSON.stringify(data.globalLogs));
+      if (data.categories !== undefined) {
+        const catsToSave = data.categories.map(({ icon, ...rest }: any) => rest);
+        localStorage.setItem('categories', JSON.stringify(catsToSave));
+      }
 
       setToast({
         show: true,
@@ -1861,6 +1871,8 @@ LISTE DES COMMANDES :
       localStorage.setItem('refCounter', JSON.stringify(refCounter));
       localStorage.setItem('headerBgColor', headerBgColor);
       if (headerBgImage) localStorage.setItem('headerBgImage', headerBgImage);
+      if (appLogo) localStorage.setItem('appLogo', appLogo);
+      else localStorage.removeItem('appLogo');
       localStorage.setItem('headerBgOpacity', headerBgOpacity.toString());
       localStorage.setItem('globalLogs', JSON.stringify(globalLogs));
       localStorage.setItem('waveColor', waveColor);
@@ -1892,6 +1904,7 @@ LISTE DES COMMANDES :
       localStorage.setItem('collapsedCategories', JSON.stringify(collapsedCategories));
       localStorage.setItem('collapsedSettingsSections', JSON.stringify(collapsedSettingsSections));
       localStorage.setItem('collapsedMosaicGroups', JSON.stringify(collapsedMosaicGroups));
+      localStorage.setItem('retractedMosaics', retractedMosaics.toString());
       localStorage.setItem('compactHiddenColumns', JSON.stringify(compactHiddenColumns));
       localStorage.setItem('minimalHiddenColumns', JSON.stringify(minimalHiddenColumns));
       localStorage.setItem('deadlineAlertThreshold', deadlineAlertThreshold.toString());
@@ -1924,7 +1937,7 @@ LISTE DES COMMANDES :
         console.error('[STORAGE] Save failed:', e);
       }
     }
-  }, [missions, secondaryMissions, headerBgColor, autoExportEnabled, autoExportInterval, scheduledExportEnabled, scheduledExportDays, scheduledExportTime, missionCounter, refPrefix, refCounter, categories, headerBgImage, headerBgOpacity, globalLogs, waveColor, waveOpacity, waveType, appFont, appFontSize, appTextColor, appTextCase, appFontWeight, navActiveColor, suiteSubtitleColor, copyBtnColor, saveBtnColor, missionTitleColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, sortConfigs, viewMode, tableViewState, manualHiddenColumns, compactHiddenColumns, minimalHiddenColumns, collapsedCategories, collapsedSettingsSections, collapsedMosaicGroups, aiInstructions, deadlineAlertThreshold, globalDeadline]);
+  }, [missions, secondaryMissions, appLogo, headerBgColor, autoExportEnabled, autoExportInterval, scheduledExportEnabled, scheduledExportDays, scheduledExportTime, missionCounter, refPrefix, refCounter, categories, headerBgImage, headerBgOpacity, globalLogs, waveColor, waveOpacity, waveType, appFont, appFontSize, appTextColor, appTextCase, appFontWeight, navActiveColor, suiteSubtitleColor, copyBtnColor, saveBtnColor, missionTitleColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, sortConfigs, viewMode, tableViewState, manualHiddenColumns, compactHiddenColumns, minimalHiddenColumns, collapsedCategories, collapsedSettingsSections, collapsedMosaicGroups, retractedMosaics, aiInstructions, deadlineAlertThreshold, globalDeadline]);
 
   const saveToLocalStorage = () => {
     performSave();
@@ -3243,12 +3256,33 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             </div>
           </div>
           
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <button 
               onClick={expandAll}
-              className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all flex items-center gap-2"
+              className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all flex items-center gap-1.5"
+              title="Développer tous les groupes d'états"
             >
-              <Maximize size={10} /> Tout Développer
+              <Maximize size={10} /> Développer colonnes
+            </button>
+            <button 
+              onClick={collapseAll}
+              className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all flex items-center gap-1.5"
+              title="Réduire tous les groupes d'états"
+            >
+              <Minimize size={10} /> Réduire colonnes
+            </button>
+            <div className="h-4 w-[1px] bg-white/10 mx-1" />
+            <button 
+              onClick={() => setRetractedMosaics(!retractedMosaics)}
+              className={`px-3 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${
+                retractedMosaics 
+                  ? 'bg-accent/20 border-accent/40 text-accent hover:bg-accent/30 shadow-[0_0_15px_-3px_var(--color-accent)]' 
+                  : 'bg-white/5 border-white/10 text-text-dim hover:text-white hover:bg-white/10'
+              }`}
+              title="Rétracter/Réduire les détails des vignettes des missions"
+            >
+              {retractedMosaics ? <Maximize size={10} /> : <Minimize size={10} />}
+              {retractedMosaics ? 'Étendre les vignettes' : 'Rétracter les vignettes'}
             </button>
           </div>
         </div>
@@ -3312,66 +3346,104 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               }
                             }}
                           >
-                            {/* Image/Placeholder */}
-                            <div className="h-40 bg-white/5 relative overflow-hidden">
-                               {m.imageUrl ? (
-                                <img 
-                                  id={`mission-image-${m.id}`}
-                                  src={m.imageUrl} 
-                                  alt={m.product} 
-                                  className={`w-full h-full object-cover group-hover:scale-110 transition-all duration-700 ${!m.enabled ? 'grayscale opacity-40' : 'grayscale-0 opacity-100'} group-hover:grayscale-0 group-hover:opacity-100`} 
-                                  referrerPolicy="no-referrer" 
-                                />
-                              ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center gap-2 opacity-20">
-                                  <ImageIcon size={32} />
-                                  <span className="text-[10px] uppercase font-black tracking-widest">No Capture</span>
+                            {/* Header (compact or imagery) */}
+                            {!retractedMosaics ? (
+                              <div className="h-40 bg-white/5 relative overflow-hidden shrink-0">
+                                 {m.imageUrl ? (
+                                  <img 
+                                    id={`mission-image-${m.id}`}
+                                    src={m.imageUrl} 
+                                    alt={m.product} 
+                                    className={`w-full h-full object-cover group-hover:scale-110 transition-all duration-700 ${!m.enabled ? 'grayscale opacity-40' : 'grayscale-0 opacity-100'} group-hover:grayscale-0 group-hover:opacity-100`} 
+                                    referrerPolicy="no-referrer" 
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex flex-col items-center justify-center gap-2 opacity-20">
+                                    <ImageIcon size={32} />
+                                    <span className="text-[10px] uppercase font-black tracking-widest">No Capture</span>
+                                  </div>
+                                )}
+                                {/* Overlay Tags */}
+                                <div className="absolute top-2 left-2 flex gap-1 z-10">
+                                  <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter ${
+                                     m.priority === 'High priority' ? 'bg-red-500 text-white' : 
+                                     m.priority === 'Medium priority' ? 'bg-accent-red text-black' : 
+                                     'bg-white/10 text-text-dim'
+                                  }`}>
+                                    {m.priority.split(' ')[0]}
+                                  </div>
                                 </div>
-                              )}
-                              {/* Overlay Tags */}
-                              <div className="absolute top-2 left-2 flex gap-1">
-                                <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter ${
-                                   m.priority === 'High priority' ? 'bg-red-500 text-white' : 
-                                   m.priority === 'Medium priority' ? 'bg-accent-red text-black' : 
-                                   'bg-white/10 text-text-dim'
-                                }`}>
-                                  {m.priority.split(' ')[0]}
+                                <div className="absolute top-2 right-2 flex gap-1.5 items-center z-10 font-black">
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
+                                    className="w-5 h-5 rounded border bg-black/60 border-white/20 text-white/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all hover:bg-red-500 hover:border-red-500 hover:text-white"
+                                    title="Supprimer la mission"
+                                  >
+                                    <Trash2 size={10} />
+                                  </button>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); toggleSelectMission(m.id, e); }}
+                                    className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
+                                      selectedMissionIds.includes(m.id) ? 'bg-accent border-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'bg-black/60 border-white/20 text-transparent opacity-0 group-hover:opacity-100'
+                                    }`}
+                                  >
+                                    <Check size={12} strokeWidth={4} />
+                                  </button>
                                 </div>
-                              </div>
-                              <div className="absolute top-2 right-2 flex gap-1.5 items-center">
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
-                                  className="w-5 h-5 rounded border bg-black/60 border-white/20 text-white/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all hover:bg-red-500 hover:border-red-500 hover:text-white"
-                                  title="Supprimer la mission"
-                                >
-                                  <Trash2 size={10} />
-                                </button>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); toggleSelectMission(m.id, e); }}
-                                  className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
-                                    selectedMissionIds.includes(m.id) ? 'bg-accent border-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'bg-black/60 border-white/20 text-transparent opacity-0 group-hover:opacity-100'
-                                  }`}
-                                >
-                                  <Check size={12} strokeWidth={4} />
-                                </button>
-                              </div>
-                              <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-black to-transparent opacity-60" />
-                              <div className="absolute bottom-2 left-3 z-10">
-                                 <span className="text-[10px] font-mono font-black text-accent" style={{ color: refIdColor }}>{m.refId}</span>
-                              </div>
-                              {/* Rating on Image */}
-                              {m.rating ? (
-                                <div className="absolute bottom-2 right-3 z-10 flex items-center gap-1.5 bg-black/40 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
-                                  <StarRatingStatic rating={m.rating} size={8} />
-                                  <span className="text-[8px] font-mono font-bold text-accent-yellow leading-none">{m.rating}/5</span>
+                                <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-t from-black to-transparent opacity-60" />
+                                <div className="absolute bottom-2 left-3 z-10">
+                                   <span className="text-[10px] font-mono font-black text-accent" style={{ color: refIdColor }}>{m.refId}</span>
                                 </div>
-                              ) : null}
+                                {/* Rating on Image */}
+                                {m.rating ? (
+                                  <div className="absolute bottom-2 right-3 z-10 flex items-center gap-1.5 bg-black/40 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
+                                    <StarRatingStatic rating={m.rating} size={8} />
+                                    <span className="text-[8px] font-mono font-bold text-accent-yellow leading-none">{m.rating}/5</span>
+                                  </div>
+                                ) : null}
 
-                              {/* Activation Toggle Overlay */}
-                              <div className="absolute top-2 left-10 z-20">
-                                <Toggle enabled={m.enabled} onToggle={(e) => toggleMissionEnabled(m.id, e)} />
+                                {/* Activation Toggle Overlay */}
+                                <div className="absolute top-2 left-10 z-20">
+                                  <Toggle enabled={m.enabled} onToggle={(e) => toggleMissionEnabled(m.id, e)} />
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="px-3.5 py-2.5 bg-white/[0.02] border-b border-white/5 flex items-center justify-between shrink-0 select-none">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] font-mono font-black text-accent" style={{ color: refIdColor }}>{m.refId}</span>
+                                  <Toggle enabled={m.enabled} onToggle={(e) => toggleMissionEnabled(m.id, e)} />
+                                  <div className={`px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-tighter ${
+                                     m.priority === 'High priority' ? 'bg-red-500 text-white' : 
+                                     m.priority === 'Medium priority' ? 'bg-accent-red text-black' : 
+                                     'bg-white/10 text-text-dim'
+                                  }`}>
+                                    {m.priority.split(' ')[0]}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {m.rating ? (
+                                    <div className="flex items-center gap-0.5 bg-black/40 px-1 py-0.5 rounded-sm">
+                                      <StarRatingStatic rating={m.rating} size={6} />
+                                    </div>
+                                  ) : null}
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
+                                    className="w-5 h-5 rounded border border-white/10 text-text-dim opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all hover:bg-red-500 hover:border-red-500 hover:text-white"
+                                    title="Supprimer la mission"
+                                  >
+                                    <Trash2 size={10} />
+                                  </button>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); toggleSelectMission(m.id, e); }}
+                                    className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
+                                      selectedMissionIds.includes(m.id) ? 'bg-accent border-accent text-black' : 'border-white/10 text-text-dim opacity-0 group-hover:opacity-100 hover:text-white'
+                                    }`}
+                                  >
+                                    <Check size={10} strokeWidth={3} />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
 
                             {/* Content */}
                             <div className={`p-4 flex flex-col flex-1 space-y-4 transition-opacity duration-300 ${!m.enabled ? 'opacity-40 grayscale-[0.5]' : 'opacity-100'}`}>
@@ -3476,7 +3548,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                   >
                                     <Maximize size={12} />
                                   </button>
-                               </div>
+                                </div>
                             </div>
                           </motion.div>
                         ))}
@@ -3484,6 +3556,136 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  const PrimaryTaskView = () => {
+    return (
+      <div className="space-y-3">
+        <div className="flex justify-end mb-4">
+          <a 
+            href="https://calendar.google.com/calendar/u/0/r/tasks" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 hover:bg-white/10 rounded-lg text-[10px] font-black uppercase tracking-widest text-[#4285F4] transition-all group"
+          >
+            <CheckSquare size={14} className="text-[#4285F4] group-hover:scale-110 transition-transform" />
+            Ouvrir Google Tasks
+          </a>
+        </div>
+        {filteredMissions.length === 0 ? (
+          <div className="py-12 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-4 opacity-30">
+            <PackageSearch size={40} className="text-text-dim" />
+            <p className="text-[10px] uppercase font-black tracking-widest">Aucune mission principale</p>
+          </div>
+        ) : (
+          filteredMissions.map((m) => (
+            <div key={m.id} className={`flex items-center gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-xl hover:bg-white/[0.04] transition-all custom-shadow ${m.enabled ? '' : 'opacity-50 grayscale'}`}>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  updateMission(m.id, { status: m.status === 'livré' ? 'en cours' : 'livré' });
+                }}
+                className={`shrink-0 w-6 h-6 rounded-md border flex items-center justify-center transition-colors ${m.status === 'livré' || m.progress >= 100 ? 'bg-accent/20 border-accent text-accent shadow-[0_0_10px_rgba(0,255,148,0.2)]' : 'bg-black/40 border-white/10 text-transparent hover:border-white/30 hover:text-white/20'}`}
+              >
+                <Check size={14} />
+              </button>
+              <div className="flex-1 flex flex-col gap-1.5">
+                <div className="flex items-center gap-4">
+                  <span className={`font-bold outline-none flex-1 transition-colors text-sm ${m.status === 'livré' || m.progress >= 100 ? 'line-through text-white/40' : 'text-white'}`}>
+                    {m.product}
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-[8px] font-black px-2 py-0.5 rounded border uppercase tracking-wider ${
+                      m.priority === 'High priority' ? 'bg-red-500/10 text-red-500 border-red-500/20' : 
+                      m.priority === 'Medium priority' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20' : 
+                      'bg-accent-blue/10 text-accent-blue border-accent-blue/20'
+                    }`}>
+                      {m.priority || 'Medium priority'}
+                    </span>
+                    {m.deadline && (
+                      <div className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded bg-black/40 border border-white/5 ${isDeadlineApproaching(m.deadline) && m.progress < 100 ? 'text-red-500 shadow-[0_0_8px_rgba(239,68,68,0.2)]' : 'text-text-dim'}`}>
+                        <Calendar size={10} />
+                        <span className="tracking-widest">{m.deadline}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="text-[10px] text-text-dim flex items-center gap-3">
+                  <span className="font-mono text-accent-blue bg-accent-blue/10 px-1.5 py-0.5 rounded">{m.refId}</span>
+                  {m.support && <span className="uppercase tracking-widest text-[9px] opacity-80">&bull; {m.support}</span>}
+                  {m.info && <span>&bull; <span className="opacity-60 italic">{m.info}</span></span>}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 border-l border-white/5 pl-4 ml-2">
+                <a 
+                  href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('Mission: ' + m.product)}&details=${encodeURIComponent('Ref: ' + m.refId + '\n' + (m.info || ''))}&dates=${m.deadline ? new Date(m.deadline).toISOString().replace(/-|:|\.\d\d\d/g, "") + '/' + new Date(new Date(m.deadline).getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "") : ''}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1.5 rounded bg-white/5 text-text-dim hover:bg-[#4285F4]/20 hover:text-[#4285F4] transition-colors"
+                  title="Ajouter à Google Calendar"
+                >
+                  <Calendar size={14} />
+                </a>
+                <Toggle enabled={m.enabled} onToggle={() => toggleMissionEnabled(m.id, { stopPropagation: () => {} } as any)} />
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  };
+
+  const PrimaryCalendarView = () => {
+    return (
+      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 custom-shadow">
+        <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4 border-b border-white/5 pb-4">
+           <div className="flex items-center gap-4 bg-black/40 px-2 py-1 rounded-lg border border-white/5">
+             <button onClick={() => setPrimaryCalendarDate(new Date(primaryCalendarDate.getFullYear(), primaryCalendarDate.getMonth() - 1, 1))} className="p-1.5 hover:bg-white/10 rounded text-text-dim hover:text-white transition-colors"><ChevronsLeft size={16}/></button>
+             <h3 className="text-white font-black text-sm uppercase tracking-widest min-w-[140px] text-center">
+               {primaryCalendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+             </h3>
+             <button onClick={() => setPrimaryCalendarDate(new Date(primaryCalendarDate.getFullYear(), primaryCalendarDate.getMonth() + 1, 1))} className="p-1.5 hover:bg-white/10 rounded text-text-dim hover:text-white transition-colors"><ChevronRight size={16}/></button>
+           </div>
+           <div className="flex items-center gap-3">
+             <button onClick={() => setPrimaryCalendarDate(new Date())} className="text-[10px] font-black uppercase tracking-widest py-2 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-all">Aujourd'hui</button>
+             <a 
+               href="https://calendar.google.com/calendar/r" 
+               target="_blank" 
+               rel="noopener noreferrer"
+               className="flex items-center gap-2 px-4 py-2 bg-[#4285F4]/10 border border-[#4285F4]/30 text-[#4285F4] hover:bg-[#4285F4]/20 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all group"
+             >
+               <Calendar size={14} className="group-hover:scale-110 transition-transform" />
+               Google Calendar
+             </a>
+           </div>
+        </div>
+        <div className="grid grid-cols-7 gap-2">
+          {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(day => (
+            <div key={day} className="text-center text-[10px] font-black uppercase tracking-widest text-text-dim/60 pb-2">{day}</div>
+          ))}
+          {Array.from({ length: Array.from({ length: new Date(primaryCalendarDate.getFullYear(), primaryCalendarDate.getMonth(), 1).getDay() === 0 ? 6 : new Date(primaryCalendarDate.getFullYear(), primaryCalendarDate.getMonth(), 1).getDay() - 1 }).length }).map((_, i) => (
+             <div key={`empty-${i}`} className="min-h-[120px] bg-white/[0.01] border border-white/[0.02] rounded-xl" />
+          ))}
+          {Array.from({ length: new Date(primaryCalendarDate.getFullYear(), primaryCalendarDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
+            const dateStr = `${primaryCalendarDate.getFullYear()}-${(primaryCalendarDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+            const dayMissions = filteredMissions.filter(m => m.deadline === dateStr);
+            const isToday = new Date().toISOString().split('T')[0] === dateStr;
+            return (
+              <div key={day} className={`min-h-[120px] rounded-xl p-2.5 flex flex-col transition-colors ${isToday ? 'bg-accent/5 border border-accent/30 shadow-[0_0_15px_rgba(0,255,148,0.1)]' : 'bg-black/20 border border-white/5 hover:border-white/20 hover:bg-white/[0.02]'}`}>
+                 <div className={`text-[11px] font-black mb-3 ${isToday ? 'text-accent' : 'text-text-dim/80'}`}>{day}</div>
+                 <div className="flex flex-col gap-1.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
+                   {dayMissions.map(m => (
+                      <a href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('Mission: ' + m.product)}&details=${encodeURIComponent('Ref: ' + m.refId + '\n' + (m.info || ''))}&dates=${m.deadline ? new Date(m.deadline).toISOString().replace(/-|:|\.\d\d\d/g, "") + '/' + new Date(new Date(m.deadline).getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "") : ''}`} target="_blank" rel="noopener noreferrer" key={m.id} title={m.product} className={`group cursor-pointer hover:scale-[1.02] transition-all text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border ${m.progress >= 100 || m.status === 'livré' ? 'bg-white/5 border-white/5 text-white/40 line-through' : m.priority === 'High priority' ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' : m.priority === 'Medium priority' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20 hover:bg-accent-yellow/20' : 'bg-accent-blue/10 text-accent-blue border-accent-blue/20 hover:bg-accent-blue/20'}`}>
+                        <span className="font-bold truncate leading-tight group-hover:text-white transition-colors">{m.product}</span>
+                        <span className="text-[8px] opacity-60 font-mono truncate">{m.refId}</span>
+                      </a>
+                   ))}
+                 </div>
               </div>
             );
           })}
@@ -7214,13 +7416,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                               <div className="px-4 py-2">
                                 <p className="text-[7px] font-black text-text-dim uppercase tracking-widest mb-2">Structure</p>
-                                <div className="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                                <div className="grid grid-cols-2 gap-1 bg-black/40 p-1 rounded-lg border border-white/5">
                                   <button 
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setViewMode('table');
                                     }}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'table' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
+                                    className={`flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'table' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
                                   >
                                     <List size={10} />
                                     <span className="text-[8px] uppercase tracking-widest">Liste</span>
@@ -7228,12 +7430,32 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                   <button 
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setViewMode('grid');
+                                      setViewMode('mosaic');
                                     }}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'grid' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
+                                    className={`flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'mosaic' || viewMode === 'grid' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
                                   >
                                     <LayoutGrid size={10} />
                                     <span className="text-[8px] uppercase tracking-widest">Grille</span>
+                                  </button>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewMode('task');
+                                    }}
+                                    className={`flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'task' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
+                                  >
+                                    <CheckSquare size={10} />
+                                    <span className="text-[8px] uppercase tracking-widest">Task</span>
+                                  </button>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewMode('calendar');
+                                    }}
+                                    className={`flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'calendar' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
+                                  >
+                                    <Calendar size={10} />
+                                    <span className="text-[8px] uppercase tracking-widest">Cal.</span>
                                   </button>
                                 </div>
                               </div>
@@ -7309,21 +7531,35 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     </button>
 
                     <div className="flex items-center gap-1 bg-white/5 border border-white/10 p-1 rounded-lg ml-2">
-                      <button 
-                        onClick={() => setViewMode('table')}
-                        className={`p-1.5 rounded transition-all ${viewMode === 'table' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                        title="Mode Ligne (Table)"
-                      >
-                        <List size={14} />
-                      </button>
-                      <button 
-                        onClick={() => setViewMode('mosaic')}
-                        className={`p-1.5 rounded transition-all ${viewMode === 'mosaic' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                        title="Mode Mosaïque (Grille)"
-                      >
-                        <LayoutGrid size={14} />
-                      </button>
-                    </div>
+                       <button 
+                         onClick={() => setViewMode('table')}
+                         className={`p-1.5 rounded transition-all ${viewMode === 'table' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
+                         title="Mode Ligne (Table)"
+                       >
+                         <List size={14} />
+                       </button>
+                       <button 
+                         onClick={() => setViewMode('mosaic')}
+                         className={`p-1.5 rounded transition-all ${viewMode === 'mosaic' || viewMode === 'grid' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
+                         title="Mode Mosaïque (Grille)"
+                       >
+                         <LayoutGrid size={14} />
+                       </button>
+                       <button 
+                         onClick={() => setViewMode('task')}
+                         className={`p-1.5 rounded transition-all ${viewMode === 'task' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
+                         title="Mode Task"
+                       >
+                         <CheckSquare size={14} />
+                       </button>
+                       <button 
+                         onClick={() => setViewMode('calendar')}
+                         className={`p-1.5 rounded transition-all ${viewMode === 'calendar' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
+                         title="Mode Calendrier"
+                       >
+                         <Calendar size={14} />
+                       </button>
+                     </div>
                   </div>
                   
                   <div className="flex items-center gap-4">
@@ -7680,10 +7916,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   </AnimatePresence>
 
                   {missions.length > 0 && (
-                    viewMode === 'table' ? (
-                    <div className="overflow-x-auto custom-scrollbar">
-                      <table className="w-full border-collapse min-w-[1300px] border border-white/5 bg-white/[0.01]">
-                        <thead>
+                    <>
+                      {viewMode === 'table' && (
+                      <div className="overflow-x-auto custom-scrollbar">
+                        <table className="w-full border-collapse min-w-[1300px] border border-white/5 bg-white/[0.01]">
+                          <thead>
                           <tr className="border-b border-white/10 bg-black/40">
                             <th className="w-10 py-5 px-3 text-center border-r border-white/5">
                               <button 
@@ -8202,9 +8439,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </Reorder.Group>
               </table>
             </div>
-            ) : (
-              MosaicView()
-            )
+            )}
+            {(viewMode === 'mosaic' || viewMode === 'grid') && MosaicView()}
+            {viewMode === 'task' && PrimaryTaskView()}
+            {viewMode === 'calendar' && PrimaryCalendarView()}
+            </>
           )}
         </div>
 
@@ -8220,11 +8459,19 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               <p className="text-[9px] font-mono text-accent-blue/60 uppercase tracking-widest mt-1">Marketing, Studio, Logistique & Divers</p>
             </div>
           </div>
-          <div className="text-[10px] font-mono text-text-dim/60 uppercase">
-            {secondaryMissions.length} Missions Actives
+          <div className="flex items-center gap-4">
+             <div className="flex bg-black/40 border border-white/10 rounded-lg p-1">
+               <button onClick={() => setSecondaryViewMode('grid')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><LayoutGrid size={12}/> Grid</button>
+               <button onClick={() => setSecondaryViewMode('task')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'task' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><List size={12}/> Task</button>
+               <button onClick={() => setSecondaryViewMode('calendar')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'calendar' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><Calendar size={12}/> Calendrier</button>
+             </div>
+             <div className="text-[10px] font-mono text-text-dim/60 uppercase">
+               {secondaryMissions.length} Missions Actives
+             </div>
           </div>
         </div>
 
+        {secondaryViewMode === 'grid' && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           <AnimatePresence initial={false}>
             {secondaryMissions.length === 0 ? (
@@ -8380,6 +8627,103 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             )}
           </AnimatePresence>
         </div>
+        )}
+
+        {secondaryViewMode === 'task' && (
+          <div className="space-y-3">
+            {secondaryMissions.length === 0 ? (
+              <div className="py-12 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-4 opacity-30">
+                <PackageSearch size={40} className="text-text-dim" />
+                <p className="text-[10px] uppercase font-black tracking-widest">Aucune mission secondaire</p>
+              </div>
+            ) : (
+              secondaryMissions.map((sm) => (
+                <div key={sm.id} className={`flex items-center gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-xl hover:bg-white/[0.04] transition-all custom-shadow ${sm.enabled ? '' : 'opacity-50 grayscale'}`}>
+                  <button 
+                    onClick={() => updateSecondaryMission(sm.id, { progress: sm.progress >= 100 ? 0 : 100 })}
+                    className={`shrink-0 w-6 h-6 rounded-md border flex items-center justify-center transition-colors ${sm.progress >= 100 ? 'bg-accent/20 border-accent text-accent shadow-[0_0_10px_rgba(0,255,148,0.2)]' : 'bg-black/40 border-white/10 text-transparent hover:border-white/30 hover:text-white/20'}`}
+                  >
+                    <Check size={14} />
+                  </button>
+                  <div className="flex-1 flex items-center gap-4">
+                    <input 
+                      type="text"
+                      value={sm.title}
+                      onChange={(e) => updateSecondaryMission(sm.id, { title: e.target.value })}
+                      className={`bg-transparent border-none font-bold outline-none flex-1 focus:bg-white/5 px-2 py-1 rounded transition-colors text-sm ${sm.progress >= 100 ? 'line-through text-white/40' : 'text-white'}`}
+                    />
+                    <div className="flex items-center gap-3">
+                      <span className={`text-[8px] font-black px-2 py-0.5 rounded border uppercase tracking-wider ${
+                        sm.priority === 'high' ? 'bg-red-500/10 text-red-500 border-red-500/20' : 
+                        sm.priority === 'medium' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20' : 
+                        'bg-accent-blue/10 text-accent-blue border-accent-blue/20'
+                      }`}>
+                        {sm.priority || 'medium'}
+                      </span>
+                      {sm.deadline && (
+                        <div className={`flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded bg-black/40 border border-white/5 ${isDeadlineApproaching(sm.deadline) && sm.progress < 100 ? 'text-red-500 shadow-[0_0_8px_rgba(239,68,68,0.2)]' : 'text-text-dim'}`}>
+                          <Calendar size={10} />
+                          <input 
+                            type="date" 
+                            value={sm.deadline} 
+                            onChange={(e) => updateSecondaryMission(sm.id, { deadline: e.target.value })}
+                            className="bg-transparent border-none outline-none cursor-pointer tracking-widest"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 pl-4 ml-2 border-l border-white/5">
+                     <Toggle enabled={sm.enabled} onToggle={() => updateSecondaryMission(sm.id, { enabled: !sm.enabled })} />
+                     <button onClick={() => removeSecondaryMission(sm.id)} className="p-1.5 rounded bg-white/5 text-text-dim hover:bg-red-500/20 hover:text-red-500 transition-colors">
+                       <Trash2 size={14} />
+                     </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {secondaryViewMode === 'calendar' && (
+          <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6 custom-shadow">
+            <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4 border-b border-white/5 pb-4">
+               <div className="flex items-center gap-4 bg-black/40 px-2 py-1 rounded-lg border border-white/5">
+                 <button onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1))} className="p-1.5 hover:bg-white/10 rounded text-text-dim hover:text-white transition-colors"><ChevronsLeft size={16}/></button>
+                 <h3 className="text-white font-black text-sm uppercase tracking-widest min-w-[140px] text-center">
+                   {calendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                 </h3>
+                 <button onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1))} className="p-1.5 hover:bg-white/10 rounded text-text-dim hover:text-white transition-colors"><ChevronRight size={16}/></button>
+               </div>
+               <button onClick={() => setCalendarDate(new Date())} className="text-[10px] font-black uppercase tracking-widest py-2 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white transition-all">Aujourd'hui</button>
+            </div>
+            <div className="grid grid-cols-7 gap-2">
+              {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(day => (
+                <div key={day} className="text-center text-[10px] font-black uppercase tracking-widest text-text-dim/60 pb-2">{day}</div>
+              ))}
+              {Array.from({ length: Array.from({ length: new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1).getDay() === 0 ? 6 : new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1).getDay() - 1 }).length }).map((_, i) => (
+                 <div key={`empty-${i}`} className="min-h-[120px] bg-white/[0.01] border border-white/[0.02] rounded-xl" />
+              ))}
+              {Array.from({ length: new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
+                const dateStr = `${calendarDate.getFullYear()}-${(calendarDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                const dayMissions = secondaryMissions.filter(m => m.deadline === dateStr);
+                const isToday = new Date().toISOString().split('T')[0] === dateStr;
+                return (
+                  <div key={day} className={`min-h-[120px] rounded-xl p-2.5 flex flex-col transition-colors ${isToday ? 'bg-accent/5 border border-accent/30 shadow-[0_0_15px_rgba(0,255,148,0.1)]' : 'bg-black/20 border border-white/5 hover:border-white/20 hover:bg-white/[0.02]'}`}>
+                     <div className={`text-[11px] font-black mb-3 ${isToday ? 'text-accent' : 'text-text-dim/80'}`}>{day}</div>
+                     <div className="flex flex-col gap-1.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
+                       {dayMissions.map(m => (
+                          <div key={m.id} title={m.title} className={`group cursor-default text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border ${m.progress >= 100 ? 'bg-white/5 border-white/5 text-white/40 line-through' : m.priority === 'high' ? 'bg-red-500/10 text-red-400 border-red-500/20' : m.priority === 'medium' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20' : 'bg-accent-blue/10 text-accent-blue border-accent-blue/20'}`}>
+                            <span className="font-bold truncate leading-tight group-hover:text-white transition-colors">{m.title}</span>
+                          </div>
+                       ))}
+                     </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </motion.div>
   )}
