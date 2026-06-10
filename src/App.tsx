@@ -285,6 +285,10 @@ interface Mission {
   updatedAt?: number;
   history: MissionLog[];
   enabled: boolean;
+  preparedAt?: string;
+  shotAt?: string;
+  postProdAt?: string;
+  deliveredAt?: string;
 }
 
 const Toggle = ({ enabled, onToggle }: { enabled: boolean, onToggle: (e: React.MouseEvent) => void }) => (
@@ -613,6 +617,24 @@ export default function App() {
     return isNaN(dates.getTime()) ? '-' : dates.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   };
 
+  const getNowLocalDatetimeString = () => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const formatDateStringNice = (val?: string) => {
+    if (!val) return '-';
+    try {
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return val;
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} à ${pad(d.getHours())}h${pad(d.getMinutes())}`;
+    } catch (e) {
+      return val;
+    }
+  };
+
   const [googleUser, setGoogleUser] = useState<User | null>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -661,6 +683,15 @@ export default function App() {
   const [globalDeadline, setGlobalDeadline] = useState('');
 
   const [isMiddleTierVisible, setIsMiddleTierVisible] = useState(true);
+
+  const [visibleTimelineSeries, setVisibleTimelineSeries] = useState({
+    prepares: false,
+    shooting: false,
+    postProd: false,
+    livreesCumulees: true,
+    livreesJour: false,
+    progression: true
+  });
 
   const toggleAllMissions = (enabled: boolean) => {
     setMissions(prev => prev.map(m => ({ ...m, enabled })));
@@ -841,7 +872,13 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<{ show: boolean, message: string, type: string }>({ show: false, message: '', type: 'calendar' });
   const [isCapturing, setIsCapturing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'table' | 'dashboard' | 'journal' | 'system'>('table');
+  const [activeTab, setActiveTab] = useState<'table' | 'dashboard' | 'journal' | 'system' | 'inventory'>('table');
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [showPreparedHistory, setShowPreparedHistory] = useState(false);
+  const [showInventoryImport, setShowInventoryImport] = useState(false);
+  const [inventoryPreviewData, setInventoryPreviewData] = useState<{ product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string }[]>([]);
+  const [inventoryFileName, setInventoryFileName] = useState('');
+  const [importDuplicateMode, setImportDuplicateMode] = useState<'skip' | 'adjust' | 'append'>('skip');
   const [viewMode, setViewMode] = useState<'table' | 'mosaic' | 'grid' | 'task' | 'calendar'>('table');
   const [primaryCalendarDate, setPrimaryCalendarDate] = useState(new Date());
   const [isAdvancedSortOpen, setIsAdvancedSortOpen] = useState(false);
@@ -965,6 +1002,24 @@ export default function App() {
   const [isViewDropdownOpen, setIsViewDropdownOpen] = useState(false);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
+  // AI Agent Config State
+  const defaultAiInstructions = `Analyse mon flux de production, détecte les goulots d'étranglement et propose des optimisations basées sur les priorités et les délais.
+
+LISTE DES COMMANDES :
+/matrice : Vue globale du tableau.
+/load : Charge par univers (Flux).
+/enchawer : Séquençage optimisé plateau.
+/inv : Picking dédupliqué.
+/scan : Transcription OCR.
+/% : Score de progression.
+/eod : Bilan soir trié par date.
+@Google Agenda : Sync Calendrier.
+@Google Tasks : Sync Tâches.
+/help : Aide efficace.`;
+  const [aiInstructions, setAiInstructions] = useState(defaultAiInstructions);
+  const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display'>('branding');
+  const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('gemini_custom_api_key') || '');
+
   // Auto Export state
   const [autoExportEnabled, setAutoExportEnabled] = useState(false);
   const [autoExportInterval, setAutoExportInterval] = useState(60); // minutes
@@ -1018,11 +1073,39 @@ export default function App() {
 
   const generateFullDataJson = useCallback(() => {
     const data = {
+      // Core Databases
+      missions,
+      secondaryMissions,
+      missionCounter,
+      globalLogs, // Extremely important since the user highlighted this!
+      
+      // System & Ref Setup
       refPrefix,
       refCounter,
+      deadlineAlertThreshold,
+      globalDeadline,
+      
+      // Theme, Typography & Design
       appLogo,
       headerBgColor,
+      headerBgImage,
+      headerBgOpacity,
+      waveColor,
+      waveOpacity,
+      waveType,
+      appFont,
+      appFontSize,
+      appTextColor,
+      appTextCase,
+      appFontWeight,
+      navActiveColor,
+      suiteSubtitleColor,
+      copyBtnColor,
+      saveBtnColor,
+      missionTitleColor,
       refIdColor,
+      
+      // Accents & Custom Palette Colors
       accentColor,
       accentBlueColor,
       accentPurpleColor,
@@ -1030,13 +1113,85 @@ export default function App() {
       accentPinkColor,
       accentRedColor,
       accentYellowColor,
-      waveOpacity,
-      headerBgImage,
-      headerBgOpacity,
+      
+      // AI Settings
+      aiInstructions,
+      
+      // Display/Layout Configurations
+      sortConfigs,
+      viewMode,
+      tableViewState,
+      manualHiddenColumns,
+      compactHiddenColumns,
+      minimalHiddenColumns,
+      collapsedCategories,
+      collapsedSettingsSections,
+      collapsedMosaicGroups,
+      retractedMosaics,
+      
+      // Auto Export Settings
+      autoExportEnabled,
+      autoExportInterval,
+      scheduledExportEnabled,
+      scheduledExportDays,
+      scheduledExportTime,
+      
+      // Custom categories definitions
       categories: categories.map(({ icon, ...rest }) => rest)
     };
     return JSON.stringify(data, null, 2);
-  }, [refPrefix, refCounter, appLogo, headerBgColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, waveOpacity, headerBgImage, headerBgOpacity, categories]);
+  }, [
+    missions,
+    secondaryMissions,
+    missionCounter,
+    globalLogs,
+    refPrefix,
+    refCounter,
+    deadlineAlertThreshold,
+    globalDeadline,
+    appLogo,
+    headerBgColor,
+    headerBgImage,
+    headerBgOpacity,
+    waveColor,
+    waveOpacity,
+    waveType,
+    appFont,
+    appFontSize,
+    appTextColor,
+    appTextCase,
+    appFontWeight,
+    navActiveColor,
+    suiteSubtitleColor,
+    copyBtnColor,
+    saveBtnColor,
+    missionTitleColor,
+    refIdColor,
+    accentColor,
+    accentBlueColor,
+    accentPurpleColor,
+    accentOrangeColor,
+    accentPinkColor,
+    accentRedColor,
+    accentYellowColor,
+    aiInstructions,
+    sortConfigs,
+    viewMode,
+    tableViewState,
+    manualHiddenColumns,
+    compactHiddenColumns,
+    minimalHiddenColumns,
+    collapsedCategories,
+    collapsedSettingsSections,
+    collapsedMosaicGroups,
+    retractedMosaics,
+    autoExportEnabled,
+    autoExportInterval,
+    scheduledExportEnabled,
+    scheduledExportDays,
+    scheduledExportTime,
+    categories
+  ]);
 
   const copySystemJson = () => {
     const json = generateFullDataJson();
@@ -1189,23 +1344,7 @@ export default function App() {
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
   };
   
-  // AI Agent Config State
-  const defaultAiInstructions = `Analyse mon flux de production, détecte les goulots d'étranglement et propose des optimisations basées sur les priorités et les délais.
-
-LISTE DES COMMANDES :
-/matrice : Vue globale du tableau.
-/load : Charge par univers (Flux).
-/enchawer : Séquençage optimisé plateau.
-/inv : Picking dédupliqué.
-/scan : Transcription OCR.
-/% : Score de progression.
-/eod : Bilan soir trié par date.
-@Google Agenda : Sync Calendrier.
-@Google Tasks : Sync Tâches.
-/help : Aide efficace.`;
-  const [aiInstructions, setAiInstructions] = useState(defaultAiInstructions);
-  const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display'>('branding');
-  const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('gemini_custom_api_key') || '');
+  // AI Agent Config State and subtabs moved above generateFullDataJson to avoid hoisting issues
   
   // Feedback State
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
@@ -1508,13 +1647,38 @@ LISTE DES COMMANDES :
       // Wait for re-render
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      const canvas = await html2canvas(reportElement, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#0A0A0A',
-        logging: false,
-        width: 1200
+      // Sanitize styles to prevent html2canvas crashing on oklch() / oklab() color functions
+      const styleElements = Array.from(document.querySelectorAll('style'));
+      const originalStyles = styleElements.map(el => ({
+        element: el,
+        text: el.textContent
+      }));
+
+      styleElements.forEach(el => {
+        if (el.textContent) {
+          let text = el.textContent;
+          text = text.replace(/oklch\([^)]+\)/gi, '#00ff94');
+          text = text.replace(/oklab\([^)]+\)/gi, '#00ff94');
+          el.textContent = text;
+        }
       });
+
+      let canvas;
+      try {
+        canvas = await html2canvas(reportElement, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#0A0A0A',
+          logging: false,
+          width: 1200
+        });
+      } finally {
+        // Restore styles immediately
+        originalStyles.forEach(s => {
+          s.element.textContent = s.text;
+        });
+      }
+
       const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
 
       const now = new Date();
@@ -1565,14 +1729,38 @@ LISTE DES COMMANDES :
         throw new Error('Element has no visible dimensions');
       }
 
-      const canvas = await html2canvas(element, {
-        scale: options.pixelRatio || 2,
-        width: width,
-        height: height,
-        useCORS: true,
-        backgroundColor: '#0A0A0A',
-        logging: false
+      // Sanitize styles to prevent html2canvas crashing on oklch() / oklab() color functions
+      const styleElements = Array.from(document.querySelectorAll('style'));
+      const originalStyles = styleElements.map(el => ({
+        element: el,
+        text: el.textContent
+      }));
+
+      styleElements.forEach(el => {
+        if (el.textContent) {
+          let text = el.textContent;
+          text = text.replace(/oklch\([^)]+\)/gi, '#00ff94');
+          text = text.replace(/oklab\([^)]+\)/gi, '#00ff94');
+          el.textContent = text;
+        }
       });
+
+      let canvas;
+      try {
+        canvas = await html2canvas(element, {
+          scale: options.pixelRatio || 2,
+          width: width,
+          height: height,
+          useCORS: true,
+          backgroundColor: '#0A0A0A',
+          logging: false
+        });
+      } finally {
+        // Restore styles immediately
+        originalStyles.forEach(s => {
+          s.element.textContent = s.text;
+        });
+      }
       
       const dataUrl = canvas.toDataURL('image/jpeg', options.quality || 0.95);
 
@@ -1784,12 +1972,32 @@ LISTE DES COMMANDES :
       // Update states
       if (data.missions) setMissions(data.missions);
       if (data.secondaryMissions) setSecondaryMissions(data.secondaryMissions);
-      if (data.missionCounter) setMissionCounter(data.missionCounter);
+      if (data.missionCounter !== undefined) setMissionCounter(data.missionCounter);
       if (data.refPrefix) setRefPrefix(data.refPrefix);
-      if (data.refCounter) setRefCounter(data.refCounter);
+      if (data.refCounter !== undefined) setRefCounter(data.refCounter);
+      if (data.deadlineAlertThreshold !== undefined) setDeadlineAlertThreshold(data.deadlineAlertThreshold);
+      if (data.globalDeadline !== undefined) setGlobalDeadline(data.globalDeadline);
+      
+      if (data.appLogo !== undefined) setAppLogo(data.appLogo);
       if (data.headerBgColor) setHeaderBgColor(data.headerBgColor);
-      if (data.appLogo) setAppLogo(data.appLogo);
+      if (data.headerBgImage !== undefined) setHeaderBgImage(data.headerBgImage);
+      if (data.headerBgOpacity !== undefined) setHeaderBgOpacity(data.headerBgOpacity);
+      if (data.waveColor) setWaveColor(data.waveColor);
+      if (data.waveOpacity !== undefined) setWaveOpacity(data.waveOpacity);
+      if (data.waveType) setWaveType(data.waveType);
+      
+      if (data.appFont) setAppFont(data.appFont);
+      if (data.appFontSize !== undefined) setAppFontSize(data.appFontSize);
+      if (data.appTextColor) setAppTextColor(data.appTextColor);
+      if (data.appTextCase) setAppTextCase(data.appTextCase);
+      if (data.appFontWeight) setAppFontWeight(data.appFontWeight);
+      if (data.navActiveColor) setNavActiveColor(data.navActiveColor);
+      if (data.suiteSubtitleColor) setSuiteSubtitleColor(data.suiteSubtitleColor);
+      if (data.copyBtnColor) setCopyBtnColor(data.copyBtnColor);
+      if (data.saveBtnColor) setSaveBtnColor(data.saveBtnColor);
+      if (data.missionTitleColor) setMissionTitleColor(data.missionTitleColor);
       if (data.refIdColor) setRefIdColor(data.refIdColor);
+      
       if (data.accentColor) setAccentColor(data.accentColor);
       if (data.accentBlueColor) setAccentBlueColor(data.accentBlueColor);
       if (data.accentPurpleColor) setAccentPurpleColor(data.accentPurpleColor);
@@ -1797,9 +2005,26 @@ LISTE DES COMMANDES :
       if (data.accentPinkColor) setAccentPinkColor(data.accentPinkColor);
       if (data.accentRedColor) setAccentRedColor(data.accentRedColor);
       if (data.accentYellowColor) setAccentYellowColor(data.accentYellowColor);
-      if (data.waveOpacity !== undefined) setWaveOpacity(data.waveOpacity);
-      if (data.headerBgImage) setHeaderBgImage(data.headerBgImage);
-      if (data.headerBgOpacity !== undefined) setHeaderBgOpacity(data.headerBgOpacity);
+      
+      if (data.aiInstructions) setAiInstructions(data.aiInstructions);
+      
+      if (data.sortConfigs) setSortConfigs(data.sortConfigs);
+      if (data.viewMode) setViewMode(data.viewMode);
+      if (data.tableViewState) setTableViewState(data.tableViewState);
+      if (data.manualHiddenColumns) setManualHiddenColumns(data.manualHiddenColumns);
+      if (data.compactHiddenColumns) setCompactHiddenColumns(data.compactHiddenColumns);
+      if (data.minimalHiddenColumns) setMinimalHiddenColumns(data.minimalHiddenColumns);
+      if (data.collapsedCategories) setCollapsedCategories(data.collapsedCategories);
+      if (data.collapsedSettingsSections) setCollapsedSettingsSections(data.collapsedSettingsSections);
+      if (data.collapsedMosaicGroups) setCollapsedMosaicGroups(data.collapsedMosaicGroups);
+      if (data.retractedMosaics !== undefined) setRetractedMosaics(data.retractedMosaics);
+      
+      if (data.autoExportEnabled !== undefined) setAutoExportEnabled(data.autoExportEnabled);
+      if (data.autoExportInterval !== undefined) setAutoExportInterval(data.autoExportInterval);
+      if (data.scheduledExportEnabled !== undefined) setScheduledExportEnabled(data.scheduledExportEnabled);
+      if (data.scheduledExportDays) setScheduledExportDays(data.scheduledExportDays);
+      if (data.scheduledExportTime) setScheduledExportTime(data.scheduledExportTime);
+
       if (data.globalLogs) setGlobalLogs(data.globalLogs);
       if (data.categories) {
         const restored = data.categories.map((cat: any) => {
@@ -1815,8 +2040,29 @@ LISTE DES COMMANDES :
       if (data.missionCounter !== undefined) localStorage.setItem('missionCounter', JSON.stringify(data.missionCounter));
       if (data.refPrefix) localStorage.setItem('refPrefix', data.refPrefix);
       if (data.refCounter) localStorage.setItem('refCounter', data.refCounter.toString());
+      if (data.deadlineAlertThreshold !== undefined) localStorage.setItem('deadlineAlertThreshold', data.deadlineAlertThreshold.toString());
+      if (data.globalDeadline !== undefined) localStorage.setItem('globalDeadline', data.globalDeadline);
+      if (data.appLogo !== undefined) {
+         if (data.appLogo) localStorage.setItem('appLogo', data.appLogo);
+         else localStorage.removeItem('appLogo');
+      }
       if (data.headerBgColor) localStorage.setItem('headerBgColor', data.headerBgColor);
-      if (data.appLogo) localStorage.setItem('appLogo', data.appLogo);
+      if (data.headerBgImage) localStorage.setItem('headerBgImage', data.headerBgImage);
+      if (data.headerBgOpacity !== undefined) localStorage.setItem('headerBgOpacity', data.headerBgOpacity.toString());
+      if (data.waveColor) localStorage.setItem('waveColor', data.waveColor);
+      if (data.waveOpacity !== undefined) localStorage.setItem('waveOpacity', data.waveOpacity.toString());
+      if (data.waveType) localStorage.setItem('waveType', data.waveType);
+      
+      if (data.appFont) localStorage.setItem('appFont', data.appFont);
+      if (data.appFontSize !== undefined) localStorage.setItem('appFontSize', data.appFontSize.toString());
+      if (data.appTextColor) localStorage.setItem('appTextColor', data.appTextColor);
+      if (data.appTextCase) localStorage.setItem('appTextCase', data.appTextCase);
+      if (data.appFontWeight) localStorage.setItem('appFontWeight', data.appFontWeight);
+      if (data.navActiveColor) localStorage.setItem('navActiveColor', data.navActiveColor);
+      if (data.suiteSubtitleColor) localStorage.setItem('suiteSubtitleColor', data.suiteSubtitleColor);
+      if (data.copyBtnColor) localStorage.setItem('copyBtnColor', data.copyBtnColor);
+      if (data.saveBtnColor) localStorage.setItem('saveBtnColor', data.saveBtnColor);
+      if (data.missionTitleColor) localStorage.setItem('missionTitleColor', data.missionTitleColor);
       if (data.refIdColor) localStorage.setItem('refIdColor', data.refIdColor);
       if (data.accentColor) localStorage.setItem('accentColor', data.accentColor);
       if (data.accentBlueColor) localStorage.setItem('accentBlueColor', data.accentBlueColor);
@@ -1825,9 +2071,23 @@ LISTE DES COMMANDES :
       if (data.accentPinkColor) localStorage.setItem('accentPinkColor', data.accentPinkColor);
       if (data.accentRedColor) localStorage.setItem('accentRedColor', data.accentRedColor);
       if (data.accentYellowColor) localStorage.setItem('accentYellowColor', data.accentYellowColor);
-      if (data.waveOpacity !== undefined) localStorage.setItem('waveOpacity', data.waveOpacity.toString());
-      if (data.headerBgImage) localStorage.setItem('headerBgImage', data.headerBgImage);
-      if (data.headerBgOpacity !== undefined) localStorage.setItem('headerBgOpacity', data.headerBgOpacity.toString());
+      if (data.aiInstructions) localStorage.setItem('aiInstructions', data.aiInstructions);
+      if (data.sortConfigs !== undefined) localStorage.setItem('sortConfigs', JSON.stringify(data.sortConfigs));
+      if (data.viewMode) localStorage.setItem('viewMode', data.viewMode);
+      if (data.tableViewState) localStorage.setItem('tableViewState', data.tableViewState);
+      if (data.manualHiddenColumns !== undefined) localStorage.setItem('manualHiddenColumns', JSON.stringify(data.manualHiddenColumns));
+      if (data.compactHiddenColumns !== undefined) localStorage.setItem('compactHiddenColumns', JSON.stringify(data.compactHiddenColumns));
+      if (data.minimalHiddenColumns !== undefined) localStorage.setItem('minimalHiddenColumns', JSON.stringify(data.minimalHiddenColumns));
+      if (data.collapsedCategories !== undefined) localStorage.setItem('collapsedCategories', JSON.stringify(data.collapsedCategories));
+      if (data.collapsedSettingsSections !== undefined) localStorage.setItem('collapsedSettingsSections', JSON.stringify(data.collapsedSettingsSections));
+      if (data.collapsedMosaicGroups !== undefined) localStorage.setItem('collapsedMosaicGroups', JSON.stringify(data.collapsedMosaicGroups));
+      if (data.retractedMosaics !== undefined) localStorage.setItem('retractedMosaics', data.retractedMosaics.toString());
+      if (data.autoExportEnabled !== undefined) localStorage.setItem('autoExportEnabled', data.autoExportEnabled.toString());
+      if (data.autoExportInterval !== undefined) localStorage.setItem('autoExportInterval', data.autoExportInterval.toString());
+      if (data.scheduledExportEnabled !== undefined) localStorage.setItem('scheduledExportEnabled', data.scheduledExportEnabled.toString());
+      if (data.scheduledExportDays !== undefined) localStorage.setItem('scheduledExportDays', JSON.stringify(data.scheduledExportDays));
+      if (data.scheduledExportTime) localStorage.setItem('scheduledExportTime', data.scheduledExportTime);
+      
       if (data.globalLogs !== undefined) localStorage.setItem('globalLogs', JSON.stringify(data.globalLogs));
       if (data.categories !== undefined) {
         const catsToSave = data.categories.map(({ icon, ...rest }: any) => rest);
@@ -1966,10 +2226,11 @@ LISTE DES COMMANDES :
     const headers = [
       'Mission #', 'Ref ID', 'Activé', 'Produit', 'Couleur', 'Argument', 
       'Univers', 'Format', 'Position', 'Support', 'Demandé', 'Délivré', 'Priorité', 
-      'Deadline', 'Statut', 'Progression %', 'Notation (Flux)', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle'
+      'Deadline', 'Statut', 'Progression %', 'Notation (Flux)', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle',
+      'Date Préparation', 'Date Shooting', 'Date Post-Prod', 'Date Livraison'
     ];
     
-    const globalEfficiency = (Math.max(0, (missions.reduce((acc, m) => acc + m.progress, 0) / (missions.length || 1)) - (missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
+    const globalEfficiency = (Math.max(0, (activeMissions.reduce((acc, m) => acc + m.progress, 0) / (activeMissions.length || 1)) - (activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
 
     const rows = filteredMissions.map(m => {
       const individualEfficiency = (Math.max(0, m.progress - (m.priority === 'High priority' ? 10 : 0))).toFixed(1);
@@ -1992,7 +2253,11 @@ LISTE DES COMMANDES :
         `${m.progress}%`,
         m.rating || 0,
         individualEfficiency,
-        globalEfficiency
+        globalEfficiency,
+        formatDateStringNice(m.preparedAt),
+        formatDateStringNice(m.shotAt),
+        formatDateStringNice(m.postProdAt),
+        formatDateStringNice(m.deliveredAt)
       ];
     });
 
@@ -2010,10 +2275,11 @@ LISTE DES COMMANDES :
       const missionHeaders = [
         'Mission #', 'Ref ID', 'Date Entrée', 'Heure Entrée', 'Activé', 'Produit', 'Couleur', 'Argument', 
         'Univers', 'Format', 'Position', 'Support', 'Photos Demandées', 'Photos Délivrées', 'Priorité', 
-        'Deadline', 'Statut', 'Progression %', 'Notation (Flux)', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle', 'Notes / Infos'
+        'Deadline', 'Statut', 'Progression %', 'Notation (Flux)', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle',
+        'Date Préparation', 'Date Shooting', 'Date Post-Prod', 'Date Livraison', 'Notes / Infos'
       ];
       
-      const globalEfficiency = (Math.max(0, (missions.reduce((acc, m) => acc + m.progress, 0) / (missions.length || 1)) - (missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
+      const globalEfficiency = (Math.max(0, (activeMissions.reduce((acc, m) => acc + m.progress, 0) / (activeMissions.length || 1)) - (activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
 
       const missionData = missions.map(m => {
         const individualEfficiency = (Math.max(0, m.progress - (m.priority === 'High priority' ? 10 : 0))).toFixed(1);
@@ -2021,7 +2287,9 @@ LISTE DES COMMANDES :
           m.missionNo, m.refId, safeFormatDate(m.createdAt), safeFormatTime(m.createdAt), m.enabled ? 'OUI' : 'NON', m.product, m.color, m.argumentType,
           m.univers, m.format, m.position, m.support, m.photoCountRequested,
           m.photoCountDelivered, m.priority, m.deadline || '-', m.status,
-          m.progress, m.rating || 0, individualEfficiency, globalEfficiency, m.info || '-'
+          m.progress, m.rating || 0, individualEfficiency, globalEfficiency,
+          formatDateStringNice(m.preparedAt), formatDateStringNice(m.shotAt), formatDateStringNice(m.postProdAt), formatDateStringNice(m.deliveredAt),
+          m.info || '-'
         ];
       });
 
@@ -2093,6 +2361,70 @@ LISTE DES COMMANDES :
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const parseExcelDate = (val: any, timeVal?: any): number => {
+      if (!val) return Date.now();
+      
+      if (typeof val === 'number') {
+        const utc_days = Math.floor(val - 25569);
+        const utc_value = utc_days * 86400;
+        const date_info = new Date(utc_value * 1000);
+        
+        const fractional_day = val - Math.floor(val);
+        let total_seconds = Math.floor(86400 * fractional_day);
+        if (timeVal !== undefined) {
+          if (typeof timeVal === 'number' && timeVal < 1) {
+            total_seconds = Math.floor(86400 * timeVal);
+          } else if (String(timeVal).includes(':')) {
+            const parts = String(timeVal).split(':');
+            const hrs = parseInt(parts[0], 10) || 0;
+            const mins = parseInt(parts[1], 10) || 0;
+            const secs = parts[2] ? parseInt(parts[2], 10) || 0 : 0;
+            total_seconds = hrs * 3600 + mins * 60 + secs;
+          }
+        }
+        const hrs = Math.floor(total_seconds / 3600);
+        const mins = Math.floor((total_seconds % 3600) / 60);
+        const secs = total_seconds % 60;
+        return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate(), hrs, mins, secs).getTime();
+      }
+
+      const dateStr = String(val).trim();
+      let parsedTime = { hrs: 0, mins: 0, secs: 0 };
+      if (timeVal !== undefined) {
+        const timeStr = String(timeVal).trim();
+        if (timeStr.includes(':')) {
+          const parts = timeStr.split(':');
+          parsedTime.hrs = parseInt(parts[0], 10) || 0;
+          parsedTime.mins = parseInt(parts[1], 10) || 0;
+          parsedTime.secs = parts[2] ? parseInt(parts[2], 10) || 0 : 0;
+        }
+      }
+
+      // French format: "DD/MM/YYYY" or "DD/MM/YY"
+      const dMatch = dateStr.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4}|\d{2})$/);
+      if (dMatch) {
+        const day = parseInt(dMatch[1], 10);
+        const month = parseInt(dMatch[2], 10) - 1;
+        let year = parseInt(dMatch[3], 10);
+        if (year < 100) year += 2000;
+        const dObj = new Date(year, month, day, parsedTime.hrs, parsedTime.mins, parsedTime.secs);
+        if (!isNaN(dObj.getTime())) {
+          return dObj.getTime();
+        }
+      }
+
+      const parsed = Date.parse(dateStr);
+      if (!isNaN(parsed)) {
+        const dObj = new Date(parsed);
+        if (timeVal !== undefined) {
+          dObj.setHours(parsedTime.hrs, parsedTime.mins, parsedTime.secs, 0);
+        }
+        return dObj.getTime();
+      }
+
+      return Date.now();
+    };
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -2116,7 +2448,6 @@ LISTE DES COMMANDES :
 
         const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        // rows[0] is typically the header row
         if (rows.length <= 1) {
           setToast({ show: true, message: 'Aucune donnée trouvée dans le fichier Excel.', type: 'alert' });
           return;
@@ -2126,10 +2457,8 @@ LISTE DES COMMANDES :
         let maxMissionNo = missionCounter;
         let maxRefCounter = refCounter;
         
-        // Start from index 1 (skipping header)
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
-          // Valid row must have at least some data
           if (!row || row.length === 0 || (!row[0] && !row[5])) continue;
           
           const missionNo = parseInt(String(row[0]), 10) || maxMissionNo;
@@ -2160,6 +2489,31 @@ LISTE DES COMMANDES :
           const parsedRefNum = parseInt(refId.split('-')[1], 10);
           if (!isNaN(parsedRefNum) && parsedRefNum >= maxRefCounter) maxRefCounter = parsedRefNum + 1;
           
+          const parsedCreatedAt = parseExcelDate(row[2], row[3]);
+
+          const importHistory: MissionLog[] = [
+            { timestamp: parsedCreatedAt, message: 'Mission créée via import Excel' }
+          ];
+          
+          if (progress > 0) {
+            importHistory.push({
+              timestamp: parsedCreatedAt,
+              message: `Progression mise à jour à ${progress}%`
+            });
+          }
+          
+          if (status === 'livré') {
+            importHistory.push({
+              timestamp: parsedCreatedAt,
+              message: 'Statut changé à "livré"'
+            });
+          } else if (status) {
+            importHistory.push({
+              timestamp: parsedCreatedAt,
+              message: `Statut changé à "${status}"`
+            });
+          }
+
           const newMission: Mission = {
             id: Math.random().toString(36).substring(2, 9),
             missionNo,
@@ -2179,12 +2533,12 @@ LISTE DES COMMANDES :
             rating,
             info,
             deadline: deadlineRaw,
-            createdAt: Date.now(), // Create new date for imported ones for simplicity
-            history: [],
+            createdAt: parsedCreatedAt,
+            updatedAt: status === 'livré' ? parsedCreatedAt : undefined,
+            history: importHistory,
             enabled: isEnabled
           };
           
-          // Basic duplicate check (optional, but good for clean import)
           if (!isDuplicate(newMission)) {
              newMissions.push(newMission);
           }
@@ -2192,7 +2546,6 @@ LISTE DES COMMANDES :
 
         setMissions(prev => {
           const merged = [...prev, ...newMissions];
-          // deduplicate just in case
           const uniqueIds = new Set();
           return merged.filter(m => {
             if (uniqueIds.has(m.id)) return false;
@@ -2204,15 +2557,81 @@ LISTE DES COMMANDES :
         setMissionCounter(maxMissionNo);
         setRefCounter(maxRefCounter);
         
+        const newSecondaryMissions: SecondaryMission[] = [];
+        let secondarySheetName = "";
+        if (workbook.SheetNames.includes("Missions Secondaires")) {
+          secondarySheetName = "Missions Secondaires";
+        } else if (workbook.SheetNames.includes("Missions secondaires")) {
+          secondarySheetName = "Missions secondaires";
+        }
+        
+        if (secondarySheetName) {
+          const secondaryWorksheet = workbook.Sheets[secondarySheetName];
+          if (secondaryWorksheet) {
+            const secRows: any[] = XLSX.utils.sheet_to_json(secondaryWorksheet, { header: 1 });
+            if (secRows.length > 1) {
+              for (let i = 1; i < secRows.length; i++) {
+                const row = secRows[i];
+                if (!row || row.length === 0 || !row[1]) continue;
+                
+                const id = row[0] ? String(row[0]) : Math.random().toString(36).substring(2, 9);
+                const title = String(row[1]);
+                const priorityRaw = row[2] ? String(row[2]).toLowerCase() : 'medium';
+                const priority: 'low' | 'medium' | 'high' = 
+                  (priorityRaw === 'high' || priorityRaw === 'medium' || priorityRaw === 'low') 
+                    ? priorityRaw 
+                    : 'medium';
+                const status = row[3] ? String(row[3]) : 'A faire';
+                const progress = parseInt(String(row[4]), 10) || 0;
+                const rating = parseFloat(String(row[5])) || 0;
+                
+                let createdAt = parseExcelDate(row[6]);
+                
+                const deadline = row[7] === '-' ? '' : row[7] ? String(row[7]) : '';
+                const note = row[8] === '-' ? '' : row[8] ? String(row[8]) : '';
+                
+                newSecondaryMissions.push({
+                  id,
+                  title,
+                  priority,
+                  status,
+                  progress,
+                  rating,
+                  createdAt,
+                  deadline: deadline || undefined,
+                  enabled: true,
+                  note
+                });
+              }
+            }
+          }
+        }
+
+        if (newSecondaryMissions.length > 0) {
+          setSecondaryMissions(prev => {
+            const merged = [...prev, ...newSecondaryMissions];
+            const uniqueSecIds = new Set();
+            return merged.filter(sm => {
+              if (uniqueSecIds.has(sm.id)) return false;
+              uniqueSecIds.add(sm.id);
+              return true;
+            });
+          });
+        }
+        
         setGlobalLogs(prev => [...prev, {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: Date.now(),
-          message: `SYSTÈME : Importation de ${newMissions.length} missions depuis Excel.`,
+          message: `SYSTÈME : Importation de ${newMissions.length} missions et ${newSecondaryMissions.length} missions secondaires depuis Excel.`,
           type: 'system'
         }]);
 
-        setToast({ show: true, message: `${newMissions.length} missions importées avec succès !`, type: 'task' });
-        setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+        setToast({ 
+          show: true, 
+          message: `${newMissions.length} missions et ${newSecondaryMissions.length} missions secondaires importées avec succès !`, 
+          type: 'task' 
+        });
+        setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 4000);
       } catch (err: any) {
         setToast({ show: true, message: `Erreur import Excel: ${err.message}`, type: 'alert' });
         setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 4000);
@@ -2235,16 +2654,19 @@ LISTE DES COMMANDES :
     const missionHeaders = [
       'Mission #', 'Ref ID', 'Date Entrée', 'Heure Entrée', 'Activé', 'Produit', 'Couleur', 'Argument', 
       'Univers', 'Format', 'Position', 'Support', 'Photos Demandées', 'Photos Délivrées', 'Priorité', 
-      'Deadline', 'Statut', 'Progression %', 'Notation', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle', 'Notes / Infos'
+      'Deadline', 'Statut', 'Progression %', 'Notation', 'Efficience Individualisée (%)', 'Efficience Globale Actuelle',
+      'Date Préparation', 'Date Shooting', 'Date Post-Prod', 'Date Livraison', 'Notes / Infos'
     ];
-    const globalEfficiency = (Math.max(0, (missions.reduce((acc, m) => acc + m.progress, 0) / (missions.length || 1)) - (missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
+    const globalEfficiency = (Math.max(0, (activeMissions.reduce((acc, m) => acc + m.progress, 0) / (activeMissions.length || 1)) - (activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length * 1.5))).toFixed(1);
     const missionData = missions.map(m => {
       const individualEfficiency = (Math.max(0, m.progress - (m.priority === 'High priority' ? 10 : 0))).toFixed(1);
       return [
         m.missionNo, m.refId, safeFormatDate(m.createdAt), safeFormatTime(m.createdAt), m.enabled ? 'OUI' : 'NON', m.product, m.color, m.argumentType,
         m.univers, m.format, m.position, m.support, m.photoCountRequested,
         m.photoCountDelivered, m.priority, m.deadline || '-', m.status,
-        m.progress, m.rating || 0, individualEfficiency, globalEfficiency, m.info || '-'
+        m.progress, m.rating || 0, individualEfficiency, globalEfficiency,
+        formatDateStringNice(m.preparedAt), formatDateStringNice(m.shotAt), formatDateStringNice(m.postProdAt), formatDateStringNice(m.deliveredAt),
+        m.info || '-'
       ];
     });
 
@@ -2554,6 +2976,17 @@ LISTE DES COMMANDES :
   const updateSecondaryMission = (id: string, updates: Partial<SecondaryMission>) => {
     const target = secondaryMissions.find(m => m.id === id);
     if (!target) return;
+
+    // Synchronisation automatique du statut en fonction du progrès
+    if (updates.progress !== undefined && updates.progress !== target.progress) {
+      if (updates.progress >= 100) {
+        updates.status = 'Mission Accomplie';
+      } else if (updates.progress > 0) {
+        updates.status = 'En cours';
+      } else {
+        updates.status = 'A faire';
+      }
+    }
 
     let logMessage = '';
     const isProgressUpdate = updates.progress !== undefined && updates.progress !== target.progress;
@@ -2981,11 +3414,34 @@ LISTE DES COMMANDES :
                 const req = updated.photoCountRequested || 1;
                 updated.progress = Math.round((del / req) * 100);
               }
+              if (!updated.deliveredAt) {
+                updated.deliveredAt = getNowLocalDatetimeString();
+              }
               break;
-            case 'En post-production': updated.progress = 85; break;
-            case 'shooté': updated.progress = 75; break;
-            case 'en cours de shoot': updated.progress = 50; break;
-            case 'produit préparé': updated.progress = 25; break;
+            case 'En post-production': 
+              updated.progress = 85; 
+              if (!updated.postProdAt) {
+                updated.postProdAt = getNowLocalDatetimeString();
+              }
+              break;
+            case 'shooté': 
+              updated.progress = 75; 
+              if (!updated.shotAt) {
+                updated.shotAt = getNowLocalDatetimeString();
+              }
+              break;
+            case 'en cours de shoot': 
+              updated.progress = 50; 
+              if (!updated.shotAt) {
+                updated.shotAt = getNowLocalDatetimeString();
+              }
+              break;
+            case 'produit préparé': 
+              updated.progress = 25; 
+              if (!updated.preparedAt) {
+                updated.preparedAt = getNowLocalDatetimeString();
+              }
+              break;
             case 'en attente': updated.progress = 0; break;
             case 'annuler': 
               updated.progress = 0; 
@@ -3584,7 +4040,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           </div>
         ) : (
           filteredMissions.map((m) => (
-            <div key={m.id} className={`flex items-center gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-xl hover:bg-white/[0.04] transition-all custom-shadow ${m.enabled ? '' : 'opacity-50 grayscale'}`}>
+            <div 
+              key={m.id} 
+              onDoubleClick={() => setSelectedMissionId(m.id)}
+              title="Double-cliquez pour ouvrir la fiche de mission"
+              className={`flex items-center gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-xl hover:bg-white/[0.04] cursor-pointer select-none transition-all custom-shadow ${m.enabled ? '' : 'opacity-50 grayscale'}`}
+            >
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
@@ -3673,14 +4134,26 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           ))}
           {Array.from({ length: new Date(primaryCalendarDate.getFullYear(), primaryCalendarDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
             const dateStr = `${primaryCalendarDate.getFullYear()}-${(primaryCalendarDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-            const dayMissions = filteredMissions.filter(m => m.deadline === dateStr);
+            const dayMissions = filteredMissions.filter(m => m.enabled && m.deadline === dateStr);
             const isToday = new Date().toISOString().split('T')[0] === dateStr;
             return (
               <div key={day} className={`min-h-[120px] rounded-xl p-2.5 flex flex-col transition-colors ${isToday ? 'bg-accent/5 border border-accent/30 shadow-[0_0_15px_rgba(0,255,148,0.1)]' : 'bg-black/20 border border-white/5 hover:border-white/20 hover:bg-white/[0.02]'}`}>
                  <div className={`text-[11px] font-black mb-3 ${isToday ? 'text-accent' : 'text-text-dim/80'}`}>{day}</div>
                  <div className="flex flex-col gap-1.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
                    {dayMissions.map(m => (
-                      <a href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('Mission: ' + m.product)}&details=${encodeURIComponent('Ref: ' + m.refId + '\n' + (m.info || ''))}&dates=${m.deadline ? new Date(m.deadline).toISOString().replace(/-|:|\.\d\d\d/g, "") + '/' + new Date(new Date(m.deadline).getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "") : ''}`} target="_blank" rel="noopener noreferrer" key={m.id} title={m.product} className={`group cursor-pointer hover:scale-[1.02] transition-all text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border ${m.progress >= 100 || m.status === 'livré' ? 'bg-white/5 border-white/5 text-white/40 line-through' : m.priority === 'High priority' ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' : m.priority === 'Medium priority' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20 hover:bg-accent-yellow/20' : 'bg-accent-blue/10 text-accent-blue border-accent-blue/20 hover:bg-accent-blue/20'}`}>
+                      <a 
+                        href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('Mission: ' + m.product)}&details=${encodeURIComponent('Ref: ' + m.refId + '\n' + (m.info || ''))}&dates=${m.deadline ? new Date(m.deadline).toISOString().replace(/-|:|\.\d\d\d/g, "") + '/' + new Date(new Date(m.deadline).getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "") : ''}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        key={m.id} 
+                        title="Double-cliquez pour ouvrir la fiche de cette mission, simple clic pour l’ajouter sur Google Calendar" 
+                        onDoubleClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedMissionId(m.id);
+                        }}
+                        className={`group cursor-pointer hover:scale-[1.02] transition-all text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border ${m.progress >= 100 || m.status === 'livré' ? 'bg-white/5 border-white/5 text-white/40 line-through' : m.priority === 'High priority' ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' : m.priority === 'Medium priority' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20 hover:bg-accent-yellow/20' : 'bg-accent-blue/10 text-accent-blue border-accent-blue/20 hover:bg-accent-blue/20'}`}
+                      >
                         <span className="font-bold truncate leading-tight group-hover:text-white transition-colors">{m.product}</span>
                         <span className="text-[8px] opacity-60 font-mono truncate">{m.refId}</span>
                       </a>
@@ -3694,7 +4167,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     );
   };
   // Calculate data series for charts
-  const statusCounts = missions.reduce((acc: any, m) => {
+  const statusCounts = activeMissions.reduce((acc: any, m) => {
     if (m.status) acc[m.status] = (acc[m.status] || 0) + 1;
     return acc;
   }, {});
@@ -3705,7 +4178,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
   const COLORS = ['#00FF94', '#00D1FF', '#BD00FF', '#FF9900', '#FF007A', '#FF3B30', '#EBFF00'];
 
-  const supportCounts = missions.reduce((acc: any, m) => {
+  const supportCounts = activeMissions.reduce((acc: any, m) => {
     if (m.support) {
       const supports = m.support.split(', ');
       supports.forEach(s => {
@@ -3720,7 +4193,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     value
   })).sort((a: any, b: any) => b.value - a.value);
 
-  const productCounts = missions.reduce((acc: any, m) => {
+  const productCounts = activeMissions.reduce((acc: any, m) => {
     if (m.product) acc[m.product] = (acc[m.product] || 0) + 1;
     return acc;
   }, {});
@@ -3728,7 +4201,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     .map(([name, value]) => ({ name, value }))
     .sort((a: any, b: any) => b.value - a.value);
 
-  const universCounts = missions.reduce((acc: any, m) => {
+  const universCounts = activeMissions.reduce((acc: any, m) => {
     if (m.univers) acc[m.univers] = (acc[m.univers] || 0) + 1;
     return acc;
   }, {});
@@ -3736,7 +4209,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     .map(([name, value]) => ({ name, value }))
     .sort((a: any, b: any) => b.value - a.value);
 
-  const argumentCounts = missions.reduce((acc: any, m) => {
+  const argumentCounts = activeMissions.reduce((acc: any, m) => {
     if (m.argumentType) acc[m.argumentType] = (acc[m.argumentType] || 0) + 1;
     return acc;
   }, {});
@@ -3747,26 +4220,120 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   const last7Days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
+    const startObj = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+    const endObj = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
     return {
-      dateString: d.toISOString().split('T')[0],
+      dayStart: startObj.getTime(),
+      dayEnd: endObj.getTime() + 1,
       label: d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' })
     };
   });
 
+  const getHistoricalStatusAtInstant = (m: Mission, instant: number): string => {
+    // Check custom dates first
+    const tDelivered = m.deliveredAt ? new Date(m.deliveredAt).getTime() : null;
+    const tPostProd = m.postProdAt ? new Date(m.postProdAt).getTime() : null;
+    const tShot = m.shotAt ? new Date(m.shotAt).getTime() : null;
+    const tPrepared = m.preparedAt ? new Date(m.preparedAt).getTime() : null;
+
+    const minTime = Math.min(
+      m.createdAt,
+      tPrepared && !isNaN(tPrepared) ? tPrepared : Infinity,
+      tShot && !isNaN(tShot) ? tShot : Infinity,
+      tPostProd && !isNaN(tPostProd) ? tPostProd : Infinity,
+      tDelivered && !isNaN(tDelivered) ? tDelivered : Infinity
+    );
+    if (minTime > instant) return '';
+
+    if (tDelivered && !isNaN(tDelivered) && tDelivered <= instant) {
+      return 'livré';
+    }
+    if (tPostProd && !isNaN(tPostProd) && tPostProd <= instant) {
+      return 'En post-production';
+    }
+    if (tShot && !isNaN(tShot) && tShot <= instant) {
+      return 'shooté';
+    }
+    if (tPrepared && !isNaN(tPrepared) && tPrepared <= instant) {
+      return 'produit préparé';
+    }
+
+    if ((tPrepared && !isNaN(tPrepared) && tPrepared > instant) ||
+        (tShot && !isNaN(tShot) && tShot > instant) ||
+        (tPostProd && !isNaN(tPostProd) && tPostProd > instant) ||
+        (tDelivered && !isNaN(tDelivered) && tDelivered > instant)) {
+      return 'en attente';
+    }
+
+    const hist = m.history || [];
+    const relevantLogs = hist.filter(h => h.timestamp <= instant);
+
+    if (relevantLogs.length === 0) {
+      const firstStatusLog = hist.find(h => h.message.includes('STATUT :') || h.message.toLowerCase().includes('statut changé à'));
+      if (firstStatusLog) {
+        if (firstStatusLog.message.includes('STATUT :')) {
+          const parts = firstStatusLog.message.split('->');
+          return parts[0].replace('STATUT :', '').trim();
+        } else {
+          return 'en attente';
+        }
+      }
+      return m.status;
+    }
+
+    // Process status logs chronologically or find the last log
+    for (let i = relevantLogs.length - 1; i >= 0; i--) {
+      const msg = relevantLogs[i].message;
+      if (msg.includes('STATUT :')) {
+        const parts = msg.split('->');
+        if (parts.length > 1) {
+          return parts[parts.length - 1].trim();
+        }
+      }
+      if (msg.toLowerCase().includes('statut changé à')) {
+        const match = msg.match(/statut changé à ["']?([^"'\n]+)["']?/i);
+        if (match) return match[1].trim();
+      }
+    }
+
+    const firstStatusLog = hist.find(h => h.message.includes('STATUT :') || h.message.toLowerCase().includes('statut changé à'));
+    if (firstStatusLog) {
+      if (firstStatusLog.message.includes('STATUT :')) {
+        const parts = firstStatusLog.message.split('->');
+        return parts[0].replace('STATUT :', '').trim();
+      }
+    }
+
+    return m.status;
+  };
+
   const timelineData = last7Days.map(dayInfo => {
-    const dayStart = new Date(dayInfo.dateString).getTime();
-    const dayEnd = dayStart + 86400000;
+    const dayStart = dayInfo.dayStart;
+    const dayEnd = dayInfo.dayEnd;
     
     // Filter currently active missions to count deliveries for this specific day
     const deliveredCount = activeMissions.filter(m => {
+      if (m.deliveredAt) {
+        const tDelivered = new Date(m.deliveredAt).getTime();
+        if (!isNaN(tDelivered)) {
+          return tDelivered >= dayStart && tDelivered < dayEnd;
+        }
+      }
+
       if (m.status !== 'livré') return false;
       
       // Check if it was delivered on this particular day by looking at history or updatedAt
-      const becameDeliveredThisDay = (m.history || []).some(h => 
-        h.timestamp >= dayStart && 
-        h.timestamp < dayEnd && 
-        (h.message.includes('-> livré') || h.message.includes('-> "livré"'))
-      );
+      const becameDeliveredThisDay = (m.history || []).some(h => {
+        const msgLower = h.message.toLowerCase();
+        const isInRange = h.timestamp >= dayStart && h.timestamp < dayEnd;
+        if (!isInRange) return false;
+        
+        return msgLower.includes('-> livré') || 
+               msgLower.includes('-> "livré"') || 
+               msgLower.includes('statut changé à "livré"') ||
+               msgLower.includes('changé à "livré"') ||
+               (msgLower.includes('statut') && msgLower.includes('livré'));
+      });
       
       // Fallback: if no history match but updatedAt is this day and status is currently livré
       const updatedThisDay = m.updatedAt && m.updatedAt >= dayStart && m.updatedAt < dayEnd;
@@ -3774,16 +4341,83 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       return becameDeliveredThisDay || updatedThisDay;
     }).length;
 
-    const missionsAtDay = activeMissions.filter(m => m.createdAt < dayEnd);
+    const missionsAtDay = activeMissions.filter(m => {
+      const tDelivered = m.deliveredAt ? new Date(m.deliveredAt).getTime() : null;
+      const tPostProd = m.postProdAt ? new Date(m.postProdAt).getTime() : null;
+      const tShot = m.shotAt ? new Date(m.shotAt).getTime() : null;
+      const tPrepared = m.preparedAt ? new Date(m.preparedAt).getTime() : null;
+
+      const minTime = Math.min(
+        m.createdAt,
+        tPrepared && !isNaN(tPrepared) ? tPrepared : Infinity,
+        tShot && !isNaN(tShot) ? tShot : Infinity,
+        tPostProd && !isNaN(tPostProd) ? tPostProd : Infinity,
+        tDelivered && !isNaN(tDelivered) ? tDelivered : Infinity
+      );
+      return minTime < dayEnd;
+    });
     
+    // Status counts at the end of this day
+    let prepCount = 0;
+    let shootCount = 0;
+    let postProdCount = 0;
+    let deliveredTotal = 0;
+
+    missionsAtDay.forEach(m => {
+      const statusAtEnd = getHistoricalStatusAtInstant(m, dayEnd);
+      if (statusAtEnd === 'produit préparé') {
+        prepCount++;
+      } else if (statusAtEnd === 'en cours de shoot' || statusAtEnd === 'shooté') {
+        shootCount++;
+      } else if (statusAtEnd === 'En post-production') {
+        postProdCount++;
+      } else if (statusAtEnd === 'livré') {
+        deliveredTotal++;
+      }
+    });
+
     const calculateHistoricalProgress = (m: Mission) => {
+       const tDelivered = m.deliveredAt ? new Date(m.deliveredAt).getTime() : null;
+       const tPostProd = m.postProdAt ? new Date(m.postProdAt).getTime() : null;
+       const tShot = m.shotAt ? new Date(m.shotAt).getTime() : null;
+       const tPrepared = m.preparedAt ? new Date(m.preparedAt).getTime() : null;
+
+       const minTime = Math.min(
+         m.createdAt,
+         tPrepared && !isNaN(tPrepared) ? tPrepared : Infinity,
+         tShot && !isNaN(tShot) ? tShot : Infinity,
+         tPostProd && !isNaN(tPostProd) ? tPostProd : Infinity,
+         tDelivered && !isNaN(tDelivered) ? tDelivered : Infinity
+       );
+       if (minTime > dayEnd) return 0;
+
+       if (tDelivered && !isNaN(tDelivered) && tDelivered < dayEnd) {
+         return 100;
+       }
+       if (tPostProd && !isNaN(tPostProd) && tPostProd < dayEnd) {
+         return 85;
+       }
+       if (tShot && !isNaN(tShot) && tShot < dayEnd) {
+         return 75;
+       }
+       if (tPrepared && !isNaN(tPrepared) && tPrepared < dayEnd) {
+         return 25;
+       }
+
+       if ((tPrepared && !isNaN(tPrepared) && tPrepared > dayEnd) ||
+           (tShot && !isNaN(tShot) && tShot > dayEnd) ||
+           (tPostProd && !isNaN(tPostProd) && tPostProd > dayEnd) ||
+           (tDelivered && !isNaN(tDelivered) && tDelivered > dayEnd)) {
+         return 0;
+       }
+
        const relevantHistory = (m.history || []).filter(h => h.timestamp < dayEnd && h.message.includes('Progression'));
        if (relevantHistory.length > 0) {
           const lastMsg = relevantHistory[relevantHistory.length - 1].message;
           const match = lastMsg.match(/(\d+)%/);
           if (match) return parseInt(match[1]);
        }
-       return m.createdAt < dayEnd ? (m.createdAt > dayStart ? 0 : m.progress) : 0; 
+       return minTime < dayEnd ? (minTime > dayStart ? 0 : m.progress) : 0; 
     };
 
     const totalProgress = missionsAtDay.reduce((acc, m) => acc + calculateHistoricalProgress(m), 0);
@@ -3792,7 +4426,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     return {
       name: dayInfo.label,
       MissionsLivrees: deliveredCount,
-      ProgressionMoyenne: Math.round(avgProgDay)
+      ProgressionMoyenne: Math.round(avgProgDay),
+      ProduitsPrepares: prepCount,
+      Shooting: shootCount,
+      PostProduction: postProdCount,
+      LivreesCumulees: deliveredTotal
     };
   });
 
@@ -4093,15 +4731,67 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </button>
 
                 <div className="w-px h-6 bg-white/10 mx-1 opacity-0 group-hover/chart:opacity-100" />
-                <div className="flex items-center gap-4 px-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-accent-blue shadow-[0_0_8px_rgba(0,209,255,0.5)]" />
-                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">Livrables</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
-                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">Progression</span>
-                  </div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 mt-2 md:mt-0 select-none">
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Produits préparés stockés">
+                    <input 
+                      type="checkbox" 
+                      className="accent-[#EBFF00] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                      checked={visibleTimelineSeries.prepares} 
+                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, prepares: e.target.checked }))}
+                    />
+                    <div className="w-2 h-2 rounded-full bg-[#EBFF00] shadow-[0_0_8px_rgba(235,255,0,0.5)]" />
+                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">1. Préparés</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions en cours de shooting ou shootées">
+                    <input 
+                      type="checkbox" 
+                      className="accent-[#00D1FF] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                      checked={visibleTimelineSeries.shooting} 
+                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, shooting: e.target.checked }))}
+                    />
+                    <div className="w-2 h-2 rounded-full bg-[#00D1FF] shadow-[0_0_8px_rgba(0,209,255,0.5)]" />
+                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">2. Shooting</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions en post-production">
+                    <input 
+                      type="checkbox" 
+                      className="accent-[#FF9900] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                      checked={visibleTimelineSeries.postProd} 
+                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, postProd: e.target.checked }))}
+                    />
+                    <div className="w-2 h-2 rounded-full bg-[#FF9900] shadow-[0_0_8px_rgba(255,153,0,0.5)]" />
+                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">3. Post-Prod</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Historique total des missions livrées">
+                    <input 
+                      type="checkbox" 
+                      className="accent-[#00FF94] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                      checked={visibleTimelineSeries.livreesCumulees} 
+                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, livreesCumulees: e.target.checked }))}
+                    />
+                    <div className="w-2 h-2 rounded-full bg-[#00FF94] shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
+                    <span className="text-[9px] font-black text-white/70 uppercase tracking-widest">4. Livrées</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions livrées spécifiquement ce jour là">
+                    <input 
+                      type="checkbox" 
+                      className="accent-accent-blue rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                      checked={visibleTimelineSeries.livreesJour} 
+                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, livreesJour: e.target.checked }))}
+                    />
+                    <div className="w-2.5 h-1 bg-accent-blue" />
+                    <span className="text-[9px] font-black text-white/40 uppercase tracking-widest">(Jour)</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Progression moyenne globale active (%)">
+                    <input 
+                      type="checkbox" 
+                      className="accent-white rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                      checked={visibleTimelineSeries.progression} 
+                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, progression: e.target.checked }))}
+                    />
+                    <div className="w-3 h-0.5 border-t border-dashed border-white/40" />
+                    <span className="text-[9px] font-black text-white/40 uppercase tracking-widest">Progression</span>
+                  </label>
                 </div>
                 
                 <div className="w-px h-6 bg-white/10 mx-1" />
@@ -4145,8 +4835,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                    contentStyle={{ backgroundColor: '#0A0A0A', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px', textTransform: 'uppercase', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
                    itemStyle={{ padding: '2px 0' }}
                  />
-                 <Bar yAxisId="left" dataKey="MissionsLivrees" fill="var(--color-accent-blue)" radius={[2, 2, 0, 0]} maxBarSize={30} opacity={0.8} />
-                 <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" stroke="var(--color-accent)" strokeWidth={4} dot={{ fill: '#0A0A0A', stroke: 'var(--color-accent)', strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: 'var(--color-accent)' }} />
+                 {visibleTimelineSeries.livreesJour && <Bar yAxisId="left" dataKey="MissionsLivrees" fill="var(--color-accent-blue)" name="Livrées (Jour)" radius={[2, 2, 0, 0]} maxBarSize={30} opacity={0.6} />}
+                 {visibleTimelineSeries.prepares && <Line yAxisId="left" type="monotone" dataKey="ProduitsPrepares" name="Préparés" stroke="#EBFF00" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#EBFF00', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                  {visibleTimelineSeries.shooting && <Line yAxisId="left" type="monotone" dataKey="Shooting" name="En Shooting" stroke="#00D1FF" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#00D1FF', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                  {visibleTimelineSeries.postProd && <Line yAxisId="left" type="monotone" dataKey="PostProduction" name="Post-Prod" stroke="#FF9900" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#FF9900', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                  {visibleTimelineSeries.livreesCumulees && <Line yAxisId="left" type="monotone" dataKey="LivreesCumulees" name="Livrées (Total)" stroke="#00FF94" strokeWidth={4} dot={{ fill: '#0A0A0A', stroke: '#00FF94', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />}
+                  
+                  {visibleTimelineSeries.progression && <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" name="Progression (%)" stroke="rgba(255,255,255,0.3)" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={{ r: 4 }} />}
                </ComposedChart>
              </ResponsiveContainer>
            </div>
@@ -4562,8 +5257,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <div className="flex flex-col items-center justify-center h-full">
                          <div className="relative h-[160px] w-[160px]">
                             {(() => {
-                              const prod = missions.length;
-                              const sec = secondaryMissions.length;
+                              const prod = activeMissions.length;
+                              const sec = secondaryMissions.filter(sm => sm.enabled).length;
                               const totalCount = prod + sec || 1;
                               const prodP = (prod / totalCount) * 100;
                               const secP = (sec / totalCount) * 100;
@@ -4599,14 +5294,14 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                   <div className="w-1.5 h-1.5 rounded-full bg-[#EBFF00]" />
                                   <span className="text-text-dim">Production</span>
                                </div>
-                               <span className="text-white">{missions.length} units</span>
+                               <span className="text-white">{activeMissions.length} units</span>
                             </div>
                             <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-wider">
                                <div className="flex items-center gap-2">
                                   <div className="w-1.5 h-1.5 rounded-full bg-[#00D1FF]" />
                                   <span className="text-text-dim">Secondaire</span>
                                </div>
-                               <span className="text-white">{secondaryMissions.length} units</span>
+                               <span className="text-white">{secondaryMissions.filter(sm => sm.enabled).length} units</span>
                             </div>
                          </div>
                       </div>
@@ -4723,7 +5418,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
                         <td className="py-3 px-4 text-[10px] font-bold text-white/80">
                           {m.title} 
-                          <span className="ml-2 text-[8px] opacity-40 font-mono tracking-widest uppercase">{m.status}</span>
+                          <span className={`ml-2 text-[8px] font-black px-1.5 py-0.5 rounded border uppercase tracking-wider ${
+                            m.status === 'Mission Accomplie' ? 'bg-accent/10 border-accent/20 text-accent font-bold shadow-[0_0_8px_rgba(0,255,148,0.1)]' :
+                            m.status === 'En cours' ? 'bg-accent-blue/10 border-accent-blue/20 text-accent-blue font-bold shadow-[0_0_8px_rgba(0,209,255,0.1)]' :
+                            'bg-white/5 border-white/10 text-text-dim/80 font-mono'
+                          }`}>
+                            {m.status || 'A faire'}
+                          </span>
                         </td>
                         <td className="py-3 px-4">
                           <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${
@@ -4897,8 +5598,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     <div className="p-4 bg-white/5 border border-white/10 rounded-xl">
                       <h5 className="text-[9px] font-black uppercase tracking-widest text-accent mb-2">Bilan de Progrès IA</h5>
                       <p className="text-[10px] text-text-dim leading-relaxed italic">
-                        "Actuellement : {missions.length} missions suivies. Taux de complétion global : {avgProgress}%. 
-                        {missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length > 0 ? ` Alerte : ${missions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length} missions critiques en attente.` : ' Flux opérationnel nominal.'}"
+                        "Actuellement : {activeMissions.length} missions actives suivies. Taux de complétion global : {avgProgress}%. 
+                        {activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length > 0 ? ` Alerte : ${activeMissions.filter(m => m.priority === 'High priority' && m.status !== 'livré').length} missions critiques en attente.` : ' Flux opérationnel nominal.'}"
                       </p>
                     </div>
 
@@ -6025,6 +6726,878 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     </div>
   );
 
+  const renderInventoryView = () => {
+    const listMissions = missions.filter(m => {
+      if (!m.enabled) return false;
+      if (showPreparedHistory) {
+        return m.status === 'produit préparé';
+      } else {
+        return m.status === 'en attente';
+      }
+    });
+
+    // Grouping by product and color (case-insensitive and trimmed)
+    const groups: { [key: string]: { product: string; color: string; count: number; missions: Mission[] } } = {};
+    listMissions.forEach(m => {
+      const prod = (m.product || '').trim();
+      const col = (m.color || '').trim();
+      const key = `${prod.toLowerCase()}|||${col.toLowerCase()}`;
+      if (!groups[key]) {
+        groups[key] = {
+          product: prod,
+          color: col,
+          count: 0,
+          missions: []
+        };
+      }
+      groups[key].count += 1;
+      groups[key].missions.push(m);
+    });
+
+    const groupList = Object.values(groups).filter(g => {
+      const q = inventorySearch.toLowerCase();
+      return (
+        g.product.toLowerCase().includes(q) || 
+        g.color.toLowerCase().includes(q)
+      );
+    });
+
+    // Total unique items count and overall sum of items
+    const totalItemsToPrepare = missions.filter(m => m.enabled && m.status === 'en attente').length;
+    const totalItemsPrepared = missions.filter(m => m.enabled && m.status === 'produit préparé').length;
+    const uniqueGroupsCount = Object.keys(groups).length;
+
+    // Handle marking a group as prepared or back to pending
+    const handleToggleGroupStatus = (group: { product: string; color: string; missions: Mission[] }, shouldPrepare: boolean) => {
+      const targetStatus = shouldPrepare ? 'produit préparé' : 'en attente';
+      const progressValue = shouldPrepare ? 25 : 0; // en attente is 0, produit préparé is 25
+
+      group.missions.forEach(m => {
+        updateMission(m.id, { 
+          status: targetStatus,
+          progress: progressValue
+        });
+      });
+
+      const count = group.missions.length;
+      const pName = group.product;
+      const cName = group.color;
+
+      setToast({ 
+        show: true, 
+        message: `${count} x ${pName} (${cName}) marqué(s) comme ${shouldPrepare ? 'PRÉPARÉ(S)' : 'EN ATTENTE'} !`, 
+        type: 'task' 
+      });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    };
+
+    const exportInventoryExcel = () => {
+      try {
+        const allCombos: { [key: string]: { product: string; color: string; pending: number; prepared: number; total: number } } = {};
+        
+        missions.filter(m => m.enabled).forEach(m => {
+          const prod = (m.product || '').trim();
+          const col = (m.color || '').trim();
+          const key = `${prod.toLowerCase()}|||${col.toLowerCase()}`;
+          if (!allCombos[key]) {
+            allCombos[key] = {
+              product: prod,
+              color: col,
+              pending: 0,
+              prepared: 0,
+              total: 0
+            };
+          }
+          if (m.status === 'produit préparé') {
+            allCombos[key].prepared += 1;
+          } else {
+            allCombos[key].pending += 1;
+          }
+          allCombos[key].total += 1;
+        });
+
+        // Sheet 1: Synthèse Inventaire Groupée
+        const synthesisHeaders = ['Nom du Produit', 'Couleur', 'Quantité en Attente', 'Quantité Préparée', 'Quantité Totale'];
+        const synthesisData = Object.values(allCombos).map(c => [
+          c.product,
+          c.color || 'Neutre',
+          c.pending,
+          c.prepared,
+          c.total
+        ]);
+
+        // Sheet 2: Détail unitaire des produits
+        const detailHeaders = ['ID Réf', 'Produit', 'Couleur', 'Priorité', 'Statut', 'Date Création', 'Échéance', 'Note/Info'];
+        const detailData = missions.filter(m => m.enabled).map(m => [
+          m.refId || m.missionNo,
+          m.product || '-',
+          m.color || 'Neutre',
+          m.priority || '-',
+          m.status || '-',
+          safeFormatDate(m.createdAt),
+          m.deadline || '-',
+          m.info || '-'
+        ]);
+
+        const workbook = XLSX.utils.book_new();
+
+        // Metadata Sheet
+        const metaHeaders = ['Indicateur', 'Valeur'];
+        const metaData = [
+          ['Fichier', 'Export Global Inventaire Multi-produits'],
+          ['Date d\'Export', new Date().toLocaleDateString('fr-FR')],
+          ['Heure d\'Export', new Date().toLocaleTimeString('fr-FR')],
+          ['Total en Attente', totalItemsToPrepare],
+          ['Total Préparés', totalItemsPrepared]
+        ];
+        const metaSheet = XLSX.utils.aoa_to_sheet([metaHeaders, ...metaData]);
+        XLSX.utils.book_append_sheet(workbook, metaSheet, "Infos Inventaire");
+
+        // Synthèse Sheet
+        const synthesisSheet = XLSX.utils.aoa_to_sheet([synthesisHeaders, ...synthesisData]);
+        XLSX.utils.book_append_sheet(workbook, synthesisSheet, "Synthèse Inventaire");
+
+        // Détails Sheet
+        const detailSheet = XLSX.utils.aoa_to_sheet([detailHeaders, ...detailData]);
+        XLSX.utils.book_append_sheet(workbook, detailSheet, "Produits Détails");
+
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0];
+        XLSX.writeFile(workbook, `Inventaire_Global_Preparation_${dateStr}.xlsx`);
+
+        setToast({ show: true, message: 'Inventaire exporté avec succès !', type: 'task' });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      } catch (err: any) {
+        console.error('Error during inventory export:', err);
+        setToast({ show: true, message: `Erreur d'export Excel: ${err.message}`, type: 'alert' });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+      }
+    };
+
+    const handleInventoryFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+
+      const fileNames = files.map(f => f.name);
+      const combinedNames = fileNames.join(', ');
+      setInventoryFileName(prev => prev ? `${prev}, ${combinedNames}` : combinedNames);
+
+      const parsedProducts: { product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string }[] = [];
+
+      const readAndParseFile = (file: File): Promise<void> => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              const data = new Uint8Array(event.target?.result as ArrayBuffer);
+              const workbook = XLSX.read(data, { type: 'array' });
+              
+              // Find the sheet to parse, skipping known metadata sheets
+              let sheetName = "";
+              const preferredSheets = ["Synthèse Inventaire", "Produits Détails", "Production (Missions)", "Missions Production", "Produits Details", "Details"];
+              for (const pref of preferredSheets) {
+                if (workbook.SheetNames.includes(pref)) {
+                  sheetName = pref;
+                  break;
+                }
+              }
+              if (!sheetName) {
+                // Find first sheet that is not a known metadata sheet
+                sheetName = workbook.SheetNames.find(name => !["Infos Inventaire", "Infos Export", "Infos de sauvegarde"].includes(name)) || workbook.SheetNames[0];
+              }
+
+              const worksheet = workbook.Sheets[sheetName];
+              if (!worksheet) {
+                resolve();
+                return;
+              }
+
+              const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+              if (rows.length <= 1) {
+                resolve();
+                return;
+              }
+
+              // Dynamic header finding helper to scan the rows for product indicators
+              const findHeaderRowAndIndices = (allRows: any[][]) => {
+                const productKeywords = ['produit', 'product', 'nom', 'modèle', 'article', 'item', 'name'];
+                const colorKeywords = ['couleur', 'color', 'col', 'teinte'];
+                const qtyKeywords = ['quantité en attente', 'attente', 'quantité', 'quantite', 'qty', 'qte', 'count', 'nombre', 'total', 'pièces', 'pieces'];
+                const priorityKeywords = ['priorité', 'priorite', 'priority'];
+                const infoKeywords = ['info', 'note', 'commentaire', 'description', 'réf', 'ref'];
+                const deadlineKeywords = ['echeance', 'échéance', 'deadline', 'date'];
+
+                const scanLimit = Math.min(allRows.length, 12);
+                for (let rIdx = 0; rIdx < scanLimit; rIdx++) {
+                  const r = allRows[rIdx];
+                  if (!r) continue;
+                  
+                  const rowStrings = r.map(c => String(c || '').trim().toLowerCase());
+                  const prodIdx = rowStrings.findIndex(s => productKeywords.some(kw => s.includes(kw) || s === kw));
+                  
+                  if (prodIdx !== -1) {
+                    const colIdx = rowStrings.findIndex(s => colorKeywords.some(kw => s.includes(kw) || s === kw));
+                    const qIdx = rowStrings.findIndex(s => qtyKeywords.some(kw => s.includes(kw) || s === kw));
+                    const prioIdx = rowStrings.findIndex(s => priorityKeywords.some(kw => s.includes(kw) || s === kw));
+                    const infIdx = rowStrings.findIndex(s => infoKeywords.some(kw => s.includes(kw) || s === kw));
+                    const deadIdx = rowStrings.findIndex(s => deadlineKeywords.some(kw => s.includes(kw) || s === kw));
+
+                    return {
+                      headerRowIndex: rIdx,
+                      productIdx: prodIdx,
+                      colorIdx: colIdx !== -1 ? colIdx : -1,
+                      qtyIdx: qIdx !== -1 ? qIdx : -1,
+                      priorityIdx: prioIdx !== -1 ? prioIdx : -1,
+                      infoIdx: infIdx !== -1 ? infIdx : -1,
+                      deadlineIdx: deadIdx !== -1 ? deadIdx : -1
+                    };
+                  }
+                }
+
+                // Fallback to row 0 default guess
+                return {
+                  headerRowIndex: 0,
+                  productIdx: 0,
+                  colorIdx: 1,
+                  qtyIdx: -1,
+                  priorityIdx: -1,
+                  infoIdx: -1,
+                  deadlineIdx: -1
+                };
+              };
+
+              const { headerRowIndex, productIdx, colorIdx, qtyIdx, priorityIdx, infoIdx, deadlineIdx } = findHeaderRowAndIndices(rows);
+
+              // Helper to check and filter fake rows/metadata completely out
+              const isMetadataValue = (val: string) => {
+                if (!val) return true;
+                const lower = val.trim().toLowerCase();
+                const metadataIndicators = [
+                  'fichier', 
+                  'date d\'export', 
+                  'date dexport',
+                  'heure d\'export', 
+                  'heure dexport',
+                  'total en attente', 
+                  'total préparés', 
+                  'total preparés', 
+                  'total préparé',
+                  'total prepare',
+                  'modèles & couleurs uniques', 
+                  'indicateur', 
+                  'valeur',
+                  'nom du produit', 
+                  'nom de produit',
+                  'produit',
+                  'product',
+                  'id réf',
+                  'id ref',
+                  'infos inventaire',
+                  'synthèse inventaire'
+                ];
+                return metadataIndicators.some(ind => lower === ind || lower.startsWith(ind + ':') || lower.startsWith(ind + ' '));
+              };
+
+              for (let i = headerRowIndex + 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length === 0) continue;
+
+                const productVal = row[productIdx] ? String(row[productIdx]).trim() : '';
+                const colorVal = (colorIdx !== -1 && row[colorIdx]) ? String(row[colorIdx]).trim() : '';
+
+                if (!productVal || isMetadataValue(productVal)) continue;
+
+                let qtyVal = 1;
+                if (qtyIdx !== -1 && row[qtyIdx] !== undefined && row[qtyIdx] !== null) {
+                  const valNum = parseInt(String(row[qtyIdx]), 10);
+                  if (!isNaN(valNum) && valNum > 0) {
+                    qtyVal = valNum;
+                  }
+                }
+
+                const priorityVal = priorityIdx !== -1 && row[priorityIdx] ? String(row[priorityIdx]).trim() : 'Medium priority';
+                const infoVal = infoIdx !== -1 && row[infoIdx] ? String(row[infoIdx]).trim() : `Importé`;
+                const deadlineVal = deadlineIdx !== -1 && row[deadlineIdx] ? String(row[deadlineIdx]).trim() : '';
+
+                parsedProducts.push({
+                  product: productVal,
+                  color: colorVal || 'Neutre',
+                  quantity: qtyVal,
+                  priority: priorityVal,
+                  info: infoVal,
+                  deadline: deadlineVal
+                });
+              }
+              resolve();
+            } catch (err) {
+              console.error(`Error parsing file ${file.name}:`, err);
+              resolve();
+            }
+          };
+          reader.onerror = () => {
+            console.error(`FileReader error on file ${file.name}`);
+            resolve();
+          };
+          reader.readAsArrayBuffer(file);
+        });
+      };
+
+      try {
+        await Promise.all(files.map(f => readAndParseFile(f)));
+
+        if (parsedProducts.length === 0) {
+          setToast({ show: true, message: 'Aucun produit valide reconnu dans le(s) fichier(s).', type: 'alert' });
+        } else {
+          setInventoryPreviewData(prev => {
+            const mergedMap: { [key: string]: { product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string } } = {};
+            [...prev, ...parsedProducts].forEach(item => {
+              const k = `${item.product.toLowerCase().trim()}|||${item.color.toLowerCase().trim()}`;
+              if (!mergedMap[k]) {
+                mergedMap[k] = { ...item };
+              } else {
+                mergedMap[k].quantity += item.quantity;
+                if (item.info && !mergedMap[k].info?.includes(item.info)) {
+                  mergedMap[k].info = `${mergedMap[k].info}, ${item.info}`;
+                }
+              }
+            });
+            return Object.values(mergedMap);
+          });
+          setToast({ show: true, message: 'Fichier(s) importé(s) et cumulé(s) dans la liste de préparation !', type: 'task' });
+        }
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+      } catch (err: any) {
+        console.error(err);
+        setToast({ show: true, message: `Erreur durant le traitement Excel : ${err.message}`, type: 'alert' });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+      }
+
+      e.target.value = '';
+    };
+
+    const confirmInventoryImport = () => {
+      if (inventoryPreviewData.length === 0) return;
+      
+      let addedCount = 0;
+      let localMissionCounter = missionCounter;
+      let localRefCounter = refCounter;
+      const newMissions: Mission[] = [];
+
+      // Map of existing pending missions by product+color
+      const existingPendingMap: { [key: string]: Mission[] } = {};
+      missions.filter(m => m.enabled && m.status === 'en attente').forEach(m => {
+        const prod = (m.product || '').trim().toLowerCase();
+        const col = (m.color || '').trim().toLowerCase();
+        const k = `${prod}|||${col}`;
+        if (!existingPendingMap[k]) {
+          existingPendingMap[k] = [];
+        }
+        existingPendingMap[k].push(m);
+      });
+
+      inventoryPreviewData.forEach(item => {
+        const prodKey = `${item.product.trim().toLowerCase()}|||${item.color.trim().toLowerCase()}`;
+        const existingCount = existingPendingMap[prodKey] ? existingPendingMap[prodKey].length : 0;
+
+        let copiesToAdd = 0;
+        if (importDuplicateMode === 'skip') {
+          if (existingCount > 0) {
+            copiesToAdd = 0; // Already exists, skip completely
+          } else {
+            copiesToAdd = item.quantity > 0 ? item.quantity : 1;
+          }
+        } else if (importDuplicateMode === 'adjust') {
+          const targetQty = item.quantity > 0 ? item.quantity : 1;
+          if (existingCount < targetQty) {
+            copiesToAdd = targetQty - existingCount;
+          } else {
+            copiesToAdd = 0;
+          }
+        } else {
+          // append
+          copiesToAdd = item.quantity > 0 ? item.quantity : 1;
+        }
+
+        for (let c = 0; c < copiesToAdd; c++) {
+          const id = Math.random().toString(36).substring(2, 9);
+          const refId = `${refPrefix}-${localRefCounter}`;
+
+          const m: Mission = {
+            id,
+            missionNo: localMissionCounter,
+            refId,
+            product: item.product,
+            color: item.color,
+            argumentType: 'Studio standard',
+            univers: 'Général',
+            format: '1:1',
+            position: 'Face',
+            support: 'Photo',
+            priority: item.priority || 'Medium priority',
+            status: 'en attente',
+            progress: 0,
+            photoCountRequested: 1,
+            photoCountDelivered: 0,
+            info: item.info || "Importation d'inventaire",
+            deadline: item.deadline || '',
+            createdAt: Date.now(),
+            history: [
+              { timestamp: Date.now(), message: "Créé via importation d'inventaire" }
+            ],
+            enabled: true
+          };
+
+          newMissions.push(m);
+          localMissionCounter++;
+          localRefCounter++;
+          addedCount++;
+        }
+      });
+
+      if (newMissions.length > 0) {
+        setMissions(prev => [...newMissions, ...prev]);
+        setMissionCounter(localMissionCounter);
+        setRefCounter(localRefCounter);
+
+        const logMsg = `IMPORTATION : ${addedCount} produit(s) importé(s) en attente via Excel (Fichier(s): "${inventoryFileName}") [Mode: ${
+          importDuplicateMode === 'skip' ? 'Éviter les doublons' : importDuplicateMode === 'adjust' ? 'Ajuster les quantités' : 'Tout ajouter'
+        }]`;
+        setGlobalLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: Date.now(),
+            message: logMsg,
+            type: 'mission'
+          }
+        ]);
+
+        setToast({ show: true, message: `${addedCount} nouveaux produits importés avec succès !`, type: 'task' });
+      } else {
+        setToast({ show: true, message: "Aucun produit n'a été ajouté (les produits figurent déjà dans l'inventaire en attente).", type: 'task' });
+      }
+
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+
+      // Clean states
+      setInventoryPreviewData([]);
+      setInventoryFileName('');
+      setShowInventoryImport(false);
+    };
+
+    return (
+      <div className="bg-[#050505] border border-white/10 rounded-2xl overflow-hidden mb-10 shadow-[0_0_50px_rgba(0,0,0,0.8)] backdrop-blur-xl">
+        {/* Header Section */}
+        <div className="px-8 py-6 border-b border-white/10 bg-white/[0.01] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="p-2.5 bg-accent/5 border border-accent/20 rounded text-accent shadow-[0_0_15px_rgba(0,255,148,0.1)]">
+              <Package size={20} className="animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-base font-black uppercase tracking-[4px] text-white">Inventaire de Préparation</h3>
+              <p className="text-[9px] font-mono uppercase text-accent tracking-[3px] opacity-70 mt-1">Status: Operational // Section: Logistique</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Excel Import Button */}
+            <button
+              onClick={() => setShowInventoryImport(!showInventoryImport)}
+              className={`px-4 py-1.5 rounded text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2 border shadow-md active:scale-95 ${
+                showInventoryImport 
+                  ? 'bg-accent-blue/20 border-accent-blue/40 text-accent-blue hover:bg-accent-blue hover:text-black' 
+                  : 'bg-accent/10 border-accent/20 text-accent hover:bg-accent hover:text-black hover:shadow-accent/5'
+              }`}
+              title="Importer une liste de produits à préparer à partir d'un fichier Excel ou CSV"
+            >
+              <Upload size={10} />
+              Importer Excel / CSV
+            </button>
+
+            {/* Excel Export Button */}
+            <button
+              onClick={exportInventoryExcel}
+              className="px-4 py-1.5 rounded text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-black shadow-md shadow-emerald-500/5 active:scale-95"
+              title="Exporter tout l'inventaire sous format de fichier Excel multi-feuille"
+            >
+              <FileSpreadsheet size={10} />
+              Exporter Excel
+            </button>
+
+            {/* Toggle History (unprepared vs prepared items) */}
+            <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-lg group">
+              <span className="text-[9px] font-black text-white/40 uppercase tracking-[2px] group-hover:text-accent transition-colors">Voir Historique Préparés</span>
+              <Toggle 
+                enabled={showPreparedHistory} 
+                onToggle={() => {
+                  setShowPreparedHistory(!showPreparedHistory);
+                  setInventorySearch('');
+                }} 
+              />
+            </div>
+            
+            <button 
+              onClick={() => {
+                if (listMissions.length === 0) return;
+                const confirmMsg = showPreparedHistory 
+                  ? "Voulez-vous remettre tous ces produits en attente ?" 
+                  : "Voulez-vous marquer tous ces produits comme préparés ?";
+                if (window.confirm(confirmMsg)) {
+                  listMissions.forEach(m => {
+                    updateMission(m.id, {
+                      status: showPreparedHistory ? 'en attente' : 'produit préparé',
+                      progress: showPreparedHistory ? 0 : 25
+                    });
+                  });
+                  setToast({ 
+                    show: true, 
+                    message: `${listMissions.length} produits mis à jour !`, 
+                    type: 'task' 
+                  });
+                  setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                }
+              }}
+              disabled={listMissions.length === 0}
+              className={`px-4 py-1.5 rounded text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                showPreparedHistory 
+                  ? 'bg-accent-blue/10 border border-accent-blue/20 text-accent-blue hover:bg-accent-blue hover:text-black' 
+                  : 'bg-accent/10 border border-accent/20 text-accent hover:bg-accent hover:text-black'
+              } disabled:opacity-30 disabled:pointer-events-none`}
+            >
+              <CheckSquare size={10} />
+              {showPreparedHistory ? 'Tout remettre en attente' : 'Tout marquer préparé'}
+            </button>
+          </div>
+        </div>
+
+        {/* Expanded Excel Import Sub-section */}
+        {showInventoryImport && (
+          <div className="p-6 bg-black/40 border-b border-white/10 border-dashed animate-fadeIn">
+            <div className="max-w-2xl mx-auto bg-black/60 border border-white/10 rounded-xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+              <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
+                <div className="flex items-center gap-2">
+                  <Upload size={14} className="text-accent" />
+                  <span className="text-xs font-black uppercase tracking-wider text-white">Importer des produits en lot</span>
+                </div>
+                <button 
+                  onClick={() => {
+                    setShowInventoryImport(false);
+                    setInventoryPreviewData([]);
+                    setInventoryFileName('');
+                  }}
+                  className="text-text-dim hover:text-white text-[10px] uppercase font-mono tracking-wider transition-colors px-2 py-0.5"
+                >
+                  Fermer
+                </button>
+              </div>
+
+              {inventoryPreviewData.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 px-4 border-2 border-dashed border-white/10 hover:border-accent/30 rounded-xl transition-all cursor-pointer bg-white/[0.01] relative group">
+                  <input 
+                    type="file" 
+                    accept=".xlsx, .xls, .csv" 
+                    multiple
+                    onChange={handleInventoryFileChange} 
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+                  />
+                  <div className="p-3 bg-white/5 rounded-full mb-3 text-text-dim group-hover:text-accent group-hover:scale-110 transition-all">
+                    <Upload size={20} />
+                  </div>
+                  <p className="text-[10px] font-bold text-white uppercase tracking-wider text-center">Glissez-déposez ou cliquez pour charger un ou plusieurs fichiers</p>
+                  <p className="text-[8px] font-mono text-text-dim/60 mt-1 uppercase text-center">Formats acceptés : Excel (.xlsx, .xls) ou CSV (.csv)</p>
+                  
+                  <div className="mt-4 pt-3 border-t border-white/5 w-full text-[8px] font-mono text-text-dim/50 leading-relaxed max-w-md">
+                    <span className="font-bold text-accent">Astuce :</span> Vous pouvez sélectionner et importer plusieurs fichiers d'un coup. Les informations de métadonnées (comme les entêtes d'exports, l'heure, etc.) sont automatiquement nettoyées et ignorées lors de l'analyse pour ne conserver que la liste des produits réels à préparer.
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 font-mono text-[10px]">
+                  <div className="flex flex-col gap-1 text-left bg-white/[0.02] border border-white/5 rounded-lg p-3">
+                    <div className="text-[8px] text-text-dim/50 uppercase font-black tracking-widest">Fichier(s) chargé(s) :</div>
+                    <div className="text-white text-[9px] font-bold">{inventoryFileName}</div>
+                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-white/5 text-[9px]">
+                      <span className="text-text-dim">Produits détectés (cumulés) :</span>
+                      <span className="bg-accent/15 px-2 py-0.5 rounded text-accent font-black tracking-wider">
+                        {inventoryPreviewData.reduce((acc, curr) => acc + curr.quantity, 0)} pièces à importer
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Options de traitement des doublons */}
+                  <div className="bg-white/[0.02] border border-white/5 rounded-lg p-3 space-y-2 text-left">
+                    <label className="text-[8px] text-text-dim/50 uppercase font-black tracking-widest block">Traitement des Doublons :</label>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setImportDuplicateMode('skip')}
+                        className={`p-2.5 rounded-lg text-[9px] border transition-all text-left flex flex-col gap-1 font-bold ${
+                          importDuplicateMode === 'skip'
+                            ? 'bg-accent/15 border-accent text-accent'
+                            : 'bg-black/40 border-white/10 text-white/50 hover:text-white/80 hover:border-white/20'
+                        }`}
+                      >
+                        <span className="uppercase text-[8px] font-black tracking-wide">✓ Éviter les Doublons</span>
+                        <span className="text-[7.5px] font-normal leading-tight opacity-70">Ignorer si le produit est déjà en attente dans l'inventaire.</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setImportDuplicateMode('adjust')}
+                        className={`p-2.5 rounded-lg text-[9px] border transition-all text-left flex flex-col gap-1 font-bold ${
+                          importDuplicateMode === 'adjust'
+                            ? 'bg-accent-blue/15 border-accent-blue text-accent-blue'
+                            : 'bg-black/40 border-white/10 text-white/50 hover:text-white/80 hover:border-white/20'
+                        }`}
+                      >
+                        <span className="uppercase text-[8px] font-black tracking-wide">⚙ Ajuster le Stock</span>
+                        <span className="text-[7.5px] font-normal leading-tight opacity-70 font-sans">N'ajouter que la différence pour compléter la quantité cible.</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setImportDuplicateMode('append')}
+                        className={`p-2.5 rounded-lg text-[9px] border transition-all text-left flex flex-col gap-1 font-bold ${
+                          importDuplicateMode === 'append'
+                            ? 'bg-accent-yellow/15 border-accent-yellow text-accent-yellow'
+                            : 'bg-black/40 border-white/10 text-white/50 hover:text-white/80 hover:border-white/20'
+                        }`}
+                      >
+                        <span className="uppercase text-[8px] font-black tracking-wide">+ Tout Importer</span>
+                        <span className="text-[7.5px] font-normal leading-tight opacity-70">Ajouter tout le contenu des fichiers sans restriction.</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Preview Table */}
+                  <div className="border border-white/5 bg-black/40 rounded-lg overflow-hidden max-h-48 overflow-y-auto custom-scrollbar">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-white/5 bg-white/[0.02] text-[8px] font-black uppercase tracking-widest text-text-dim/50">
+                          <th className="py-2 px-3">Produit</th>
+                          <th className="py-2 px-3">Couleur</th>
+                          <th className="py-2 px-3 text-center">Quantité</th>
+                          <th className="py-2 px-3">Commentaire / Réf</th>
+                          <th className="py-2 px-3">Date Prévue</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5 text-[9px] font-mono text-text-dim/80">
+                        {inventoryPreviewData.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
+                            <td className="py-1.5 px-3 text-white font-bold">{item.product}</td>
+                            <td className="py-1.5 px-3">
+                              <span className="px-1.5 py-0.5 bg-white/5 text-[8px] font-bold rounded uppercase tracking-wider">
+                                {item.color}
+                              </span>
+                            </td>
+                            <td className="py-1.5 px-3 text-center text-accent font-black">{item.quantity}</td>
+                            <td className="py-1.5 px-3 truncate max-w-[120px]" title={item.info}>{item.info || '-'}</td>
+                            <td className="py-1.5 px-3 text-accent-yellow">{item.deadline || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+                    <div className="relative">
+                      <button className="w-full sm:w-auto px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 transition-all text-[9px] font-bold text-white tracking-widest uppercase rounded flex items-center justify-center gap-1.5 relative overflow-hidden">
+                        <Upload size={10} />
+                        Ajouter d'autres fichiers
+                        <input 
+                          type="file" 
+                          accept=".xlsx, .xls, .csv" 
+                          multiple
+                          onChange={handleInventoryFileChange} 
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                        />
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => {
+                          setInventoryPreviewData([]);
+                          setInventoryFileName('');
+                        }}
+                        className="px-3 py-1.5 bg-white/5 hover:bg-white/10 active:scale-95 transition-all text-[9px] font-bold text-white tracking-widest uppercase rounded"
+                      >
+                        Vider la liste
+                      </button>
+                      <button
+                        onClick={confirmInventoryImport}
+                        className="px-4 py-1.5 bg-accent hover:bg-[#00d676] text-black active:scale-[0.98] transition-all text-[9px] font-black tracking-widest uppercase rounded shadow-[0_0_15px_rgba(0,255,148,0.2)]"
+                      >
+                        Confirmer l'importation
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Info banners & Quick Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-6 bg-black/20 border-b border-white/5">
+          <div className="bg-white/[0.02] border border-white/5 p-4 rounded-xl flex items-center gap-4">
+            <div className="p-3 rounded-lg bg-accent-blue/10 text-accent-blue border border-accent-blue/20">
+              <Package size={16} />
+            </div>
+            <div>
+              <div className="text-xl font-mono font-black text-white">{totalItemsToPrepare}</div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-text-dim/60">Total Produits en Attente</div>
+            </div>
+          </div>
+
+          <div className="bg-white/[0.02] border border-white/5 p-4 rounded-xl flex items-center gap-4">
+            <div className="p-3 rounded-lg bg-accent/10 text-accent border border-accent/20">
+              <ClipboardCheck size={16} />
+            </div>
+            <div>
+              <div className="text-xl font-mono font-black text-white">{totalItemsPrepared}</div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-text-dim/60">Total Produits Préparés</div>
+            </div>
+          </div>
+
+          <div className="bg-white/[0.02] border border-white/5 p-4 rounded-xl flex items-center gap-4">
+            <div className="p-3 rounded-lg bg-accent-purple/10 text-accent-purple border border-accent-purple/20">
+              <Layers size={16} />
+            </div>
+            <div>
+              <div className="text-xl font-mono font-black text-white">{uniqueGroupsCount}</div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-text-dim/60">Modèles & Couleurs Uniques</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Search controls & info banner */}
+        <div className="px-6 py-4 bg-black/40 border-b border-white/5 flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div className="relative w-full md:w-80 group">
+            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30 group-focus-within:text-accent transition-colors" />
+            <input 
+              type="text"
+              value={inventorySearch}
+              onChange={(e) => setInventorySearch(e.target.value)}
+              placeholder="Filtrer par nom de produit ou couleur..."
+              className="w-full bg-black/30 border border-white/10 pl-10 pr-4 py-2.5 rounded-lg text-xs text-white placeholder:text-white/20 outline-none focus:border-accent/40 placeholder:font-normal hover:bg-black/50 transition-all font-mono"
+            />
+            {inventorySearch && (
+              <button 
+                onClick={() => setInventorySearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white transition-colors"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          <div className="text-right text-[10px] font-mono text-text-dim/60 flex items-center gap-2">
+            <Info size={12} className="text-accent-blue" />
+            <span>Les produits identiques de même couleur sont automatiquement regroupés.</span>
+          </div>
+        </div>
+
+        {/* Group list */}
+        <div className="p-6">
+          {groupList.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 bg-black/20 border border-dashed border-white/10 rounded-xl">
+              <div className="p-4 bg-white/5 rounded-full text-white/25 mb-4 border border-white/5">
+                <PackageSearch size={32} />
+              </div>
+              <h4 className="text-sm font-bold text-white mb-1 uppercase tracking-wider">Aucun produit trouvé</h4>
+              <p className="text-xs text-text-dim/60 max-w-md text-center px-4">
+                {showPreparedHistory 
+                  ? "Aucun produit n'a encore été préparé. Cochez des produits de la liste d'attente pour commencer."
+                  : "Tous les produits en attente sont préparés ! Ou modifiez vos filtres de recherche."}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {groupList.map((group, idx) => {
+                const groupKey = `${group.product}|||${group.color}`;
+                
+                return (
+                  <motion.div 
+                    key={groupKey}
+                    layoutId={`inv-${groupKey}`}
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.03 }}
+                    className="bg-black/30 border border-white/10 rounded-xl overflow-hidden shadow-lg hover:border-white/20 transition-all group/card relative flex flex-col justify-between"
+                  >
+                    <div className="p-5 flex flex-col gap-4">
+                      {/* Top bar with count & checkbox */}
+                      <div className="flex justify-between items-start gap-4">
+                        {/* Checkbox button */}
+                        <button
+                          onClick={() => handleToggleGroupStatus(group, !showPreparedHistory)}
+                          className={`w-6 h-6 rounded border flex items-center justify-center transition-all cursor-pointer shadow-md ${
+                            showPreparedHistory 
+                              ? 'bg-accent border-accent text-black hover:bg-accent/80' 
+                              : 'border-white/20 bg-black/60 text-transparent hover:border-accent hover:bg-accent/10 hover:text-accent/40'
+                          }`}
+                          title={showPreparedHistory ? "Remettre en attente" : "Marquer comme préparé"}
+                        >
+                          <Check size={16} strokeWidth={3} className={showPreparedHistory ? "text-black" : "text-current"} />
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase font-mono tracking-widest text-white/40">Quantité</span>
+                          <span className={`px-2.5 py-1 text-xs rounded-lg font-mono font-black ${
+                            showPreparedHistory 
+                              ? 'bg-accent/10 border border-accent/20 text-accent' 
+                              : 'bg-accent-blue/10 border border-accent-blue/20 text-accent-blue'
+                          }`}>
+                            x{group.count}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Info body */}
+                      <div>
+                        <h4 className="text-sm font-black text-white uppercase tracking-wider leading-snug group-hover/card:text-accent transition-colors">
+                          {group.product}
+                        </h4>
+                        
+                        <div className="flex items-center gap-1.5 mt-2">
+                          <span className="w-2 h-2 rounded-full border border-white/10" style={{ backgroundColor: group.color.toLowerCase() === 'grey' ? '#4B5563' : group.color.toLowerCase() === 'red' || group.color.toLowerCase().includes('red') ? '#EF4444' : group.color.toLowerCase().includes('white') ? '#FFFFFF' : '#10B981' }} />
+                          <span className="text-[10px] font-bold text-text-dim/80 font-mono tracking-wider bg-white/5 py-0.5 px-2 rounded-md uppercase">
+                            {group.color || 'Neutre'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expandable mission detail list */}
+                    <div className="border-t border-white/5 bg-black/50 p-4">
+                      <div className="flex justify-between items-center text-[8px] font-black uppercase tracking-widest text-text-dim/50 mb-2">
+                        <span>Missions Associées</span>
+                        <span>{group.missions.length} réf. (Double-clic pour ouvrir)</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar pr-1 font-mono">
+                        {group.missions.map(m => (
+                          <div 
+                            key={m.id}
+                            onDoubleClick={() => setSelectedMissionId(m.id)}
+                            className="px-2 py-1 bg-white/[0.02] border border-white/5 rounded text-[8px] font-bold text-white/50 flex flex-col gap-0.5 cursor-pointer hover:bg-white/10 hover:border-accent-blue/50 hover:text-white select-none transition-all"
+                            title="Double-cliquez pour ouvrir la fiche de cette mission"
+                          >
+                            <span className="text-accent-blue font-black group-hover:text-accent-blue">{m.refId}</span>
+                            {m.univers && <span className="opacity-60 text-[6px] uppercase tracking-tighter">{m.univers}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const toggleSort = (key: string, isMulti: boolean) => {
     if (key === 'checkbox') return; // Ignore checkbox column for sorting
     setSortConfigs(prev => {
@@ -6052,6 +7625,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   };
 
   const handleBulkStatusUpdate = (newStatus: string) => {
+    // Collect titles or references for global logging
+    const updatedCount = selectedMissionIds.length;
+    
     setMissions(prev => prev.map(m => {
       if (selectedMissionIds.includes(m.id)) {
         let progress = m.progress;
@@ -6082,9 +7658,22 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       }
       return m;
     }));
+
+    if (updatedCount > 0) {
+      setGlobalLogs(prev => [
+        ...prev,
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: Date.now(),
+          message: `MISE À JOUR GROUPÉE : ${updatedCount} missions modifiées vers le statut "${newStatus}".`,
+          type: 'mission'
+        }
+      ]);
+    }
+
     setBulkStatusModalOpen(false);
     setSelectedMissionIds([]);
-    setToast({ show: true, message: `${selectedMissionIds.length} missions mises à jour`, type: 'task' });
+    setToast({ show: true, message: `${updatedCount} missions mises à jour`, type: 'task' });
     setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
   };
 
@@ -6271,6 +7860,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   const tabs = [
     { id: 'table', label: 'Rapport', icon: Activity },
     { id: 'dashboard', label: 'Monitor', icon: BarChart3 },
+    { id: 'inventory', label: 'Inventaire', icon: Package },
     { id: 'journal', label: 'Journal', icon: Clock },
     { id: 'system', label: 'Système', icon: Settings }
   ];
@@ -7080,6 +8670,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           <span key="tab-table">TABLEAU<br/>DE BORD</span>
                         ) : activeTab === 'dashboard' ? (
                           <span key="tab-dash">MONITEUR<br/>SYSTÈME</span>
+                        ) : activeTab === 'inventory' ? (
+                          <span key="tab-inventory">INVENTAIRE<br/>PRÉPARATION</span>
                         ) : activeTab === 'journal' ? (
                           <span key="tab-journal">JOURNAL<br/>DE BORD</span>
                         ) : (
@@ -7600,6 +9192,17 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   exit={{ opacity: 0, y: -10 }}
                 >
                   {renderDashboardView()}
+                </motion.div>
+              )}
+
+              {activeTab === 'inventory' && (
+                <motion.div
+                  key="inventory"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  {renderInventoryView()}
                 </motion.div>
               )}
 
@@ -8613,9 +10216,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                       <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
                          <div className="flex items-center gap-2">
-                           <div className={`w-2 h-2 rounded-full ${sm.progress >= 100 ? 'bg-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]' : 'bg-accent-blue animate-pulse'}`} />
+                           <div className={`w-2 h-2 rounded-full ${
+                             sm.progress >= 100 ? 'bg-accent shadow-[0_0_8px_rgba(0,255,148,0.5)]' : 
+                             sm.progress > 0 ? 'bg-accent-blue animate-pulse' : 'bg-white/20'
+                           }`} />
                            <span className="text-[8px] font-black uppercase tracking-widest text-white/40">
-                             {sm.progress >= 100 ? 'Mission Accomplie' : 'Mission en Cours'}
+                             {sm.status || (sm.progress >= 100 ? 'Mission Accomplie' : sm.progress > 0 ? 'En cours' : 'A faire')}
                            </span>
                          </div>
                      <span className="text-[8px] font-mono text-text-dim italic">
@@ -9604,13 +11210,37 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         </div>
                       </div>
                   </div>
-                  <div>
+                   <div>
                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', fontWeight: '900', textTransform: 'uppercase', marginBottom: '4px' }}>
                       <span style={{ color: '#888888' }}>Avancement</span>
                       <span style={{ color: '#00FF94' }}>{m.progress}%</span>
                     </div>
-                    <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '99px', overflow: 'hidden' }}>
+                    <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '99px', overflow: 'hidden', marginBottom: '24px' }}>
                        <div style={{ height: '100%', backgroundColor: '#00FF94', width: `${m.progress}%` }} />
+                    </div>
+
+                    {/* Timeline des étapes */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '16px' }}>
+                      <span style={{ fontSize: '9px', fontWeight: '900', textTransform: 'uppercase', color: '#888888', letterSpacing: '1px' }}>Chronologie de Production</span>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', fontSize: '10px' }}>
+                        <div style={{ borderLeft: m.preparedAt ? '2px solid #00FF94' : '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px', opacity: m.preparedAt ? 1 : 0.4 }}>
+                          <span style={{ display: 'block', fontWeight: '900', color: m.preparedAt ? '#00FF94' : '#888888', textTransform: 'uppercase', fontSize: '8px', letterSpacing: '0.5px' }}>I. Produit Préparé</span>
+                          <span style={{ color: '#FFFFFF', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.preparedAt)}</span>
+                        </div>
+                        <div style={{ borderLeft: m.shotAt ? '2px solid #00D1FF' : '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px', opacity: m.shotAt ? 1 : 0.4 }}>
+                          <span style={{ display: 'block', fontWeight: '900', color: m.shotAt ? '#00D1FF' : '#888888', textTransform: 'uppercase', fontSize: '8px', letterSpacing: '0.5px' }}>II. Produit Shooté</span>
+                          <span style={{ color: '#FFFFFF', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.shotAt)}</span>
+                        </div>
+                        <div style={{ borderLeft: m.postProdAt ? '2px solid #FF9900' : '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px', opacity: m.postProdAt ? 1 : 0.4 }}>
+                          <span style={{ display: 'block', fontWeight: '900', color: m.postProdAt ? '#FF9900' : '#888888', textTransform: 'uppercase', fontSize: '8px', letterSpacing: '0.5px' }}>III. Passage Post-Prod</span>
+                          <span style={{ color: '#FFFFFF', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.postProdAt)}</span>
+                        </div>
+                        <div style={{ borderLeft: m.deliveredAt ? '2px solid #00FF94' : '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px', opacity: m.deliveredAt ? 1 : 0.4 }}>
+                          <span style={{ display: 'block', fontWeight: '900', color: m.deliveredAt ? '#00FF94' : '#888888', textTransform: 'uppercase', fontSize: '8px', letterSpacing: '0.5px' }}>IV. Produit Livré</span>
+                          <span style={{ color: '#FFFFFF', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.deliveredAt)}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -9743,8 +11373,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     <YAxis yAxisId="left" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis yAxisId="right" orientation="right" tick={{ fill: 'rgba(0,255,148,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
                     <Legend wrapperStyle={{ fontSize: '10px', textTransform: 'uppercase', opacity: 0.6 }} />
-                    <Bar yAxisId="left" dataKey="MissionsLivrees" name="Missions Livrées" fill="#00D1FF" radius={[4, 4, 0, 0]} maxBarSize={40} isAnimationActive={false} />
-                    <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" name="Progression Moyenne" stroke="#00FF94" strokeWidth={3} dot={{ fill: '#00FF94', r: 4 }} activeDot={{ r: 6 }} isAnimationActive={false} />
+                    {visibleTimelineSeries.livreesJour && <Bar yAxisId="left" dataKey="MissionsLivrees" name="Livrées (Jour)" fill="#00D1FF" radius={[4, 4, 0, 0]} maxBarSize={40} isAnimationActive={false} opacity={0.6} />}
+                    {visibleTimelineSeries.prepares && <Line yAxisId="left" type="monotone" dataKey="ProduitsPrepares" name="Préparés" stroke="#EBFF00" strokeWidth={3} dot={{ fill: '#EBFF00', r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />}
+                    {visibleTimelineSeries.shooting && <Line yAxisId="left" type="monotone" dataKey="Shooting" name="En Shooting" stroke="#00D1FF" strokeWidth={3} dot={{ fill: '#00D1FF', r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />}
+                    {visibleTimelineSeries.postProd && <Line yAxisId="left" type="monotone" dataKey="PostProduction" name="Post-Prod" stroke="#FF9900" strokeWidth={3} dot={{ fill: '#FF9900', r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />}
+                    {visibleTimelineSeries.livreesCumulees && <Line yAxisId="left" type="monotone" dataKey="LivreesCumulees" name="Livrées (Total)" stroke="#00FF94" strokeWidth={4} dot={{ fill: '#00FF94', r: 4 }} activeDot={{ r: 6 }} isAnimationActive={false} />}
+                    {visibleTimelineSeries.progression && <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" name="Progression (%)" stroke="rgba(255,255,255,0.3)" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />}
                   </ComposedChart>
                 </div>
              </div>
@@ -9863,8 +11497,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <h3 style={{ fontSize: '14px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#888', marginBottom: '24px' }}>Poids Stratégique</h3>
                 <div style={{ position: 'relative', height: '180px', width: '180px', margin: '0 auto' }}>
                    {(() => {
-                     const prod = missions.length;
-                     const sec = secondaryMissions.length;
+                     const prod = activeMissions.length;
+                     const sec = secondaryMissions.filter(sm => sm.enabled).length;
                      const totalCount = prod + sec || 1;
                      const prodP = (prod / totalCount) * 100;
                      const secP = (sec / totalCount) * 100;
@@ -9895,13 +11529,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px' }}>
                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <div style={{ width: '10px', height: '10px', backgroundColor: '#EBFF00', borderRadius: '2px' }} />
-                      <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Production: {missions.length}</span>
-                      <span style={{ fontSize: '11px', color: '#fff', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((missions.length / (missions.length + secondaryMissions.length || 1)) * 100)}%</span>
+                      <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Production: {activeMissions.length}</span>
+                      <span style={{ fontSize: '11px', color: '#fff', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((activeMissions.length / (activeMissions.length + secondaryMissions.filter(sm => sm.enabled).length || 1)) * 100)}%</span>
                    </div>
                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <div style={{ width: '10px', height: '10px', backgroundColor: '#00D1FF', borderRadius: '2px' }} />
-                      <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Secondaire: {secondaryMissions.length}</span>
-                      <span style={{ fontSize: '11px', color: '#fff', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((secondaryMissions.length / (missions.length + secondaryMissions.length || 1)) * 100)}%</span>
+                      <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Secondaire: {secondaryMissions.filter(sm => sm.enabled).length}</span>
+                      <span style={{ fontSize: '11px', color: '#fff', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((secondaryMissions.filter(sm => sm.enabled).length / (activeMissions.length + secondaryMissions.filter(sm => sm.enabled).length || 1)) * 100)}%</span>
                    </div>
                 </div>
              </div>
@@ -10201,6 +11835,61 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                        <button onClick={() => pushToGoogleTasks(mission)} className="flex-1 flex items-center justify-center gap-2 py-1.5 bg-[#F4B400]/10 text-[#F4B400] border border-[#F4B400]/20 hover:bg-[#F4B400]/20 rounded text-[9px] font-black uppercase transition-all whitespace-nowrap">
                          <Check size={10} /> Tasks
                        </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-white/5 border border-white/10 rounded-lg space-y-3">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-text-dim block border-b border-white/5 pb-1.5 flex items-center gap-1.5">
+                      <Clock size={10} />
+                      Suivi des Étapes de Production
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-1">
+                      <div>
+                        <label className="text-[8px] font-black uppercase tracking-wider text-accent block mb-1">
+                          Produit Préparé
+                        </label>
+                        <input 
+                          type="datetime-local"
+                          value={mission.preparedAt || ''}
+                          onChange={(e) => onUpdate(mission.id, { preparedAt: e.target.value })}
+                          className="w-full bg-black/40 border border-white/10 rounded p-1 text-[10px] text-accent font-bold outline-none focus:border-accent/50 cursor-text"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[8px] font-black uppercase tracking-wider text-accent-blue block mb-1">
+                          Shooté
+                        </label>
+                        <input 
+                          type="datetime-local"
+                          value={mission.shotAt || ''}
+                          onChange={(e) => onUpdate(mission.id, { shotAt: e.target.value })}
+                          className="w-full bg-black/40 border border-white/10 rounded p-1 text-[10px] text-accent-blue font-bold outline-none focus:border-accent-blue/50 cursor-text"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[8px] font-black uppercase tracking-wider text-accent-purple block mb-1">
+                          Passé en Post-Prod
+                        </label>
+                        <input 
+                          type="datetime-local"
+                          value={mission.postProdAt || ''}
+                          onChange={(e) => onUpdate(mission.id, { postProdAt: e.target.value })}
+                          className="w-full bg-black/40 border border-white/10 rounded p-1 text-[10px] text-accent-purple font-bold outline-none focus:border-accent-purple/50 cursor-text"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[8px] font-black uppercase tracking-wider text-accent-pink block mb-1">
+                          Livré
+                        </label>
+                        <input 
+                          type="datetime-local"
+                          value={mission.deliveredAt || ''}
+                          onChange={(e) => onUpdate(mission.id, { deliveredAt: e.target.value })}
+                          className="w-full bg-black/40 border border-white/10 rounded p-1 text-[10px] text-accent-pink font-bold outline-none focus:border-accent-pink/50 cursor-text"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
