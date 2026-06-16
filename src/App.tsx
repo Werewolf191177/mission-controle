@@ -82,7 +82,9 @@ import {
   Info,
   FileJson,
   Bot,
-  Send
+  Send,
+  Edit2,
+  Percent
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import html2canvas from 'html2canvas';
@@ -164,7 +166,7 @@ const ChartCard = ({ title, subtitle, children, delay = 0, className = "", right
   </motion.div>
 );
 
-const WaveEffect = ({ progress, color, type, opacity }: { progress: number, color: string, type: 'liquid' | 'organic' | 'tech', opacity?: number }) => {
+const WaveEffect = ({ progress, color, type, opacity }: { progress: number, color: string | undefined | null, type: 'liquid' | 'organic' | 'tech', opacity?: number }) => {
   const getPath = () => {
     switch(type) {
       case 'organic':
@@ -177,20 +179,44 @@ const WaveEffect = ({ progress, color, type, opacity }: { progress: number, colo
   };
 
   const path = getPath();
+  const safeProgress = typeof progress === 'number' && !isNaN(progress) ? progress : 0;
+
+  // Resolve Tailwind utility colors or hex strings to explicit CSS values
+  const resolveColor = (c: string | undefined | null) => {
+    if (!c) return 'var(--color-accent, #00FF94)';
+    if (c.startsWith('#')) return c;
+    if (c === 'text-accent' || c === 'accent') return 'var(--color-accent, #00FF94)';
+    if (c === 'text-accent-blue' || c === 'accent-blue') return 'var(--color-accent-blue, #00D1FF)';
+    if (c === 'text-accent-purple' || c === 'accent-purple') return 'var(--color-accent-purple, #BD00FF)';
+    if (c === 'text-accent-orange' || c === 'accent-orange') return 'var(--color-accent-orange, #FF9900)';
+    if (c === 'text-accent-pink' || c === 'accent-pink') return 'var(--color-accent-pink, #FF007A)';
+    if (c === 'text-accent-red' || c === 'accent-red') return 'var(--color-accent-red, #FF3B30)';
+    if (c === 'text-accent-yellow' || c === 'accent-yellow') return 'var(--color-accent-yellow, #EBFF00)';
+    if (c.startsWith('text-')) {
+      const term = c.replace('text-', '');
+      return `var(--color-${term})`;
+    }
+    return c;
+  };
+
+  const resolvedColor = resolveColor(color);
   
+  // We use max offset of 75% instead of 100% so that at 0% progress, a beautiful subtle crest remains visible at the header's base fold.
+  const motionY = 75 - (safeProgress > 100 ? 100 : safeProgress) * 0.7;
+
   return (
     <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden" style={{ opacity: opacity !== undefined ? opacity : 0.3 }}>
       <motion.div
         className="absolute bottom-0 left-0 w-[200%] h-[150%] flex flex-col"
-        animate={{ y: `${100 - (progress > 100 ? 100 : progress) * 0.9}%` }}
+        animate={{ y: `${motionY}%` }}
         transition={{ type: 'spring', damping: 30, stiffness: 45 }}
       >
         <div className="relative w-full h-[150px]">
           <motion.svg
             viewBox="0 0 1200 120"
             preserveAspectRatio="none"
-            className={`absolute top-0 left-0 w-full h-full ${!color.startsWith('#') ? color : ''}`}
-            style={color.startsWith('#') ? { color } : {}}
+            className="absolute top-0 left-0 w-full h-full"
+            style={{ color: resolvedColor }}
             animate={{
               x: [0, -1200],
             }}
@@ -200,13 +226,13 @@ const WaveEffect = ({ progress, color, type, opacity }: { progress: number, colo
               ease: "linear"
             }}
           >
-            <path d={path} fill="currentColor" />
+            <path d={path} fill={resolvedColor} />
           </motion.svg>
           <motion.svg
             viewBox="0 0 1200 120"
             preserveAspectRatio="none"
-            className={`absolute top-0 left-0 w-full h-full opacity-40 ${!color.startsWith('#') ? color : ''}`}
-            style={color.startsWith('#') ? { color } : {}}
+            className="absolute top-0 left-0 w-full h-full opacity-40"
+            style={{ color: resolvedColor }}
             animate={{
               x: [-1200, 0],
             }}
@@ -216,10 +242,10 @@ const WaveEffect = ({ progress, color, type, opacity }: { progress: number, colo
               ease: "linear"
             }}
           >
-            <path d={path} fill="currentColor" />
+            <path d={path} fill={resolvedColor} />
           </motion.svg>
         </div>
-        <div className={`flex-1 w-full ${!color.startsWith('#') ? color : ''}`} style={color.startsWith('#') ? { backgroundColor: color } : { backgroundColor: 'currentColor' }} />
+        <div className="flex-1 w-full" style={{ backgroundColor: resolvedColor }} />
       </motion.div>
     </div>
   );
@@ -264,6 +290,7 @@ interface Mission {
   id: string;
   missionNo: number;
   refId: string;
+  family?: string;
   product: string;
   color: string;
   argumentType: string;
@@ -304,6 +331,29 @@ const Toggle = ({ enabled, onToggle }: { enabled: boolean, onToggle: (e: React.M
     />
   </div>
 );
+
+const deduceFamily = (productName: string): string => {
+  if (!productName) return 'Autre';
+  const name = productName.toUpperCase();
+  if (name.includes('PUNT')) return 'PUNT';
+  if (name.includes('AT ')) return 'AT';
+  if (name.includes('AT(') || name === 'AT') return 'AT';
+  if (name.includes('HARD PRO')) return 'HARD PRO';
+  if (name.includes('PWB')) return 'PWB';
+  if (name.includes('SBIN')) return 'SBIN';
+  if (name.includes('PORTRAIT')) return 'Portraits';
+  return 'Autre';
+};
+
+const getColorAccentClass = (color: string): string => {
+  const low = (color || '').toLowerCase();
+  if (low.includes('red') || low.includes('bcr')) return 'border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 hover:border-red-500/40';
+  if (low.includes('grey') || low.includes('gray')) return 'border-gray-500/30 text-gray-400 bg-gray-500/5 hover:bg-gray-500/10 hover:border-gray-500/40';
+  if (low.includes('black') || low.includes('bk')) return 'border-neutral-705 text-neutral-300 bg-neutral-800/20 hover:bg-neutral-800/30 hover:border-neutral-500';
+  if (low.includes('white') || low.includes('cr')) return 'border-white/20 text-white bg-white/5 hover:bg-white/10 hover:border-white/30';
+  if (low.includes('blue')) return 'border-blue-500/30 text-blue-400 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500/40';
+  return 'border-accent-purple/35 text-accent-purple bg-accent-purple/5 hover:bg-accent-purple/10 hover:border-accent-purple/40';
+};
 
 const StarRatingStatic = ({ rating = 0, size = 8 }: { rating?: number, size?: number }) => (
   <div className="flex gap-0.5">
@@ -479,13 +529,17 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
     }
   }, [messages]);
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-    const currentInput = input;
+  const sendMessage = async (overrideInput?: string) => {
+    const textToSend = overrideInput !== undefined ? overrideInput : input;
+    if (!textToSend.trim()) return;
+    
+    const currentInput = textToSend;
     const currentHistory = [...messages];
     
     setMessages([...currentHistory, { role: 'user', text: currentInput }]);
-    setInput('');
+    if (overrideInput === undefined) {
+      setInput('');
+    }
     setIsLoading(true);
 
     try {
@@ -518,6 +572,10 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
     }
   };
 
+  const handleQuickAction = (promptText: string) => {
+    sendMessage(promptText);
+  };
+
   return (
     <motion.div 
       drag
@@ -531,30 +589,86 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="w-[350px] bg-card-bg border border-white/10 shadow-2xl flex flex-col rounded-2xl overflow-hidden cursor-auto"
+            className="w-[370px] bg-card-bg border border-white/10 shadow-2xl flex flex-col rounded-2xl overflow-hidden cursor-auto"
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <div className="bg-white/5 border-b border-white/10 p-4 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent">
-                <Bot size={18} />
+            <div className="bg-white/5 border-b border-white/10 p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent animate-pulse">
+                  <Bot size={18} />
+                </div>
+                <div>
+                  <h3 className="text-white text-sm font-bold leading-tight flex items-center gap-1.5">
+                    Directeur de Prod IA
+                    <span className="text-[8px] bg-accent/25 text-accent border border-accent/30 font-black tracking-widest px-1 py-0.5 rounded-md uppercase font-mono">
+                      Manager Mode
+                    </span>
+                  </h3>
+                  <span className="text-[10px] text-text-dim/80">Stratégie, Familles & Notations</span>
+                </div>
               </div>
-              <div>
-                <h3 className="text-white text-sm font-bold leading-tight">Agent IA Studio</h3>
-                <span className="text-[10px] text-accent font-mono">En ligne</span>
-              </div>
+              <button 
+                onClick={() => setIsOpen(false)}
+                className="p-1 hover:bg-white/10 rounded-lg text-text-dim hover:text-white transition-colors"
+              >
+                <X size={14} />
+              </button>
             </div>
             
-            <div className="flex-1 p-4 overflow-y-auto custom-scrollbar flex flex-col gap-3 min-h-[300px] max-h-[400px]" ref={scrollRef}>
+            <div className="flex-1 p-4 overflow-y-auto custom-scrollbar flex flex-col gap-3 min-h-[350px] max-h-[420px]" ref={scrollRef}>
               {messages.length === 0 && (
-                <div className="text-center text-text-dim text-xs mt-10">
-                  <Bot size={24} className="mx-auto mb-2 opacity-50" />
-                  <p>Bonjour ! Je suis l'Agent IA.</p>
-                  <p>Comment puis-je vous aider ?</p>
+                <div className="space-y-4">
+                  <div className="text-center text-text-dim text-xs py-2">
+                    <Bot size={28} className="mx-auto mb-2 text-accent" />
+                    <p className="font-bold text-white mb-1">Bienvenue dans votre Espace de Management Constructif</p>
+                    <p className="max-w-[280px] mx-auto opacity-70 leading-relaxed text-[10px]">
+                      Je suis votre Directeur de Production IA. Je vous aide à piloter vos missions par famille de produits, auditer les notations pour viser l'excellence et orchestrer votre plan de travail.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 pt-2">
+                    <p className="text-[9px] uppercase tracking-wider text-accent font-black">Raccourcis de Gestion Directe :</p>
+                    
+                    <button 
+                      onClick={() => handleQuickAction("Fais-moi un audit complet de la charge de travail et de la répartition par famille de produits (AT, PUNT, HARD PRO, PWB, SBIN). Quels sont les goulots d'étranglement ?")}
+                      className="w-full text-left p-2.5 bg-white/5 hover:bg-accent/10 border border-white/10 hover:border-accent/30 transition-all rounded-xl text-xs text-white/90 font-medium flex items-center gap-2.5 group cursor-pointer"
+                    >
+                      <Layers size={14} className="text-accent group-hover:scale-110 transition-transform shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-[11px] truncate">📊 Audit de charge par Famille</div>
+                        <div className="text-[9px] text-text-dim truncate">Analyse des flux et blocages par gamme</div>
+                      </div>
+                    </button>
+
+                    <button 
+                      onClick={() => handleQuickAction("Analyse toutes les notations (ratings) de nos tâches par famille et format. Quels sont les points faibles techniques et comment progresser ?")}
+                      className="w-full text-left p-2.5 bg-white/5 hover:bg-accent/10 border border-white/10 hover:border-accent/30 transition-all rounded-xl text-xs text-white/90 font-medium flex items-center gap-2.5 group cursor-pointer"
+                    >
+                      <Sparkles size={14} className="text-accent group-hover:scale-110 transition-transform shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-[11px] truncate">⭐ Analyse de Qualité & Notations</div>
+                        <div className="text-[9px] text-text-dim truncate">Comment hausser nos notes de prise de vue</div>
+                      </div>
+                    </button>
+
+                    <button 
+                      onClick={() => handleQuickAction("Agis en tant que Manager de Production. Fournis-moi un plan d'action prioritaire et tes conseils de leadership constructif pour faire évoluer nos tâches.")}
+                      className="w-full text-left p-2.5 bg-white/5 hover:bg-accent/10 border border-white/10 hover:border-accent/30 transition-all rounded-xl text-xs text-white/90 font-medium flex items-center gap-2.5 group cursor-pointer"
+                    >
+                      <TrendingUp size={14} className="text-accent group-hover:scale-110 transition-transform shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-[11px] truncate">📋 Directives & Plan d'évolution</div>
+                        <div className="text-[9px] text-text-dim truncate">Feuille de route stratégique du jour</div>
+                      </div>
+                    </button>
+                  </div>
                 </div>
               )}
               {messages.map((msg, i) => (
                 <div key={i} className={`max-w-[85%] rounded-xl p-3 text-sm flex flex-col ${msg.role === 'user' ? 'bg-accent/20 text-white ml-auto border border-accent/20' : 'bg-white/5 text-white/90 mr-auto border border-white/10'}`}>
-                  {msg.text}
+                  <div className="whitespace-pre-line text-xs leading-relaxed max-w-full overflow-x-auto">
+                    {msg.text}
+                  </div>
                 </div>
               ))}
               {isLoading && (
@@ -572,12 +686,12 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder="Posez votre question..."
-                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-accent transition-colors"
+                placeholder="Posez une question de gestion ou de qualité..."
+                className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-accent transition-colors"
                 autoFocus
               />
               <button 
-                onClick={sendMessage}
+                onClick={() => sendMessage()}
                 disabled={isLoading || !input.trim()}
                 className="w-10 h-10 bg-accent text-black rounded-lg flex items-center justify-center hover:bg-accent/80 disabled:opacity-50 transition-colors shrink-0"
               >
@@ -590,10 +704,16 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
 
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="w-14 h-14 bg-gradient-to-tr from-accent to-accent-blue rounded-full flex items-center justify-center text-black shadow-[0_0_20px_rgba(0,255,148,0.3)] hover:scale-110 active:scale-95 transition-all cursor-move"
-        title="Discuter avec l'Agent IA (Déplaçable)"
+        className="w-14 h-14 bg-gradient-to-tr from-accent to-accent-blue rounded-full flex items-center justify-center text-black shadow-[0_0_20px_rgba(0,255,148,0.3)] hover:scale-110 active:scale-95 transition-all cursor-move relative"
+        title="Directeur de Production IA (Déplaçable)"
       >
         <Bot size={24} />
+        {!isOpen && messages.length === 0 && (
+          <span className="absolute -top-1 -right-1 flex h-4 w-4">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-4 w-4 bg-accent text-black text-[8px] font-black items-center justify-center">!</span>
+          </span>
+        )}
       </button>
     </motion.div>
   );
@@ -716,8 +836,16 @@ export default function App() {
     setTimeout(() => setIsRefreshingScore(false), 1500);
   };
 
-  // State for categories
-  const [categories, setCategories] = useState<CategoryConfig[]>([
+  // State for raw (manually customized) categories
+  const [rawCategories, setRawCategories] = useState<CategoryConfig[]>([
+    { 
+      id: 'family', 
+      name: 'Famille', 
+      items: ['AT', 'PUNT', 'HARD PRO', 'PWB', 'SBIN', 'Portraits', 'Autre'],
+      icon: Layers,
+      displayType: 'select',
+      colorRef: 'accent-purple'
+    },
     { 
       id: 'product', 
       name: 'Produit', 
@@ -803,7 +931,43 @@ export default function App() {
 
   // State for missions
   const [missions, setMissions] = useState<Mission[]>([]);
+
+  // Computed categories with historical items dynamically populated from existing missions list
+  const computedCategories = useMemo(() => {
+    return rawCategories.map(cat => {
+      if (cat.id === 'family' || cat.id === 'product' || cat.id === 'color') {
+        const uniqueVals = Array.from(new Set(
+          missions
+            .map(m => {
+              if (cat.id === 'family') return m.family;
+              if (cat.id === 'product') return m.product;
+              return m.color || '';
+            })
+            .filter((val): val is string => typeof val === 'string' && val.trim() !== '')
+        ));
+
+        // Filter and merge (case-insensitive deduplication)
+        const existingLower = new Set((cat.items || []).map(i => i.toLowerCase()));
+        const extraVals = uniqueVals.filter(v => !existingLower.has(v.toLowerCase()));
+
+        const combined = [
+          ...(cat.items || []),
+          ...extraVals.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+        ].filter(Boolean);
+
+        return { ...cat, items: combined };
+      }
+      return cat;
+    });
+  }, [rawCategories, missions]);
+
+  const categories = computedCategories;
+  const setCategories = setRawCategories;
   const [secondaryMissions, setSecondaryMissions] = useState<SecondaryMission[]>([]);
+  const [autoExportCalendarOnCreate, setAutoExportCalendarOnCreate] = useState<boolean>(false);
+  const [autoExportTasksOnCreate, setAutoExportTasksOnCreate] = useState<boolean>(false);
+  const [autoExportMainCalendarOnCreate, setAutoExportMainCalendarOnCreate] = useState<boolean>(false);
+  const [autoExportMainTasksOnCreate, setAutoExportMainTasksOnCreate] = useState<boolean>(false);
   const [secondaryViewMode, setSecondaryViewMode] = useState<'grid' | 'task' | 'calendar'>('grid');
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [sidebarTab, setSidebarTab] = useState<'production' | 'secondary'>('production');
@@ -815,6 +979,8 @@ export default function App() {
   const [refCounter, setRefCounter] = useState(882);
   
   // Form State
+  const [selectedFamily, setSelectedFamily] = useState('');
+  const [isFamilyDropdownOpen, setIsFamilyDropdownOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState('');
   const [selectedColor, setSelectedColor] = useState('');
   const [selectedArgument, setSelectedArgument] = useState('');
@@ -879,7 +1045,7 @@ export default function App() {
   const [inventoryPreviewData, setInventoryPreviewData] = useState<{ product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string }[]>([]);
   const [inventoryFileName, setInventoryFileName] = useState('');
   const [importDuplicateMode, setImportDuplicateMode] = useState<'skip' | 'adjust' | 'append'>('skip');
-  const [viewMode, setViewMode] = useState<'table' | 'mosaic' | 'grid' | 'task' | 'calendar'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'mosaic' | 'grid' | 'task' | 'calendar' | 'family'>('table');
   const [primaryCalendarDate, setPrimaryCalendarDate] = useState(new Date());
   const [isAdvancedSortOpen, setIsAdvancedSortOpen] = useState(false);
   
@@ -888,6 +1054,59 @@ export default function App() {
   const [bulkStatusModalOpen, setBulkStatusModalOpen] = useState(false);
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [bulkDeleteIndex, setBulkDeleteIndex] = useState(0);
+
+  // States for unified bulk editing
+  const [bulkEditEnabled, setBulkEditEnabled] = useState(true);
+  const [bulkEditUpdateEnabled, setBulkEditUpdateEnabled] = useState(false);
+  
+  const [bulkEditStatus, setBulkEditStatus] = useState('en attente');
+  const [bulkEditUpdateStatus, setBulkEditUpdateStatus] = useState(false);
+  
+  const [bulkEditDeadline, setBulkEditDeadline] = useState('');
+  const [bulkEditUpdateDeadline, setBulkEditUpdateDeadline] = useState(false);
+  
+  const [bulkEditPreparedAt, setBulkEditPreparedAt] = useState('');
+  const [bulkEditUpdatePreparedAt, setBulkEditUpdatePreparedAt] = useState(false);
+  
+  const [bulkEditShotAt, setBulkEditShotAt] = useState('');
+  const [bulkEditUpdateShotAt, setBulkEditUpdateShotAt] = useState(false);
+  
+  const [bulkEditPostProdAt, setBulkEditPostProdAt] = useState('');
+  const [bulkEditUpdatePostProdAt, setBulkEditUpdatePostProdAt] = useState(false);
+  
+  const [bulkEditDeliveredAt, setBulkEditDeliveredAt] = useState('');
+  const [bulkEditUpdateDeliveredAt, setBulkEditUpdateDeliveredAt] = useState(false);
+  
+  const [bulkEditRating, setBulkEditRating] = useState(0);
+  const [bulkEditUpdateRating, setBulkEditUpdateRating] = useState(false);
+
+  const openBulkEditModal = () => {
+    setBulkEditEnabled(true);
+    setBulkEditUpdateEnabled(false);
+    
+    setBulkEditStatus('en attente');
+    setBulkEditUpdateStatus(false);
+    
+    setBulkEditDeadline('');
+    setBulkEditUpdateDeadline(false);
+    
+    setBulkEditPreparedAt('');
+    setBulkEditUpdatePreparedAt(false);
+    
+    setBulkEditShotAt('');
+    setBulkEditUpdateShotAt(false);
+    
+    setBulkEditPostProdAt('');
+    setBulkEditUpdatePostProdAt(false);
+    
+    setBulkEditDeliveredAt('');
+    setBulkEditUpdateDeliveredAt(false);
+    
+    setBulkEditRating(0);
+    setBulkEditUpdateRating(false);
+
+    setBulkStatusModalOpen(true);
+  };
   
   // Header Style State
   const [headerBgImage, setHeaderBgImage] = useState<string | null>(null);
@@ -936,10 +1155,13 @@ export default function App() {
   const logDebounceTimers = useRef<{ [key: string]: NodeJS.Timeout }>({});
   const [tableViewState, setTableViewState] = useState<'full' | 'compact' | 'minimal'>('full');
   
-  const [compactHiddenColumns, setCompactHiddenColumns] = useState<string[]>(['imageUrl', 'color', 'argumentType', 'format', 'position', 'support', 'priority']);
-  const [minimalHiddenColumns, setMinimalHiddenColumns] = useState<string[]>(['missionNo', 'imageUrl', 'color', 'argumentType', 'univers', 'format', 'position', 'support', 'priority', 'deadline', 'info', 'rating', 'progress', 'photoCountRequested', 'photoCountDelivered', 'status', 'product']);
+  const [compactHiddenColumns, setCompactHiddenColumns] = useState<string[]>(['imageUrl', 'family', 'color', 'argumentType', 'format', 'position', 'support', 'priority']);
+  const [minimalHiddenColumns, setMinimalHiddenColumns] = useState<string[]>(['missionNo', 'imageUrl', 'family', 'color', 'argumentType', 'univers', 'format', 'position', 'support', 'priority', 'deadline', 'info', 'rating', 'progress', 'photoCountRequested', 'photoCountDelivered', 'status', 'product']);
   
   const [manualHiddenColumns, setManualHiddenColumns] = useState<string[]>([]);
+  
+  // State for changing a project's family via popup/modal
+  const [familyEditProduct, setFamilyEditProduct] = useState<{ missionId: string; currentFamily: string } | null>(null);
   
   const hiddenColumns = useMemo(() => {
     if (tableViewState === 'compact') return compactHiddenColumns;
@@ -998,6 +1220,7 @@ export default function App() {
   // Journal State
   const [systemDataJson, setSystemDataJson] = useState('');
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [isColorDropdownOpen, setIsColorDropdownOpen] = useState(false);
   const [isNavDropdownOpen, setIsNavDropdownOpen] = useState(false);
   const [isViewDropdownOpen, setIsViewDropdownOpen] = useState(false);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
@@ -1457,6 +1680,7 @@ LISTE DES COMMANDES :
           if (parsed && Array.isArray(parsed)) {
             const migrated = parsed.map((m: any) => ({
               ...m,
+              family: m.family ?? deduceFamily(m.product) ?? 'Autre',
               enabled: m.enabled ?? true,
               photoCountRequested: m.photoCountRequested ?? 1,
               photoCountDelivered: m.photoCountDelivered ?? 0
@@ -1597,20 +1821,30 @@ LISTE DES COMMANDES :
         if (savedCategories) {
           const parsed = safeParse(savedCategories);
           if (parsed && Array.isArray(parsed)) {
-            const restored = parsed.map((cat: any) => {
-              const original = categories.find(c => c.id === cat.id);
-              // Migration: ensures "En post-production" is present in the status items if missing
-              if (cat.id === 'status' && !cat.items.includes('En post-production')) {
-                const newItems = [...cat.items];
-                const index = newItems.indexOf('livré');
-                if (index !== -1) {
-                  newItems.splice(index, 0, 'En post-production');
-                } else {
-                  newItems.push('En post-production');
+            // Merge loaded list with initial categories to keep newly added ones like 'family'
+            const restored = categories.map((config) => {
+              const saved = parsed.find((p: any) => p.id === config.id);
+              if (saved) {
+                let finalItems = saved.items || config.items;
+                // Migration: ensures "En post-production" is present in the status items if missing
+                if (config.id === 'status' && !finalItems.includes('En post-production')) {
+                  const newItems = [...finalItems];
+                  const index = newItems.indexOf('livré');
+                  if (index !== -1) {
+                    newItems.splice(index, 0, 'En post-production');
+                  } else {
+                    newItems.push('En post-production');
+                  }
+                  finalItems = newItems;
                 }
-                return { ...cat, items: newItems, icon: original?.icon || ClipboardCheck };
+                return {
+                  ...config,
+                  ...saved,
+                  items: finalItems,
+                  icon: config.icon
+                };
               }
-              return { ...cat, icon: original?.icon || Package };
+              return config;
             });
             setCategories(restored);
           }
@@ -2544,6 +2778,10 @@ LISTE DES COMMANDES :
           }
         }
 
+        newMissions.forEach(m => {
+          registerNewProductOrColor(m.product, m.color);
+        });
+
         setMissions(prev => {
           const merged = [...prev, ...newMissions];
           const uniqueIds = new Set();
@@ -2722,21 +2960,77 @@ LISTE DES COMMANDES :
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
   };
 
+  const generateRichMissionDescription = (mission: Mission | SecondaryMission) => {
+    const isMain = 'missionNo' in mission;
+    const ratingVal = mission.rating || 0;
+    const stars = '⭐'.repeat(ratingVal) || 'Aucune';
+    
+    const rawPriority = mission.priority || 'medium';
+    let priorityLabel = 'Moyenne 🟡';
+    if (rawPriority.toLowerCase().includes('high')) {
+      priorityLabel = 'Haute 🔴';
+    } else if (rawPriority.toLowerCase().includes('low')) {
+      priorityLabel = 'Basse 🔵';
+    }
+
+    if (isMain) {
+      const m = mission as Mission;
+      const progressLabel = `${m.progress}% (${m.status})`;
+      return `=== MISSION DE PRODUCTION ===
+Référence unique : ${m.refId}
+Produit : ${m.product}
+Couleur : ${m.color || 'Non spécifiée'}
+Priorité : ${priorityLabel}
+Notation d'intérêt : ${stars} / 5
+Statut / Progression : ${progressLabel}
+
+=== SPÉCIFICATIONS DE SHOOT ===
+Type d'argument : ${m.argumentType || 'Non spécifié'}
+Univers : ${m.univers || 'Non spécifié'}
+Format de shoot : ${m.format || 'Non spécifié'}
+Cadrage/Position : ${m.position || 'Non spécifié'}
+Support : ${m.support || 'Non spécifié'}
+Photos demandées (Livrées) : ${m.photoCountRequested} (${m.photoCountDelivered})
+
+=== NOTES & CONSIGNES ===
+${m.info || 'Aucune consigne ou note spécifiée.'}
+
+ID de mission : ${m.id}
+Créée le : ${new Date(m.createdAt).toLocaleDateString()}
+Formatté via Mission Contrôle V3`;
+    } else {
+      const sm = mission as SecondaryMission;
+      const progressLabel = `${sm.progress}% (${sm.status})`;
+      return `=== MISSION SECONDAIRE ===
+Titre : ${sm.title}
+Priorité : ${priorityLabel}
+Notation d'intérêt : ${stars} / 5
+Statut / Progression : ${progressLabel}
+
+=== NOTES & CONSIGNES ===
+${sm.note || 'Aucune consigne ou note spécifiée.'}
+
+ID de mission : ${sm.id.toUpperCase()}
+Créée le : ${new Date(sm.createdAt).toLocaleDateString()}
+Formatté via Mission Contrôle V3`;
+    }
+  };
+
   const pushToGoogleCalendar = async (mission: Mission | SecondaryMission) => {
     if (!googleToken) {
-      setToast({ show: true, message: 'Connectez Workspace d\'abord !', type: 'alert' });
-      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      setToast({ show: true, message: 'Google Workspace non connecté. Veuillez vous connecter en haut à droite !', type: 'system' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
       return;
     }
     if (!mission.deadline) {
-      setToast({ show: true, message: 'Pas de deadline définie !', type: 'alert' });
-      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      setToast({ show: true, message: 'Veuillez définir une deadline (date limite) avant l\'export.', type: 'alert' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
       return;
     }
     try {
-      setToast({ show: true, message: 'Création de l\'évent...', type: 'task' });
-      const summary = 'missionNo' in mission ? `[Mission] ${mission.refId} - ${mission.product}` : `[Secondaire] ${mission.title}`;
-      const description = 'info' in mission ? (mission.info || '') : ('note' in mission ? (mission.note || '') : '');
+      setToast({ show: true, message: 'Export sur Google Agenda...', type: 'task' });
+      const summary = 'missionNo' in mission ? `[Shoot] ${mission.refId} - ${mission.product}` : `[Mission Sec] ${mission.title}`;
+      const description = generateRichMissionDescription(mission);
       const res = await fetch(getApiUrl('/api/calendar/event'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2748,26 +3042,29 @@ LISTE DES COMMANDES :
         })
       });
       const data = await res.json();
-      if (data.eventLink) {
-         setToast({ show: true, message: 'Ajouté au calendrier !', type: 'task' });
+      if (res.ok && data.eventLink) {
+         setToast({ show: true, message: 'Mission exportée sur Google Agenda !', type: 'calendar' });
          window.open(data.eventLink, '_blank');
+      } else {
+         throw new Error(data.error || "Erreur de réponse de l'API Agenda.");
       }
     } catch (err: any) {
-      setToast({ show: true, message: err.message, type: 'alert' });
+      console.error(err);
+      setToast({ show: true, message: `Échec de l'export Agenda : ${err.message}`, type: 'system' });
     }
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
   };
 
   const pushToGoogleTasks = async (mission: Mission | SecondaryMission) => {
     if (!googleToken) {
-      setToast({ show: true, message: 'Connectez Workspace d\'abord !', type: 'alert' });
-      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      setToast({ show: true, message: 'Google Workspace non connecté. Veuillez vous connecter en haut à droite !', type: 'system' });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
       return;
     }
     try {
-      setToast({ show: true, message: 'Création de la tâche...', type: 'task' });
-      const title = 'missionNo' in mission ? `Mission: ${mission.refId} - ${mission.product}` : `Secondaire: ${mission.title}`;
-      const notes = 'info' in mission ? (mission.info || '') : ('note' in mission ? (mission.note || '') : '');
+      setToast({ show: true, message: 'Export Google Tasks...', type: 'task' });
+      const title = 'missionNo' in mission ? `[Mission] ${mission.refId} - ${mission.product}` : `[Mission Sec] ${mission.title}`;
+      const notes = generateRichMissionDescription(mission);
       const res = await fetch(getApiUrl('/api/tasks/task'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2775,15 +3072,18 @@ LISTE DES COMMANDES :
           tokens: googleToken,
           title,
           notes,
-          due: mission.deadline || undefined
+          due: mission.deadline || new Date().toISOString().split('T')[0]
         })
       });
       const data = await res.json();
-      if (data.task) {
-         setToast({ show: true, message: 'Ajouté à Google Tasks !', type: 'task' });
+      if (res.ok && data.task) {
+         setToast({ show: true, message: 'Mission exportée dans Google Tasks !', type: 'task' });
+      } else {
+         throw new Error(data.error || "Erreur de réponse de l'API Google Tasks.");
       }
     } catch (err: any) {
-      setToast({ show: true, message: err.message, type: 'alert' });
+      console.error(err);
+      setToast({ show: true, message: `Échec de l'export Tasks : ${err.message}`, type: 'system' });
     }
     setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
   };
@@ -2807,15 +3107,28 @@ LISTE DES COMMANDES :
   useEffect(() => {
     if (categories.length === 0) return;
     
-    if (!selectedProduct && categories[0]?.items?.length > 0) setSelectedProduct(categories[0].items[0]);
-    if (!selectedColor && categories[1]?.items?.length > 0) setSelectedColor(categories[1].items[0]);
-    if (!selectedArgument && categories[2]?.items?.length > 0) setSelectedArgument(categories[2].items[0]);
-    if (!selectedUnivers && categories[3]?.items?.length > 0) setSelectedUnivers(categories[3].items[0]);
-    if (!selectedFormat && categories[4]?.items?.length > 0) setSelectedFormat(categories[4].items[0]);
-    if (!selectedPosition && categories[5]?.items?.length > 0) setSelectedPosition(categories[5].items[0]);
-    if (selectedSupport.length === 0 && categories[6]?.items?.length > 0) setSelectedSupport([categories[6].items[0]]);
-    if (!selectedPriority && categories[7]?.items?.length > 0) setSelectedPriority(categories[7].items[0]);
-    if (!selectedStatus && categories[8]?.items?.length > 0) setSelectedStatus(categories[8].items[0]);
+    const getCat = (id: string) => categories.find(c => c.id === id);
+    const famItems = getCat('family')?.items;
+    const prodItems = getCat('product')?.items;
+    const colItems = getCat('color')?.items;
+    const argItems = getCat('argument')?.items;
+    const univItems = getCat('univers')?.items;
+    const fmtItems = getCat('format')?.items;
+    const posItems = getCat('position')?.items;
+    const suppItems = getCat('support')?.items;
+    const prioItems = getCat('priority')?.items;
+    const statItems = getCat('status')?.items;
+
+    if (!selectedFamily && famItems && famItems.length > 0) setSelectedFamily(famItems[0]);
+    if (!selectedProduct && prodItems && prodItems.length > 0) setSelectedProduct(prodItems[0]);
+    if (!selectedColor && colItems && colItems.length > 0) setSelectedColor(colItems[0]);
+    if (!selectedArgument && argItems && argItems.length > 0) setSelectedArgument(argItems[0]);
+    if (!selectedUnivers && univItems && univItems.length > 0) setSelectedUnivers(univItems[0]);
+    if (!selectedFormat && fmtItems && fmtItems.length > 0) setSelectedFormat(fmtItems[0]);
+    if (!selectedPosition && posItems && posItems.length > 0) setSelectedPosition(posItems[0]);
+    if (selectedSupport.length === 0 && suppItems && suppItems.length > 0) setSelectedSupport([suppItems[0]]);
+    if (!selectedPriority && prioItems && prioItems.length > 0) setSelectedPriority(prioItems[0]);
+    if (!selectedStatus && statItems && statItems.length > 0) setSelectedStatus(statItems[0]);
   }, [categories]);
 
   const getInitialProgress = (status: string) => {
@@ -2826,6 +3139,294 @@ LISTE DES COMMANDES :
       case 'en cours de shoot': return 50;
       case 'produit préparé': return 25;
       default: return 0;
+    }
+  };
+
+  const registerNewProductOrColor = useCallback((product?: string, color?: string, family?: string) => {
+    if (!product && !color && !family) return;
+    setCategories(prev => {
+      let updated = false;
+      const next = prev.map(c => {
+        if (family && c.id === 'family') {
+          const trimmed = family.trim();
+          if (trimmed && !c.items.some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+            updated = true;
+            return {
+              ...c,
+              items: [...c.items, trimmed]
+            };
+          }
+        }
+        if (product && c.id === 'product') {
+          const trimmed = product.trim();
+          if (trimmed && !c.items.some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+            updated = true;
+            return {
+              ...c,
+              items: [...c.items, trimmed]
+            };
+          }
+        }
+        if (color && c.id === 'color') {
+          const trimmed = color.trim();
+          if (trimmed && !c.items.some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+            updated = true;
+            return {
+              ...c,
+              items: [...c.items, trimmed]
+            };
+          }
+        }
+        return c;
+      });
+      if (updated) {
+        const categoriesToSave = next.map(({ icon, ...rest }) => rest);
+        localStorage.setItem('categories', JSON.stringify(categoriesToSave));
+        console.log('[SYSTEM] Registered new product/color/family successfully:', { product, color, family });
+      }
+      return updated ? next : prev;
+    });
+  }, []);
+
+  const sendMainToGoogleCalendar = async (m: Mission) => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Google Workspace non connecté. Veuillez vous connecter en haut à droite !', type: 'system' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'system' }), 4000);
+      return;
+    }
+
+    const exportId = `calendar-${m.id}`;
+    setIsExporting(prev => ({ ...prev, [exportId]: true }));
+
+    const priorityLabel = m.priority.toLowerCase().includes('high') ? 'Haute 🔴' : m.priority.toLowerCase().includes('low') ? 'Basse 🔵' : 'Moyenne 🟡';
+    const stars = '⭐'.repeat(m.rating || 0) || 'Aucune';
+    const progressLabel = `${m.progress}% (${m.status})`;
+
+    const description = `=== MISSION DE PRODUCTION ===
+Référence unique : ${m.refId}
+Produit : ${m.product}
+Couleur : ${m.color || 'Non spécifiée'}
+Priorité : ${priorityLabel}
+Notation : ${stars} / 5
+Statut / Progression : ${progressLabel}
+
+=== SPÉCIFICATIONS DE SHOOT ===
+Type d'argument : ${m.argumentType || 'Non spécifié'}
+Univers : ${m.univers || 'Non spécifié'}
+Format de shoot : ${m.format || 'Non spécifié'}
+Cadrage/Position : ${m.position || 'Non spécifié'}
+Support : ${m.support || 'Non spécifié'}
+Photos demandées (Livrées) : ${m.photoCountRequested} (${m.photoCountDelivered})
+
+=== NOTES & CONSIGNES ===
+${m.info || 'Aucune consigne ou note spécifiée.'}
+
+ID de mission : ${m.id}
+Créée le : ${new Date(m.createdAt).toLocaleDateString()}
+Formatté via Mission Contrôle V3`;
+
+    try {
+      const response = await fetch(getApiUrl('/api/calendar/event'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokens: googleToken,
+          summary: `[Shoot] ${m.refId} - ${m.product}`,
+          description,
+          dueDate: m.deadline || new Date().toISOString().split('T')[0]
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Une erreur est survenue lors de l'export.");
+      }
+
+      setToast({ show: true, message: 'Mission de production exportée sur Google Agenda !', type: 'calendar' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'calendar' }), 4000);
+    } catch (err: any) {
+      console.error(err);
+      setToast({ show: true, message: `Échec de l'export Google Agenda : ${err.message}`, type: 'system' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'system' }), 4000);
+    } finally {
+      setIsExporting(prev => ({ ...prev, [exportId]: false }));
+    }
+  };
+
+  const sendMainToGoogleTasks = async (m: Mission) => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Google Workspace non connecté. Veuillez vous connecter en haut à droite !', type: 'system' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'system' }), 4000);
+      return;
+    }
+
+    const exportId = `tasks-${m.id}`;
+    setIsExporting(prev => ({ ...prev, [exportId]: true }));
+
+    const priorityLabel = m.priority.toLowerCase().includes('high') ? 'Haute 🔴' : m.priority.toLowerCase().includes('low') ? 'Basse 🔵' : 'Moyenne 🟡';
+    const stars = '⭐'.repeat(m.rating || 0) || 'Aucune';
+    const progressLabel = `${m.progress}% (${m.status})`;
+
+    const description = `=== MISSION DE PRODUCTION ===
+Référence unique : ${m.refId}
+Produit : ${m.product}
+Couleur : ${m.color || 'Non spécifiée'}
+Priorité : ${priorityLabel}
+Notation : ${stars} / 5
+Statut / Progression : ${progressLabel}
+
+=== SPÉCIFICATIONS DE SHOOT ===
+Type d'argument : ${m.argumentType || 'Non spécifié'}
+Univers : ${m.univers || 'Non spécifié'}
+Format de shoot : ${m.format || 'Non spécifié'}
+Cadrage/Position : ${m.position || 'Non spécifié'}
+Support : ${m.support || 'Non spécifié'}
+Photos demandées (Livrées) : ${m.photoCountRequested} (${m.photoCountDelivered})
+
+=== NOTES & CONSIGNES ===
+${m.info || 'Aucune consigne ou note spécifiée.'}
+
+ID de mission : ${m.id}
+Créée le : ${new Date(m.createdAt).toLocaleDateString()}
+Formatté via Mission Contrôle V3`;
+
+    try {
+      const response = await fetch(getApiUrl('/api/tasks/task'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokens: googleToken,
+          title: `[Mission] ${m.refId} - ${m.product}`,
+          notes: description,
+          due: m.deadline || new Date().toISOString().split('T')[0]
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Une erreur est survenue lors de l'export.");
+      }
+
+      setToast({ show: true, message: 'Mission de production exportée dans Google Tasks !', type: 'task' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 4000);
+    } catch (err: any) {
+      console.error(err);
+      setToast({ show: true, message: `Échec de l'export Google Tasks : ${err.message}`, type: 'system' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'system' }), 4000);
+    } finally {
+      setIsExporting(prev => ({ ...prev, [exportId]: false }));
+    }
+  };
+
+  const sendToGoogleCalendar = async (sm: SecondaryMission) => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Google Workspace non connecté. Veuillez vous connecter en haut à droite !', type: 'system' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'system' }), 4000);
+      return;
+    }
+
+    const exportId = `calendar-${sm.id}`;
+    setIsExporting(prev => ({ ...prev, [exportId]: true }));
+
+    const priorityLabel = sm.priority === 'high' ? 'Haute 🔴' : sm.priority === 'medium' ? 'Moyenne 🟡' : 'Basse 🔵';
+    const stars = '⭐'.repeat(sm.rating || 0) || 'Aucune';
+    const statusLabel = sm.progress >= 100 ? 'Mission Accomplie ✅' : sm.progress > 0 ? 'En cours ⚡' : 'À faire ⏳';
+
+    const description = `=== MISSION SECONDAIRE ===
+Titre : ${sm.title}
+Priorité : ${priorityLabel}
+Notation d'intérêt : ${stars} / 5
+Statut : ${statusLabel}
+Progression : ${sm.progress}%
+
+=== NOTES & CONSIGNES ===
+${sm.note || 'Aucune consigne ou note spécifiée.'}
+
+ID de mission : ${sm.id.toUpperCase()}
+Créée le : ${new Date(sm.createdAt).toLocaleDateString()}
+Formatté via Mission Contrôle V3`;
+
+    try {
+      const response = await fetch(getApiUrl('/api/calendar/event'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokens: googleToken,
+          summary: `[Mission Sec] ${sm.title}`,
+          description,
+          dueDate: sm.deadline || new Date().toISOString().split('T')[0]
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Une erreur est survenue lors de l'export.");
+      }
+
+      setToast({ show: true, message: 'Mission secondaire exportée sur Google Agenda !', type: 'calendar' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'calendar' }), 4000);
+    } catch (err: any) {
+      console.error(err);
+      setToast({ show: true, message: `Échec de l'export Google Agenda : ${err.message}`, type: 'system' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'system' }), 4000);
+    } finally {
+      setIsExporting(prev => ({ ...prev, [exportId]: false }));
+    }
+  };
+
+  const sendToGoogleTasks = async (sm: SecondaryMission) => {
+    if (!googleToken) {
+      setToast({ show: true, message: 'Google Workspace non connecté. Veuillez vous connecter en haut à droite !', type: 'system' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'system' }), 4000);
+      return;
+    }
+
+    const exportId = `tasks-${sm.id}`;
+    setIsExporting(prev => ({ ...prev, [exportId]: true }));
+
+    const priorityLabel = sm.priority === 'high' ? 'Haute 🔴' : sm.priority === 'medium' ? 'Moyenne 🟡' : 'Basse 🔵';
+    const stars = '⭐'.repeat(sm.rating || 0) || 'Aucune';
+    const statusLabel = sm.progress >= 100 ? 'Mission Accomplie ✅' : sm.progress > 0 ? 'En cours ⚡' : 'À faire ⏳';
+
+    const description = `=== MISSION SECONDAIRE ===
+Titre : ${sm.title}
+Priorité : ${priorityLabel}
+Notation d'intérêt : ${stars} / 5
+Statut : ${statusLabel}
+Progression : ${sm.progress}%
+
+=== NOTES & CONSIGNES ===
+${sm.note || 'Aucune consigne ou note spécifiée.'}
+
+ID de mission : ${sm.id.toUpperCase()}
+Créée le : ${new Date(sm.createdAt).toLocaleDateString()}
+Formatté via Mission Contrôle V3`;
+
+    try {
+      const response = await fetch(getApiUrl('/api/tasks/task'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tokens: googleToken,
+          title: `[Mission Sec] ${sm.title}`,
+          notes: description,
+          due: sm.deadline || new Date().toISOString().split('T')[0]
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Une erreur est survenue lors de l'export.");
+      }
+
+      setToast({ show: true, message: 'Mission secondaire exportée dans Google Tasks !', type: 'task' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 4000);
+    } catch (err: any) {
+      console.error(err);
+      setToast({ show: true, message: `Échec de l'export Google Tasks : ${err.message}`, type: 'system' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'system' }), 4000);
+    } finally {
+      setIsExporting(prev => ({ ...prev, [exportId]: false }));
     }
   };
 
@@ -2859,6 +3460,7 @@ LISTE DES COMMANDES :
       id: Math.random().toString(36).substring(2, 9),
       missionNo: missionCounter,
       refId: `${refPrefix} ${refCounter}`,
+      family: selectedFamily || deduceFamily(selectedProduct) || 'Autre',
       product: selectedProduct,
       color: selectedColor,
       argumentType: selectedArgument,
@@ -2920,7 +3522,18 @@ LISTE DES COMMANDES :
       console.log(`[AGENT] Planification sur ${command} détectée pour la mission #${missionCounter}`);
     }
 
+    registerNewProductOrColor(selectedProduct, selectedColor, selectedFamily || deduceFamily(selectedProduct));
     setMissions(prev => [newMission, ...prev]);
+
+    // Auto-export main mission to Google Workspace if active and authenticated
+    if (googleToken) {
+      if (autoExportMainCalendarOnCreate) {
+        sendMainToGoogleCalendar(newMission);
+      }
+      if (autoExportMainTasksOnCreate) {
+        sendMainToGoogleTasks(newMission);
+      }
+    }
     
     // Add to Global Logs
     const logMsg = `CRÉATION : Mission #${newMission.missionNo} [${newMission.refId}] - ${selectedProduct} (${selectedColor}) enregistré.${info.trim() ? ` INSTRUCTION : ${info}` : ''}`;
@@ -2939,7 +3552,7 @@ LISTE DES COMMANDES :
     setPhotoRequested(1);
     setSelectedDate('');
     setSelectedImage(null);
-  }, [missionCounter, refCounter, refPrefix, selectedProduct, selectedColor, selectedArgument, selectedUnivers, selectedFormat, selectedPosition, selectedSupport, selectedPriority, selectedStatus, selectedRating, info, selectedDate, selectedImage, photoRequested]);
+  }, [missionCounter, refCounter, refPrefix, selectedProduct, selectedColor, selectedFamily, selectedArgument, selectedUnivers, selectedFormat, selectedPosition, selectedSupport, selectedPriority, selectedStatus, selectedRating, info, selectedDate, selectedImage, photoRequested, registerNewProductOrColor, googleToken, autoExportMainCalendarOnCreate, autoExportMainTasksOnCreate, sendMainToGoogleCalendar, sendMainToGoogleTasks]);
 
   const addSecondaryMission = (title: string) => {
     const newMission: SecondaryMission = {
@@ -2955,6 +3568,16 @@ LISTE DES COMMANDES :
       enabled: true
     };
     setSecondaryMissions(prev => [newMission, ...prev]);
+    
+    // Auto-export to Google Workspace if active and authenticated
+    if (googleToken) {
+      if (autoExportCalendarOnCreate) {
+        sendToGoogleCalendar(newMission);
+      }
+      if (autoExportTasksOnCreate) {
+        sendToGoogleTasks(newMission);
+      }
+    }
     
     // Journal Logging
     const logEntry: GlobalLogEntry = {
@@ -3033,6 +3656,8 @@ LISTE DES COMMANDES :
   const removeSecondaryMission = (id: string) => {
     setSecondaryMissions(prev => prev.filter(m => m.id !== id));
   };
+
+  const [isExporting, setIsExporting] = useState<{[key: string]: boolean}>({});
 
   const cleanupDuplicates = () => {
     const groups = new Map<string, Mission[]>();
@@ -3221,6 +3846,10 @@ LISTE DES COMMANDES :
   const updateMission = (id: string, updates: Partial<Mission>) => {
     const missionBefore = missions.find(m => m.id === id);
     if (!missionBefore) return;
+
+    if (updates.product || updates.color) {
+      registerNewProductOrColor(updates.product, updates.color);
+    }
 
     const timestamp = Date.now();
     const logId = Math.random().toString(36).substring(2, 9);
@@ -3573,6 +4202,204 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     setCategories(prev => prev.map(c => c.id === catId ? { ...c, ...updates } : c));
   };
 
+  const renameFamily = (oldName: string, newName: string) => {
+    if (!newName || !newName.trim() || oldName === newName) return;
+    const trimmed = newName.trim();
+
+    // 1. Update main missions family property
+    setMissions(prevMissions => prevMissions.map(m => {
+      const currentFam = m.family || deduceFamily(m.product) || 'Autre';
+      if (currentFam === oldName) {
+        return { ...m, family: trimmed };
+      }
+      return m;
+    }));
+
+    // 2. Update the options inside categories list
+    setCategories(prevCategories => prevCategories.map(cat => {
+      if (cat.id === 'family') {
+        const items = cat.items ? [...cat.items] : [];
+        const index = items.indexOf(oldName);
+        if (index !== -1) {
+          items[index] = trimmed;
+        } else if (!items.includes(trimmed)) {
+          items.push(trimmed);
+        }
+        return { ...cat, items };
+      }
+      return cat;
+    }));
+
+    // 3. Add to system logs
+    setGlobalLogs(prev => [...prev, {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      message: `FAMILLE: Renommage de la famille "${oldName}" en "${trimmed}"`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `Famille "${oldName}" renommée en "${trimmed}" !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const toggleAllMissionsInFamily = (famName: string, enabled: boolean) => {
+    setMissions(prevMissions => prevMissions.map(m => {
+      const currentFam = m.family || deduceFamily(m.product) || 'Autre';
+      if (currentFam === famName) {
+        return { ...m, enabled };
+      }
+      return m;
+    }));
+    
+    setGlobalLogs(prev => [...prev, {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      message: `FAMILLE: ${enabled ? 'ACTIVATION' : 'DÉSACTIVATION'} de toutes les missions de la famille "${famName}"`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `Toutes les missions de la famille "${famName}" ${enabled ? 'activées' : 'désactivées'} !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const toggleAllMissionsInSubFamily = (famName: string, productName: string, colorName: string, enabled: boolean) => {
+    setMissions(prevMissions => prevMissions.map(m => {
+      const currentFam = m.family || deduceFamily(m.product) || 'Autre';
+      const mColor = m.color || 'Sans couleur';
+      if (currentFam === famName && m.product === productName && mColor === colorName) {
+        return { ...m, enabled };
+      }
+      return m;
+    }));
+
+    setGlobalLogs(prev => [...prev, {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      message: `FAMILLE: ${enabled ? 'ACTIVATION' : 'DÉSACTIVATION'} de la sous-famille "${productName} (${colorName})"`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `Sous-famille "${productName} (${colorName})" ${enabled ? 'activée' : 'désactivée'} !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const moveSubFamilyToFamily = (productName: string, colorName: string, targetFamily: string) => {
+    setMissions(prevMissions => prevMissions.map(m => {
+      const mColor = m.color || 'Sans couleur';
+      if (m.product === productName && mColor === colorName) {
+        return { ...m, family: targetFamily };
+      }
+      return m;
+    }));
+
+    setGlobalLogs(prev => [...prev, {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      message: `FAMILLE: Déplacement de la sous-famille "${productName} (${colorName})" vers la famille "${targetFamily}"`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `Sous-famille "${productName} (${colorName})" déplacée vers "${targetFamily}" !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const moveMultipleSubFamiliesToFamily = (subFamiliesToMove: { productName: string, colorName: string }[], targetFamily: string) => {
+    setMissions(prevMissions => prevMissions.map(m => {
+      const mColor = m.color || 'Sans couleur';
+      const shouldMove = subFamiliesToMove.some(sf => sf.productName === m.product && sf.colorName === mColor);
+      if (shouldMove) {
+        return { ...m, family: targetFamily };
+      }
+      return m;
+    }));
+
+    setGlobalLogs(prev => [...prev, {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      message: `FAMILLE: Déplacement de ${subFamiliesToMove.length} sous-familles vers la famille "${targetFamily}"`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `${subFamiliesToMove.length} sous-familles déplacées vers "${targetFamily}" !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const moveMissionToFamily = (missionId: string, targetFamily: string, targetProduct?: string, targetColor?: string) => {
+    setMissions(prevMissions => prevMissions.map(m => {
+      if (m.id === missionId) {
+        return { 
+          ...m, 
+          family: targetFamily,
+          ...(targetProduct !== undefined ? { product: targetProduct } : {}),
+          ...(targetColor !== undefined ? { color: targetColor === 'Sans couleur' ? '' : targetColor } : {})
+        };
+      }
+      return m;
+    }));
+
+    setGlobalLogs(prev => [...prev, {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      message: `FAMILLE: Déplacement de la mission #${missionId} vers la famille "${targetFamily}"${targetProduct ? ` (sous-famille: ${targetProduct} | ${targetColor})` : ''}`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `Mission déplacée${targetProduct ? ` vers sous-famille "${targetProduct} - ${targetColor}"` : ` vers "${targetFamily}"`} !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
+  const moveMultipleMissionsToFamily = (missionIds: string[], targetFamily: string, targetProduct?: string, targetColor?: string) => {
+    setMissions(prevMissions => prevMissions.map(m => {
+      if (missionIds.includes(m.id)) {
+        return { 
+          ...m, 
+          family: targetFamily,
+          ...(targetProduct !== undefined ? { product: targetProduct } : {}),
+          ...(targetColor !== undefined ? { color: targetColor === 'Sans couleur' ? '' : targetColor } : {})
+        };
+      }
+      return m;
+    }));
+
+    setGlobalLogs(prev => [...prev, {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      message: `FAMILLE: Déplacement de ${missionIds.length} missions vers la famille "${targetFamily}"${targetProduct ? ` (sous-famille: ${targetProduct} | ${targetColor})` : ''}`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `${missionIds.length} missions déplacées${targetProduct ? ` vers sous-famille "${targetProduct} - ${targetColor}"` : ` vers "${targetFamily}"`} !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
   const activeMissions = useMemo(() => missions.filter(m => m.enabled), [missions]);
 
   const dashboardStats = useMemo(() => {
@@ -3590,7 +4417,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       total: secondaryMissionsFiltered.length,
       completed: secondaryMissionsFiltered.filter(m => m.progress >= 100).length,
       avgProgress: secondaryMissionsFiltered.length > 0
-        ? secondaryMissionsFiltered.reduce((acc, m) => acc + m.progress, 0) / secondaryMissionsFiltered.length
+        ? secondaryMissionsFiltered.reduce((acc, m) => acc + (typeof m.progress === 'number' && !isNaN(m.progress) ? m.progress : 0), 0) / secondaryMissionsFiltered.length
         : 0
     };
 
@@ -3652,7 +4479,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   const avgRating = dashboardStats.avgRating;
 
   const avgProgress = activeMissions.length > 0 
-    ? Math.round(activeMissions.reduce((acc, m) => acc + m.progress, 0) / activeMissions.length) 
+    ? Math.round(activeMissions.reduce((acc, m) => acc + (typeof m.progress === 'number' && !isNaN(m.progress) ? m.progress : 0), 0) / activeMissions.length) 
     : 0;
 
   const handleFeedbackSubmit = () => {
@@ -4019,6 +4846,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       </div>
     );
   };
+
+
   const PrimaryTaskView = () => {
     return (
       <div className="space-y-3">
@@ -5846,26 +6675,44 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <div className="flex items-center gap-4">
                         <input 
                           type="color" 
-                          value={waveColor.startsWith('#') ? waveColor : '#00FF94'}
+                          value={
+                            waveColor.startsWith('#') ? waveColor : 
+                            waveColor === 'text-accent' ? accentColor : 
+                            waveColor === 'text-accent-blue' ? accentBlueColor : 
+                            waveColor === 'text-accent-purple' ? accentPurpleColor : 
+                            waveColor === 'text-accent-orange' ? accentOrangeColor : 
+                            waveColor === 'text-accent-pink' ? accentPinkColor : 
+                            waveColor === 'text-accent-red' ? accentRedColor : 
+                            waveColor === 'text-accent-yellow' ? accentYellowColor : 
+                            '#00FF94'
+                          }
                           onChange={(e) => setWaveColor(e.target.value)}
                           className="w-12 h-12 rounded-xl bg-transparent cursor-pointer border-none p-0"
                         />
-                        <div className="flex-1 flex gap-2">
-                          {['text-accent', 'text-accent-blue', 'text-accent-purple'].map(c => (
-                            <button 
-                              key={c}
-                              onClick={() => setWaveColor(c)}
-                              className={`w-8 h-8 rounded-lg border transition-all ${waveColor === c ? 'border-white scale-110 shadow-[0_0_10px_currentColor]' : 'border-white/10 opacity-60 hover:opacity-100'}`}
-                              style={{ 
-                                backgroundColor: c === 'text-accent' ? '#00FF94' : 
-                                               c === 'text-accent-blue' ? '#00D1FF' : 
-                                               '#BF7AF0',
-                                color: c === 'text-accent' ? '#00FF94' : 
-                                       c === 'text-accent-blue' ? '#00D1FF' : 
-                                       '#BF7AF0'
-                              }}
-                            />
-                          ))}
+                        <div className="flex-grow flex items-center gap-2">
+                          <div className="flex gap-2">
+                            {['text-accent', 'text-accent-blue', 'text-accent-purple'].map(c => {
+                              const btnColor = 
+                                c === 'text-accent' ? accentColor : 
+                                c === 'text-accent-blue' ? accentBlueColor : 
+                                accentPurpleColor;
+                              return (
+                                <button 
+                                  key={c}
+                                  onClick={() => setWaveColor(c)}
+                                  className={`w-8 h-8 rounded-lg border transition-all ${waveColor === c ? 'border-white scale-110 shadow-[0_0_10px_currentColor]' : 'border-white/10 opacity-60 hover:opacity-100'}`}
+                                  style={{ 
+                                    backgroundColor: btnColor,
+                                    color: btnColor
+                                  }}
+                                  title={c}
+                                />
+                              );
+                            })}
+                          </div>
+                          <span className="text-[10px] font-mono text-white/40 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5 select-all ml-2">
+                            {waveColor}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -7155,6 +8002,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       });
 
       if (newMissions.length > 0) {
+        newMissions.forEach(m => {
+          registerNewProductOrColor(m.product, m.color);
+        });
         setMissions(prev => [...newMissions, ...prev]);
         setMissionCounter(localMissionCounter);
         setRefCounter(localRefCounter);
@@ -7677,6 +8527,131 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
   };
 
+  const handleBulkUpdate = (updates: {
+    enabled?: boolean;
+    status?: string;
+    deadline?: string;
+    preparedAt?: string;
+    shotAt?: string;
+    postProdAt?: string;
+    deliveredAt?: string;
+    rating?: number;
+    updateEnabled: boolean;
+    updateStatus: boolean;
+    updateDeadline: boolean;
+    updatePrepared: boolean;
+    updateShot: boolean;
+    updatePostProd: boolean;
+    updateDelivered: boolean;
+    updateRating: boolean;
+  }) => {
+    const updatedCount = selectedMissionIds.length;
+    if (updatedCount === 0) return;
+
+    setMissions(prev => prev.map(m => {
+      if (selectedMissionIds.includes(m.id)) {
+        const nextMission = { ...m };
+        const history = m.history ? [...m.history] : [];
+        let changed = false;
+
+        if (updates.updateEnabled && updates.enabled !== undefined && updates.enabled !== m.enabled) {
+          nextMission.enabled = updates.enabled;
+          history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Visibilité changée à ${updates.enabled ? 'Actif (ON)' : 'Inactif (OFF)'}` });
+          changed = true;
+        }
+
+        if (updates.updateStatus && updates.status) {
+          const newStatus = updates.status;
+          if (newStatus !== m.status) {
+            nextMission.status = newStatus;
+            
+            // Calculate progress
+            let progress = m.progress;
+            switch (newStatus) {
+              case 'livré': 
+                if ((m.photoCountDelivered || 0) > 0) {
+                  progress = Math.round(((m.photoCountDelivered || 0) / (m.photoCountRequested || 1)) * 100);
+                } else {
+                  progress = 100;
+                }
+                break;
+              case 'En post-production': progress = 85; break;
+              case 'shooté': progress = 75; break;
+              case 'en cours de shoot': progress = 50; break;
+              case 'produit préparé': progress = 25; break;
+              case 'en attente': progress = 0; break;
+            }
+            nextMission.progress = progress;
+
+            history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Statut changé à "${newStatus}"` });
+            if (progress !== m.progress) {
+              history.push({ timestamp: Date.now(), message: `Progression synchronisée à ${progress}%` });
+            }
+            changed = true;
+          }
+        }
+
+        if (updates.updateDeadline && updates.deadline !== undefined && updates.deadline !== m.deadline) {
+          nextMission.deadline = updates.deadline;
+          history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Deadline changée à "${updates.deadline || 'aucune'}"` });
+          changed = true;
+        }
+
+        if (updates.updatePrepared && updates.preparedAt !== undefined && updates.preparedAt !== m.preparedAt) {
+          nextMission.preparedAt = updates.preparedAt;
+          history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Date Produit Préparé changée à "${updates.preparedAt || 'aucune'}"` });
+          changed = true;
+        }
+
+        if (updates.updateShot && updates.shotAt !== undefined && updates.shotAt !== m.shotAt) {
+          nextMission.shotAt = updates.shotAt;
+          history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Date Shooté changée à "${updates.shotAt || 'aucune'}"` });
+          changed = true;
+        }
+
+        if (updates.updatePostProd && updates.postProdAt !== undefined && updates.postProdAt !== m.postProdAt) {
+          nextMission.postProdAt = updates.postProdAt;
+          history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Date Post-Prod changée à "${updates.postProdAt || 'aucune'}"` });
+          changed = true;
+        }
+
+        if (updates.updateDelivered && updates.deliveredAt !== undefined && updates.deliveredAt !== m.deliveredAt) {
+          nextMission.deliveredAt = updates.deliveredAt;
+          history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Date Livré changée à "${updates.deliveredAt || 'aucune'}"` });
+          changed = true;
+        }
+
+        if (updates.updateRating && updates.rating !== undefined && updates.rating !== m.rating) {
+          nextMission.rating = updates.rating;
+          history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Note changée à ${updates.rating}/5` });
+          changed = true;
+        }
+
+        if (changed) {
+          nextMission.history = history;
+          nextMission.updatedAt = Date.now();
+          return nextMission;
+        }
+      }
+      return m;
+    }));
+
+    setGlobalLogs(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: Date.now(),
+        message: `ÉDITION EN MASSE : ${updatedCount} missions modifiées.`,
+        type: 'mission'
+      }
+    ]);
+
+    setBulkStatusModalOpen(false);
+    setSelectedMissionIds([]);
+    setToast({ show: true, message: `${updatedCount} missions mises à jour`, type: 'task' });
+    setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+  };
+
   const startBulkDelete = () => {
     setBulkDeleteIndex(0);
     setIsBulkDeleteModalOpen(true);
@@ -7945,7 +8920,21 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               }} 
             />
           )}
-          {WaveEffect({ progress: avgProgress, color: waveColor, type: waveType, opacity: waveOpacity })}
+           {WaveEffect({ 
+            progress: avgProgress, 
+            color: 
+              waveColor.startsWith('#') ? waveColor : 
+              waveColor === 'text-accent' ? accentColor : 
+              waveColor === 'text-accent-blue' ? accentBlueColor : 
+              waveColor === 'text-accent-purple' ? accentPurpleColor : 
+              waveColor === 'text-accent-orange' ? accentOrangeColor : 
+              waveColor === 'text-accent-pink' ? accentPinkColor : 
+              waveColor === 'text-accent-red' ? accentRedColor : 
+              waveColor === 'text-accent-yellow' ? accentYellowColor : 
+              '#00FF94', 
+            type: waveType, 
+            opacity: waveOpacity 
+          })}
           <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-accent/30 to-transparent z-10"></div>
           <div className="absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/5 to-transparent z-10"></div>
           
@@ -8115,21 +9104,21 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               <span className="text-[9px] font-black uppercase text-white/40 tracking-[2px]">Configuration Tools</span>
               <button 
                 onClick={() => {
-                  if (collapsedCategories.length === categories.length) {
+                  if (collapsedCategories.length === computedCategories.length) {
                     setCollapsedCategories([]);
                   } else {
-                    setCollapsedCategories(categories.map(c => c.id));
+                    setCollapsedCategories(computedCategories.map(c => c.id));
                   }
                 }}
                 className="text-[9px] font-black uppercase text-accent hover:text-white transition-colors flex items-center gap-2"
               >
-                {collapsedCategories.length === categories.length ? <Maximize size={10} /> : <Minimize size={10} />}
-                {collapsedCategories.length === categories.length ? 'Tout Développer' : 'Tout Rétracter'}
+                {collapsedCategories.length === computedCategories.length ? <Maximize size={10} /> : <Minimize size={10} />}
+                {collapsedCategories.length === computedCategories.length ? 'Tout Développer' : 'Tout Rétracter'}
               </button>
             </div>
             
             {/* Selection Categories */}
-            {categories.map((cat) => {
+            {computedCategories.map((cat) => {
               if (!cat) return null;
               const isCollapsed = collapsedCategories.includes(cat.id);
               const isHex = cat.colorRef?.startsWith('#');
@@ -8195,9 +9184,76 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        className={`${cat.id === 'product' && isProductDropdownOpen ? 'overflow-visible' : 'overflow-hidden'} space-y-3`}
+                        className={`${((cat.id === 'product' && isProductDropdownOpen) || (cat.id === 'color' && isColorDropdownOpen) || (cat.id === 'family' && isFamilyDropdownOpen)) ? 'overflow-visible' : 'overflow-hidden'} space-y-3`}
                       >
-                        {cat.id === 'product' ? (
+                        {cat.id === 'family' ? (
+                          <div className={`relative group ${isFamilyDropdownOpen ? 'z-[165]' : 'z-10'}`}>
+                            <input 
+                              type="text"
+                              value={selectedFamily}
+                              onChange={(e) => {
+                                setSelectedFamily(e.target.value);
+                                if (!isFamilyDropdownOpen) setIsFamilyDropdownOpen(true);
+                              }}
+                              onFocus={() => setIsFamilyDropdownOpen(true)}
+                              placeholder="Famille de produit..."
+                              className="w-full bg-card-bg border border-border p-3 pr-10 rounded-md text-white outline-none focus:border-accent transition-all text-sm focus:ring-1 focus:ring-accent/30 relative z-[166]"
+                              style={isHex ? { borderColor: `${cat.colorRef}40`, boxShadow: `0 0 0 1px ${cat.colorRef}20` } : {}}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setIsFamilyDropdownOpen(!isFamilyDropdownOpen)}
+                              className="absolute right-0 top-0 h-full px-3 text-text-dim hover:text-accent transition-colors z-[167]"
+                            >
+                              <ChevronDown size={14} className={isFamilyDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                            </button>
+                            
+                            <AnimatePresence>
+                              {isFamilyDropdownOpen && (
+                                <motion.div
+                                  key="family-dropdown"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                >
+                                  <div 
+                                    className="fixed inset-0 z-[140] bg-black/20 backdrop-blur-[1px]" 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setIsFamilyDropdownOpen(false);
+                                    }}
+                                  />
+                                  <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="absolute top-full left-0 w-full mt-1 bg-[#1A1A1A] border border-white/10 rounded-md shadow-2xl z-[155] max-h-60 overflow-y-auto custom-scrollbar"
+                                  >
+                                  {(cat.items || [])
+                                    .filter(item => item.toLowerCase().includes((selectedFamily || '').toLowerCase()))
+                                    .map(item => (
+                                      <button
+                                        key={item}
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedFamily(item);
+                                          setIsFamilyDropdownOpen(false);
+                                        }}
+                                        className="w-full text-left px-4 py-2 text-[11px] text-white/70 hover:bg-accent/10 hover:text-accent transition-colors border-b border-white/5 last:border-0"
+                                      >
+                                        {item}
+                                      </button>
+                                    ))}
+                                  {((cat.items || []).filter(item => item.toLowerCase().includes((selectedFamily || '').toLowerCase()))).length === 0 && (
+                                    <div className="px-4 py-3 text-[10px] text-white/30 italic">Aucun résultat</div>
+                                  )}
+                                  </motion.div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        ) : cat.id === 'product' ? (
                           <div className={`relative group ${isProductDropdownOpen ? 'z-[160]' : 'z-10'}`}>
                             <input 
                               type="text"
@@ -8256,6 +9312,73 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                       </button>
                                     ))}
                                   {((cat.items || []).filter(item => item.toLowerCase().includes((selectedProduct || '').toLowerCase()))).length === 0 && (
+                                    <div className="px-4 py-3 text-[10px] text-white/30 italic">Aucun résultat</div>
+                                  )}
+                                </motion.div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                          </div>
+                        ) : cat.id === 'color' ? (
+                          <div className={`relative group ${isColorDropdownOpen ? 'z-[160]' : 'z-10'}`}>
+                            <input 
+                              type="text"
+                              value={selectedColor}
+                              onChange={(e) => {
+                                setSelectedColor(e.target.value);
+                                if (!isColorDropdownOpen) setIsColorDropdownOpen(true);
+                              }}
+                              onFocus={() => setIsColorDropdownOpen(true)}
+                              placeholder="Couleur du produit..."
+                              className="w-full bg-card-bg border border-border p-3 pr-10 rounded-md text-white outline-none focus:border-accent transition-all text-sm focus:ring-1 focus:ring-accent/30 relative z-[161]"
+                              style={isHex ? { borderColor: `${cat.colorRef}40`, boxShadow: `0 0 0 1px ${cat.colorRef}20` } : {}}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setIsColorDropdownOpen(!isColorDropdownOpen)}
+                              className="absolute right-0 top-0 h-full px-3 text-text-dim hover:text-accent transition-colors z-[162]"
+                            >
+                              <ChevronDown size={14} className={isColorDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                            </button>
+                            
+                            <AnimatePresence>
+                              {isColorDropdownOpen && (
+                                <motion.div
+                                  key="color-dropdown"
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 0 }}
+                                >
+                                  <div 
+                                    className="fixed inset-0 z-[140] bg-black/20 backdrop-blur-[1px]" 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setIsColorDropdownOpen(false);
+                                    }}
+                                  />
+                                  <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="absolute top-full left-0 w-full mt-1 bg-[#1A1A1A] border border-white/10 rounded-md shadow-2xl z-[155] max-h-60 overflow-y-auto custom-scrollbar"
+                                  >
+                                  {(cat.items || [])
+                                    .filter(item => item.toLowerCase().includes((selectedColor || '').toLowerCase()))
+                                    .map(item => (
+                                      <button
+                                        key={item}
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedColor(item);
+                                          setIsColorDropdownOpen(false);
+                                        }}
+                                        className="w-full text-left px-4 py-2 text-[11px] text-white/70 hover:bg-accent/10 hover:text-accent transition-colors border-b border-white/5 last:border-0"
+                                      >
+                                        {item}
+                                      </button>
+                                    ))}
+                                  {((cat.items || []).filter(item => item.toLowerCase().includes((selectedColor || '').toLowerCase()))).length === 0 && (
                                     <div className="px-4 py-3 text-[10px] text-white/30 italic">Aucun résultat</div>
                                   )}
                                 </motion.div>
@@ -8496,6 +9619,54 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               </div>
             </div>
 
+            <div className="flex flex-col gap-3 pt-4 border-t border-white/5">
+              <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center justify-between">
+                <span className="flex items-center gap-2 text-white/50">
+                  <Globe size={12} className="text-[#4285F4]" />
+                  Synchronisation Automatique
+                </span>
+                {!googleToken && (
+                  <span className="text-[9px] text-[#4285F4]/90 font-mono font-medium normal-case bg-[#4285F4]/10 border border-[#4285F4]/20 px-2 py-0.5 rounded-full select-none">
+                    Non connecté
+                  </span>
+                )}
+              </label>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  disabled={!googleToken}
+                  onClick={() => setAutoExportMainCalendarOnCreate(prev => !prev)}
+                  className={`flex items-center justify-center gap-2 py-3 px-2 border rounded-xl text-[10px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
+                    !googleToken ? 'opacity-30 cursor-not-allowed border-white/5 bg-transparent text-white/20' :
+                    autoExportMainCalendarOnCreate
+                      ? 'bg-accent-yellow/15 border border-accent-yellow/40 text-accent-yellow shadow-[0_0_15px_rgba(234,179,8,0.15)]'
+                      : 'bg-white/5 border-white/10 text-white/50 hover:border-white/20 hover:text-white'
+                  }`}
+                  title={googleToken ? "Ajouter automatiquement à Google Agenda à l'enregistrement" : "Veuillez vous connecter à Google pour activer cette option"}
+                >
+                  <Calendar size={12} />
+                  Google Agenda
+                </button>
+                
+                <button
+                  type="button"
+                  disabled={!googleToken}
+                  onClick={() => setAutoExportMainTasksOnCreate(prev => !prev)}
+                  className={`flex items-center justify-center gap-2 py-3 px-2 border rounded-xl text-[10px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
+                    !googleToken ? 'opacity-30 cursor-not-allowed border-white/5 bg-transparent text-white/20' :
+                    autoExportMainTasksOnCreate
+                      ? 'bg-accent-blue/15 border border-accent-blue/40 text-accent-blue shadow-[0_0_15px_rgba(0,209,255,0.15)]'
+                      : 'bg-white/5 border-white/10 text-white/50 hover:border-white/20 hover:text-white'
+                  }`}
+                  title={googleToken ? "Créer automatiquement une tâche Google Tasks à l'enregistrement" : "Veuillez vous connecter à Google pour activer cette option"}
+                >
+                  <CheckSquare size={12} />
+                  Google Tasks
+                </button>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-3">
               <button 
                 onClick={addMission}
@@ -8603,6 +9774,54 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     rows={4}
                     className="w-full bg-card-bg border border-border p-3 rounded-md text-white outline-none focus:border-accent-blue transition-all text-sm resize-none"
                   />
+                </div>
+
+                <div className="flex flex-col gap-3 pt-4 border-t border-white/5">
+                  <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-white/50">
+                      <Globe size={12} className="text-[#4285F4]" />
+                      Synchronisation Automatique
+                    </span>
+                    {!googleToken && (
+                      <span className="text-[9px] text-[#4285F4]/90 font-mono font-medium normal-case bg-[#4285F4]/10 border border-[#4285F4]/20 px-2 py-0.5 rounded-full select-none">
+                        Non connecté
+                      </span>
+                    )}
+                  </label>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      disabled={!googleToken}
+                      onClick={() => setAutoExportCalendarOnCreate(prev => !prev)}
+                      className={`flex items-center justify-center gap-2 py-3 px-2 border rounded-xl text-[10px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
+                        !googleToken ? 'opacity-30 cursor-not-allowed border-white/5 bg-transparent text-white/20' :
+                        autoExportCalendarOnCreate
+                          ? 'bg-accent-yellow/15 border border-accent-yellow/40 text-accent-yellow shadow-[0_0_15px_rgba(234,179,8,0.15)]'
+                          : 'bg-white/5 border-white/10 text-white/50 hover:border-white/20 hover:text-white'
+                      }`}
+                      title={googleToken ? "Ajouter automatiquement à Google Agenda à l'enregistrement" : "Veuillez vous connecter à Google pour activer cette option"}
+                    >
+                      <Calendar size={12} />
+                      Google Agenda
+                    </button>
+                    
+                    <button
+                      type="button"
+                      disabled={!googleToken}
+                      onClick={() => setAutoExportTasksOnCreate(prev => !prev)}
+                      className={`flex items-center justify-center gap-2 py-3 px-2 border rounded-xl text-[10px] font-black uppercase tracking-wider transition-all select-none cursor-pointer ${
+                        !googleToken ? 'opacity-30 cursor-not-allowed border-white/5 bg-transparent text-white/20' :
+                        autoExportTasksOnCreate
+                          ? 'bg-accent-blue/15 border border-accent-blue/40 text-accent-blue shadow-[0_0_15px_rgba(0,209,255,0.15)]'
+                          : 'bg-white/5 border-white/10 text-white/50 hover:border-white/20 hover:text-white'
+                      }`}
+                      title={googleToken ? "Créer automatiquement une tâche Google Tasks à l'enregistrement" : "Veuillez vous connecter à Google pour activer cette option"}
+                    >
+                      <CheckSquare size={12} />
+                      Google Tasks
+                    </button>
+                  </div>
                 </div>
 
                 <button 
@@ -9049,6 +10268,16 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     <Calendar size={10} />
                                     <span className="text-[8px] uppercase tracking-widest">Cal.</span>
                                   </button>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewMode('family');
+                                    }}
+                                    className={`flex items-center justify-center gap-2 py-1.5 rounded transition-all ${viewMode === 'family' ? 'bg-accent text-black font-black' : 'text-text-dim hover:text-white'}`}
+                                  >
+                                    <Layers size={10} />
+                                    <span className="text-[8px] uppercase tracking-widest">Famille</span>
+                                  </button>
                                 </div>
                               </div>
 
@@ -9148,6 +10377,19 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                          onClick={() => setViewMode('calendar')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'calendar' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
                          title="Mode Calendrier"
+                       >
+                         <Calendar size={14} />
+                       </button>
+                       <button 
+                         onClick={() => setViewMode('family')}
+                         className={`p-1.5 rounded transition-all ${viewMode === 'family' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
+                         title="Mode Familles & Sous-Familles"
+                       >
+                         <Layers size={14} />
+                       </button>
+                       <button 
+                         title="Spacer"
+                         className="hidden"
                        >
                          <Calendar size={14} />
                        </button>
@@ -9544,6 +10786,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                 { id: 'missionNo', label: 'ID.Ref', class: 'w-16 text-center text-accent' },
                                 { id: 'refId', label: 'Reference', class: 'w-24 text-accent-blue font-mono' },
                                 { id: 'imageUrl', label: 'Capture', class: 'w-16 text-center text-text-dim', sortable: false },
+                                { id: 'family', label: 'Famille', class: 'text-accent-purple/80 w-32 font-bold' },
                                 { id: 'product', label: 'Product Name', class: 'text-white' },
                                 { id: 'color', label: 'Variant', class: 'text-text-dim/60 w-32' },
                                 { id: 'argumentType', label: 'Arg.', class: 'text-accent-blue/80 w-24' },
@@ -9609,7 +10852,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         animate={{ opacity: 0.2 }}
                         exit={{ opacity: 0 }}
                       >
-                        <td colSpan={21 - hiddenColumns.length} className="py-24 text-center">
+                        <td colSpan={22 - hiddenColumns.length} className="py-24 text-center">
                           <div className="flex flex-col items-center gap-4 opacity-20">
                             <Layers size={48} className="text-text-dim" />
                             <p className="text-xs uppercase tracking-[4px]">
@@ -9647,7 +10890,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           {!hiddenColumns.includes('missionNo') && <td className="py-4 px-3 font-mono text-[11px] text-accent/80">#{m.missionNo}</td>}
                           {!hiddenColumns.includes('refId') && <td className="py-4 px-3 font-mono text-[11px] font-bold whitespace-nowrap" style={{ color: refIdColor }}>{m.refId}</td>}
                           {!hiddenColumns.includes('imageUrl') && (
-                            <td className="py-4 px-3 text-center">
+                            <td className="py-4 px-3 text-center border-r border-white/5">
                               {m.imageUrl ? (
                                 <div className="w-10 h-10 border border-white/10 rounded overflow-hidden mx-auto bg-black/40">
                                   <img src={m.imageUrl} alt="Mission thumbnail" className="w-full h-full object-cover" />
@@ -9657,6 +10900,38 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                   <ImageIcon size={12} />
                                 </div>
                               )}
+                            </td>
+                          )}
+                          {!hiddenColumns.includes('family') && (
+                            <td 
+                              className="py-4 px-3 border-r border-white/5"
+                              onClick={(e) => e.stopPropagation()}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setFamilyEditProduct({
+                                  missionId: m.id,
+                                  currentFamily: m.family || deduceFamily(m.product) || 'Autre'
+                                });
+                              }}
+                            >
+                              <div className="flex items-center gap-2 group/fam-cell cursor-pointer">
+                                <span className="px-2.5 py-1 rounded bg-accent-purple/10 border border-accent-purple/20 text-[9px] font-mono font-black text-accent-purple tracking-widest uppercase hover:bg-accent-purple/25 transition-colors">
+                                  {m.family || deduceFamily(m.product) || 'Autre'}
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFamilyEditProduct({
+                                      missionId: m.id,
+                                      currentFamily: m.family || deduceFamily(m.product) || 'Autre'
+                                    });
+                                  }}
+                                  className="p-1 text-text-dim hover:text-white bg-white/0 hover:bg-white/10 rounded transition-all opacity-0 group-hover/fam-cell:opacity-100"
+                                  title="Changer la famille (double-cliquer pour pop-up)"
+                                >
+                                  <Edit2 size={10} />
+                                </button>
+                              </div>
                             </td>
                           )}
                           {!hiddenColumns.includes('product') && (
@@ -10046,6 +11321,28 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             {(viewMode === 'mosaic' || viewMode === 'grid') && MosaicView()}
             {viewMode === 'task' && PrimaryTaskView()}
             {viewMode === 'calendar' && PrimaryCalendarView()}
+            {viewMode === 'family' && (
+              <FamilyGroupView 
+                filteredMissions={filteredMissions}
+                setSelectedMissionId={setSelectedMissionId}
+                refIdColor={refIdColor}
+                isDeadlineApproaching={isDeadlineApproaching}
+                onRenameFamily={renameFamily}
+                onToggleMissionEnabled={toggleMissionEnabled}
+                onToggleAllMissionsInFamily={toggleAllMissionsInFamily}
+                onToggleAllMissionsInSubFamily={toggleAllMissionsInSubFamily}
+                onMoveSubFamilyToFamily={moveSubFamilyToFamily}
+                onMoveMultipleSubFamilies={moveMultipleSubFamiliesToFamily}
+                allFamilies={categories.find(c => c.id === 'family')?.items || ['AT', 'PUNT', 'HARD PRO', 'PWB', 'SBIN', 'Portraits', 'Autre']}
+                selectedMissionIds={selectedMissionIds}
+                setSelectedMissionIds={setSelectedMissionIds}
+                onToggleSelectMission={toggleSelectMission}
+                onMoveMissionToFamily={moveMissionToFamily}
+                onMoveMultipleMissions={moveMultipleMissionsToFamily}
+                showDuplicateIndicators={showDuplicateIndicators}
+                isDuplicate={isDuplicate}
+              />
+            )}
             </>
           )}
         </div>
@@ -10212,6 +11509,37 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         className="w-full bg-white/[0.03] border border-white/5 p-3 rounded-xl text-[10px] text-white/80 outline-none focus:border-accent-blue/40 resize-none transition-all placeholder:opacity-20"
                       />
                     </div>
+
+                    {/* Exports Google Calendar / Tasks */}
+                    <div className="mt-4 pt-4 border-t border-white/5 flex gap-2">
+                       <button
+                         onClick={() => sendToGoogleCalendar(sm)}
+                         disabled={isExporting[`calendar-${sm.id}`]}
+                         className="flex-1 py-2 px-2 bg-white/5 hover:bg-accent-yellow/15 border border-white/10 hover:border-accent-yellow/30 text-white/70 hover:text-accent-yellow rounded-xl text-[9px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                         title="Envoyer sur mon Google Agenda (Calendar)"
+                       >
+                         {isExporting[`calendar-${sm.id}`] ? (
+                           <Loader2 size={10} className="animate-spin text-accent-yellow" />
+                         ) : (
+                           <Calendar size={10} />
+                         )}
+                         <span>Google Agenda</span>
+                       </button>
+                       <button
+                         onClick={() => sendToGoogleTasks(sm)}
+                         disabled={isExporting[`tasks-${sm.id}`]}
+                         className="flex-1 py-2 px-2 bg-white/5 hover:bg-accent-blue/15 border border-white/10 hover:border-accent-blue/30 text-white/70 hover:text-accent-blue rounded-xl text-[9px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                         title="Envoyer sur Google Tasks"
+                       >
+                         {isExporting[`tasks-${sm.id}`] ? (
+                           <Loader2 size={10} className="animate-spin text-accent-blue" />
+                         ) : (
+                           <CheckSquare size={10} />
+                         )}
+                         <span>Google Tasks</span>
+                       </button>
+                    </div>
+
                   </div>
 
                       <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
@@ -10281,6 +11609,30 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   </div>
                   <div className="flex items-center gap-3 pl-4 ml-2 border-l border-white/5">
                      <Toggle enabled={sm.enabled} onToggle={() => updateSecondaryMission(sm.id, { enabled: !sm.enabled })} />
+                     <button
+                       onClick={() => sendToGoogleCalendar(sm)}
+                       disabled={isExporting[`calendar-${sm.id}`]}
+                       title="Envoyer sur mon Google Agenda"
+                       className="p-1.5 rounded bg-white/5 text-text-dim hover:text-accent-yellow hover:bg-accent-yellow/10 transition-colors disabled:opacity-50 cursor-pointer"
+                     >
+                       {isExporting[`calendar-${sm.id}`] ? (
+                         <Loader2 size={14} className="animate-spin text-accent-yellow" />
+                       ) : (
+                         <Calendar size={14} />
+                       )}
+                     </button>
+                     <button
+                       onClick={() => sendToGoogleTasks(sm)}
+                       disabled={isExporting[`tasks-${sm.id}`]}
+                       title="Envoyer sur Google Tasks"
+                       className="p-1.5 rounded bg-white/5 text-text-dim hover:text-accent-blue hover:bg-accent-blue/10 transition-colors disabled:opacity-50 cursor-pointer"
+                     >
+                       {isExporting[`tasks-${sm.id}`] ? (
+                         <Loader2 size={14} className="animate-spin text-accent-blue" />
+                       ) : (
+                         <CheckSquare size={14} />
+                       )}
+                     </button>
                      <button onClick={() => removeSecondaryMission(sm.id)} className="p-1.5 rounded bg-white/5 text-text-dim hover:bg-red-500/20 hover:text-red-500 transition-colors">
                        <Trash2 size={14} />
                      </button>
@@ -10355,11 +11707,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
             <div className="flex items-center gap-4">
               <button 
-                onClick={() => setBulkStatusModalOpen(true)}
+                onClick={openBulkEditModal}
                 className="flex items-center gap-2 px-4 py-2 bg-accent-blue/20 text-accent-blue border border-accent-blue/30 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-accent-blue/30 transition-all"
               >
                 <Activity size={12} />
-                Changer Statut
+                Éditions Groupées
               </button>
 
               <button 
@@ -10399,7 +11751,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         )}
       </AnimatePresence>
 
-      {/* Bulk Status Modal */}
+      {/* Bulk Status/Edit Modal */}
       <AnimatePresence>
         {bulkStatusModalOpen && (
           <motion.div 
@@ -10414,38 +11766,381 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         {bulkStatusModalOpen && (
           <motion.div 
             key="bulk-status-modal"
-            initial={{ opacity: 0, scale: 0.9 }}
+            initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-card-bg border border-white/10 rounded-2xl p-8 z-[401] shadow-2xl"
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl bg-[#0d0d0d] border border-white/10 rounded-2xl p-6 z-[401] shadow-2xl max-h-[85vh] overflow-y-auto custom-scrollbar"
           >
-              <h3 className="text-sm font-black uppercase tracking-wider text-white mb-6">Mise à jour groupée</h3>
-              <p className="text-[10px] text-text-dim uppercase font-bold mb-4 tracking-widest">Appliquer le statut aux {selectedMissionIds.length} éléments :</p>
-              
-              <div className="grid grid-cols-1 gap-2">
-                {categories.find(c => c.id === 'status')?.items.map(status => (
-                  <button
-                    key={status}
-                    onClick={() => handleBulkStatusUpdate(status)}
-                    className="w-full text-left px-4 py-3 bg-white/5 border border-white/5 rounded-lg hover:border-accent hover:bg-accent/5 text-[10px] font-black uppercase tracking-widest text-white transition-all transition-colors"
-                  >
-                    {status}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-white">Édition groupée (En Masse)</h3>
+                  <p className="text-[10px] text-text-dim uppercase font-bold tracking-widest mt-1">Appliquer les modifications aux <span className="text-accent">{selectedMissionIds.length}</span> éléments sélectionnés</p>
+                </div>
+                <button 
+                  onClick={() => setBulkStatusModalOpen(false)}
+                  className="p-1 rounded-lg hover:bg-white/5 transition-colors text-text-dim hover:text-white"
+                >
+                  <X size={16} />
+                </button>
               </div>
 
-              <button 
-                onClick={() => setBulkStatusModalOpen(false)}
-                className="w-full mt-6 py-3 text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white transition-colors"
-              >
-                Annuler
-              </button>
+              {/* Warning/Helper info */}
+              <div className="bg-white/[0.02] border border-white/5 p-3 rounded-lg mb-4 text-[9px] text-text-dim uppercase tracking-wider leading-relaxed flex items-center gap-2">
+                <span className="text-accent font-bold">💡 Astuce :</span> Cochez la case d'un champ pour l'activer, puis modifiez sa valeur. Seuls les champs cochés seront appliqués aux missions sélectionnées en même temps.
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                {/* 1. Statut de production */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all ${bulkEditUpdateStatus ? 'border-accent-blue/30 bg-accent-blue/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdateStatus} 
+                        onChange={(e) => setBulkEditUpdateStatus(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-accent-blue focus:ring-accent-blue"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Statut de Production</span>
+                    </label>
+                    {bulkEditUpdateStatus && <span className="text-[8px] font-bold text-accent-blue uppercase tracking-widest bg-accent-blue/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={bulkEditUpdateStatus ? "opacity-100" : "opacity-45 pointer-events-none"}>
+                    <select
+                      value={bulkEditStatus}
+                      onChange={(e) => setBulkEditStatus(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-white font-bold outline-none focus:border-accent-blue/50"
+                    >
+                      {categories.find(c => c.id === 'status')?.items.map(st => (
+                        <option key={st} value={st} className="bg-zinc-900">{st.toUpperCase()}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 2. Date Deadline */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all ${bulkEditUpdateDeadline ? 'border-accent-yellow/30 bg-accent-yellow/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdateDeadline} 
+                        onChange={(e) => setBulkEditUpdateDeadline(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-accent-yellow focus:ring-accent-yellow"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Date Deadline</span>
+                    </label>
+                    {bulkEditUpdateDeadline && <span className="text-[8px] font-bold text-accent-yellow uppercase tracking-widest bg-accent-yellow/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={bulkEditUpdateDeadline ? "opacity-100" : "opacity-45 pointer-events-none"}>
+                    <input 
+                      type="date"
+                      value={bulkEditDeadline}
+                      onChange={(e) => setBulkEditDeadline(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent-yellow font-bold outline-none focus:border-accent-yellow/50"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Note / Qualification */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all md:col-span-2 ${bulkEditUpdateRating ? 'border-accent-yellow/30 bg-accent-yellow/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdateRating} 
+                        onChange={(e) => setBulkEditUpdateRating(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-accent-yellow focus:ring-accent-yellow"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Note (Qualification / Notation)</span>
+                    </label>
+                    {bulkEditUpdateRating && <span className="text-[8px] font-bold text-accent-yellow uppercase tracking-widest bg-accent-yellow/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={`flex items-center gap-4 ${bulkEditUpdateRating ? "opacity-100" : "opacity-45 pointer-events-none"}`}>
+                    <InteractiveStarRating 
+                      rating={bulkEditRating} 
+                      onRatingChange={(val) => {
+                        setBulkEditRating(val);
+                        setBulkEditUpdateRating(true);
+                      }} 
+                      size={18} 
+                    />
+                    <span className="text-[10px] font-mono font-bold text-accent-yellow">{bulkEditRating}/5 Étoiles</span>
+                  </div>
+                </div>
+
+                {/* 4. ON / OFF Active status */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all md:col-span-2 ${bulkEditUpdateEnabled ? 'border-accent/30 bg-accent/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdateEnabled} 
+                        onChange={(e) => setBulkEditUpdateEnabled(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-accent focus:ring-accent"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Sélection ON/OFF (Activer les missions dans la liste)</span>
+                    </label>
+                    {bulkEditUpdateEnabled && <span className="text-[8px] font-bold text-accent uppercase tracking-widest bg-accent/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={`flex items-center gap-3 ${bulkEditUpdateEnabled ? "opacity-100" : "opacity-45 pointer-events-none"}`}>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-text-dim">Désactivé (OFF)</span>
+                    <Toggle 
+                      enabled={bulkEditEnabled} 
+                      onToggle={(e) => {
+                        e.stopPropagation();
+                        setBulkEditEnabled(prev => !prev);
+                        setBulkEditUpdateEnabled(true);
+                      }} 
+                    />
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-accent font-black">Activé (ON)</span>
+                  </div>
+                </div>
+
+                {/* Follow-up / Step dates Title */}
+                <div className="md:col-span-2 border-t border-white/5 pt-4 mt-2 mb-1">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-text-dim flex items-center gap-2">
+                    <Clock size={12} className="text-accent" />
+                    Suivi de Production (Dates & Heures)
+                  </h4>
+                </div>
+
+                {/* 5. Produit Préparé */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all ${bulkEditUpdatePreparedAt ? 'border-accent/30 bg-accent/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdatePreparedAt} 
+                        onChange={(e) => setBulkEditUpdatePreparedAt(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-accent focus:ring-accent"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Produit Préparé</span>
+                    </label>
+                    {bulkEditUpdatePreparedAt && <span className="text-[8px] font-bold text-accent uppercase tracking-widest bg-accent/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={bulkEditUpdatePreparedAt ? "opacity-100" : "opacity-45 pointer-events-none"}>
+                    <input 
+                      type="datetime-local"
+                      value={bulkEditPreparedAt}
+                      onChange={(e) => setBulkEditPreparedAt(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent font-bold outline-none focus:border-accent/50"
+                    />
+                  </div>
+                </div>
+
+                {/* 6. Shooté */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all ${bulkEditUpdateShotAt ? 'border-accent-blue/30 bg-accent-blue/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdateShotAt} 
+                        onChange={(e) => setBulkEditUpdateShotAt(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-accent-blue focus:ring-accent-blue"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Shooté</span>
+                    </label>
+                    {bulkEditUpdateShotAt && <span className="text-[8px] font-bold text-accent-blue uppercase tracking-widest bg-accent-blue/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={bulkEditUpdateShotAt ? "opacity-100" : "opacity-45 pointer-events-none"}>
+                    <input 
+                      type="datetime-local"
+                      value={bulkEditShotAt}
+                      onChange={(e) => setBulkEditShotAt(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent-blue font-bold outline-none focus:border-accent-blue/50"
+                    />
+                  </div>
+                </div>
+
+                {/* 7. Passé en Post-Prod */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all ${bulkEditUpdatePostProdAt ? 'border-accent-purple/30 bg-accent-purple/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdatePostProdAt} 
+                        onChange={(e) => setBulkEditUpdatePostProdAt(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-accent-purple focus:ring-accent-purple"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Passé en Post-Prod</span>
+                    </label>
+                    {bulkEditUpdatePostProdAt && <span className="text-[8px] font-bold text-accent-purple uppercase tracking-widest bg-accent-purple/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={bulkEditUpdatePostProdAt ? "opacity-100" : "opacity-45 pointer-events-none"}>
+                    <input 
+                      type="datetime-local"
+                      value={bulkEditPostProdAt}
+                      onChange={(e) => setBulkEditPostProdAt(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent-purple font-bold outline-none focus:border-accent-purple/50"
+                    />
+                  </div>
+                </div>
+
+                {/* 8. Livré */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all ${bulkEditUpdateDeliveredAt ? 'border-accent-pink/30 bg-accent-pink/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdateDeliveredAt} 
+                        onChange={(e) => setBulkEditUpdateDeliveredAt(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-accent-pink focus:ring-accent-pink"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Livré</span>
+                    </label>
+                    {bulkEditUpdateDeliveredAt && <span className="text-[8px] font-bold text-accent-pink uppercase tracking-widest bg-accent-pink/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={bulkEditUpdateDeliveredAt ? "opacity-100" : "opacity-45 pointer-events-none"}>
+                    <input 
+                      type="datetime-local"
+                      value={bulkEditDeliveredAt}
+                      onChange={(e) => setBulkEditDeliveredAt(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent-pink font-bold outline-none focus:border-accent-pink/50"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center justify-end gap-3 border-t border-white/10 pt-4">
+                <button 
+                  onClick={() => setBulkStatusModalOpen(false)}
+                  className="px-4 py-2.5 text-[9px] font-black uppercase tracking-widest border border-white/10 hover:bg-white/5 rounded-lg text-text-dim hover:text-white transition-all"
+                >
+                  Annuler
+                </button>
+                <button 
+                  onClick={() => handleBulkUpdate({
+                    enabled: bulkEditEnabled,
+                    status: bulkEditStatus,
+                    deadline: bulkEditDeadline,
+                    preparedAt: bulkEditPreparedAt,
+                    shotAt: bulkEditShotAt,
+                    postProdAt: bulkEditPostProdAt,
+                    deliveredAt: bulkEditDeliveredAt,
+                    rating: bulkEditRating,
+                    updateEnabled: bulkEditUpdateEnabled,
+                    updateStatus: bulkEditUpdateStatus,
+                    updateDeadline: bulkEditUpdateDeadline,
+                    updatePrepared: bulkEditUpdatePreparedAt,
+                    updateShot: bulkEditUpdateShotAt,
+                    updatePostProd: bulkEditUpdatePostProdAt,
+                    updateDelivered: bulkEditUpdateDeliveredAt,
+                    updateRating: bulkEditUpdateRating
+                  })}
+                  className="px-6 py-2.5 bg-accent hover:bg-accent/95 text-black rounded-lg text-[9px] font-black uppercase tracking-widest shadow-[0_0_15px_rgba(0,255,148,0.2)] transition-all"
+                >
+                  Appliquer les modifications
+                </button>
+              </div>
             </motion.div>
         )}
       </AnimatePresence>
 
       {/* Modals and Overlays */}
       <AnimatePresence>
+        {/* Modal for editing project family via double-click popup */}
+        {familyEditProduct && (
+          <div key="family-edit-modal-container" className="fixed inset-0 z-[750] flex items-center justify-center p-4">
+            <motion.div 
+              key="family-edit-backdrop"
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => setFamilyEditProduct(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              key="family-edit-content"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-card-bg border border-white/10 p-6 rounded-3xl shadow-2xl max-w-md w-full"
+            >
+              <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-accent-purple/20 flex items-center justify-center text-accent-purple">
+                    <Layers size={16} />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold font-serif italic text-white flex items-center gap-1.5">Famille du projet</h2>
+                    <p className="text-[10px] text-text-dim uppercase tracking-wider">
+                      Modifier l'attribution de la famille
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setFamilyEditProduct(null)}
+                  className="p-1 hover:bg-white/5 rounded-lg text-text-dim hover:text-white transition-all animate-none"
+                  id="close-family-modal"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {(() => {
+                const targetM = missions.find(m => m.id === familyEditProduct.missionId);
+                if (!targetM) {
+                  return <p className="text-xs text-text-dim">Projet introuvable.</p>;
+                }
+                const famList = categories.find(c => c.id === 'family')?.items || [];
+                return (
+                  <div className="space-y-4 pt-2">
+                    <div className="p-3 bg-white/[0.02] border border-white/5 rounded-xl">
+                      <div className="text-[10px] text-text-dim uppercase tracking-wider mb-1">Projet :</div>
+                      <div className="text-xs font-bold text-white mb-0.5">{targetM.product}</div>
+                      <div className="text-[10px] font-mono text-accent-blue">{targetM.refId} — {targetM.color}</div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] text-text-dim uppercase tracking-wider block">Sélectionner une famille :</label>
+                      <div className="grid grid-cols-2 gap-2 max-h-[180px] overflow-y-auto custom-scrollbar pr-1">
+                        {famList.map((f) => {
+                          const isSelected = familyEditProduct.currentFamily === f;
+                          return (
+                            <button
+                              key={f}
+                              onClick={() => setFamilyEditProduct(prev => prev ? { ...prev, currentFamily: f } : null)}
+                              className={`p-2.5 rounded-xl border text-[10px] text-left uppercase font-mono font-black tracking-wider transition-all flex items-center justify-between ${
+                                isSelected 
+                                  ? 'bg-accent-purple/20 border-accent-purple text-accent-purple shadow-[0_0_10px_rgba(168,85,247,0.2)]'
+                                  : 'bg-white/5 border-white/5 text-text-dim hover:text-white hover:border-white/10 hover:bg-white/[0.08]'
+                              }`}
+                            >
+                              <span>{f}</span>
+                              {isSelected && <Check size={10} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-3 border-t border-white/5">
+                      <button 
+                        onClick={() => setFamilyEditProduct(null)}
+                        className="flex-1 py-2 bg-white/5 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all border border-white/10"
+                      >
+                        Annuler
+                      </button>
+                      <button 
+                        onClick={() => {
+                          updateMission(familyEditProduct.missionId, { family: familyEditProduct.currentFamily });
+                          setFamilyEditProduct(null);
+                          setToast({ show: true, message: 'Famille mise à jour avec succès !', type: 'task' });
+                          setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2000);
+                        }}
+                        className="flex-1 py-2 bg-accent-purple text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-purple-600 transition-all shadow-lg shadow-purple-500/20"
+                      >
+                        Enregistrer
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </motion.div>
+          </div>
+        )}
+
         {/* Confirmation Modal for Cleaning Duplicates */}
         {showCleanDuplicatesModal && (
           <div key="clean-duplicates-modal-container" className="fixed inset-0 z-[700] flex items-center justify-center p-4">
@@ -10809,6 +12504,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             onRemove={removeMission}
             refIdColor={refIdColor}
             allStatuses={categories.find(c => c.id === 'status')?.items || []}
+            allFamilies={categories.find(c => c.id === 'family')?.items || []}
             pushToGoogleCalendar={pushToGoogleCalendar}
             pushToGoogleTasks={pushToGoogleTasks}
           />
@@ -11134,7 +12830,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       </div>
 
       {/* Export Template (Hidden) - Hardcoded colors for capture reliability */}
-      <div id="global-report-container" style={{ position: 'absolute', top: '-9999px', left: '-9999px', backgroundColor: '#0A0A0A', color: '#FFFFFF', padding: '80px', width: '1200px', fontFamily: 'sans-serif' }}>
+      <div id="global-report-container" style={{ position: 'absolute', top: '-9999px', left: '-9999px', backgroundColor: '#0A0A0A', color: '#D1D5DB', padding: '80px', width: '1200px', fontFamily: 'sans-serif' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '64px', borderBottom: '2px solid rgba(255,255,255,0.1)', paddingBottom: '40px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
@@ -11147,7 +12843,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           </div>
           <div style={{ textAlign: 'right' }}>
             <p style={{ fontSize: '10px', fontWeight: '900', color: '#888888', textTransform: 'uppercase', letterSpacing: '2px', margin: '0 0 4px 0' }}>Semaine / Date d'Export</p>
-            <p style={{ fontSize: '20px', color: '#FFFFFF', margin: '0 0 4px 0' }}>S{getCurrentWeekNumber()} — {getDayMonthYear()}</p>
+            <p style={{ fontSize: '20px', color: '#D1D5DB', margin: '0 0 4px 0' }}>S{getCurrentWeekNumber()} — {getDayMonthYear()}</p>
             <p style={{ fontSize: '10px', color: '#888888', margin: 0 }}>{new Date().toLocaleTimeString()}</p>
           </div>
         </div>
@@ -11189,17 +12885,17 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     border: m.status === 'livré' ? '1px solid #00FF94' : 
                             m.status === 'En post-production' ? '1px solid #FF9900' : '1px solid rgba(255,255,255,0.2)', 
                     color: m.status === 'livré' ? '#00FF94' : 
-                           m.status === 'En post-production' ? '#FF9900' : '#FFFFFF', 
+                           m.status === 'En post-production' ? '#FF9900' : '#D1D5DB', 
                     textTransform: 'uppercase' 
                   }}>{m.status}</span>
                 </div>
                 <div style={{ padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '11px', fontWeight: 'bold', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase' }}>
                      <p style={{ margin: 0 }}>Référence: <span style={{ color: '#00D1FF' }}>{m.refId}</span></p>
-                     <p style={{ margin: 0 }}>Couleur: <span style={{ color: '#FFFFFF' }}>{m.color}</span></p>
-                     <p style={{ margin: 0 }}>Argument: <span style={{ color: '#FFFFFF' }}>{m.argumentType}</span></p>
-                     <p style={{ margin: 0 }}>Univers: <span style={{ color: '#FFFFFF' }}>{m.univers}</span></p>
-                     <p style={{ margin: 0 }}>Support: <span style={{ color: '#FFFFFF' }}>{m.support}</span></p>
+                     <p style={{ margin: 0 }}>Couleur: <span style={{ color: '#D1D5DB' }}>{m.color}</span></p>
+                     <p style={{ margin: 0 }}>Argument: <span style={{ color: '#D1D5DB' }}>{m.argumentType}</span></p>
+                     <p style={{ margin: 0 }}>Univers: <span style={{ color: '#D1D5DB' }}>{m.univers}</span></p>
+                     <p style={{ margin: 0 }}>Support: <span style={{ color: '#D1D5DB' }}>{m.support}</span></p>
                      <div style={{ marginTop: '4px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px' }}>
                         <p style={{ margin: '0 0 4px 0', fontSize: '9px', color: '#888888' }}>Charge de Travail Appréciée</p>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -11226,19 +12922,19 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', fontSize: '10px' }}>
                         <div style={{ borderLeft: m.preparedAt ? '2px solid #00FF94' : '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px', opacity: m.preparedAt ? 1 : 0.4 }}>
                           <span style={{ display: 'block', fontWeight: '900', color: m.preparedAt ? '#00FF94' : '#888888', textTransform: 'uppercase', fontSize: '8px', letterSpacing: '0.5px' }}>I. Produit Préparé</span>
-                          <span style={{ color: '#FFFFFF', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.preparedAt)}</span>
+                          <span style={{ color: '#D1D5DB', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.preparedAt)}</span>
                         </div>
                         <div style={{ borderLeft: m.shotAt ? '2px solid #00D1FF' : '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px', opacity: m.shotAt ? 1 : 0.4 }}>
                           <span style={{ display: 'block', fontWeight: '900', color: m.shotAt ? '#00D1FF' : '#888888', textTransform: 'uppercase', fontSize: '8px', letterSpacing: '0.5px' }}>II. Produit Shooté</span>
-                          <span style={{ color: '#FFFFFF', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.shotAt)}</span>
+                          <span style={{ color: '#D1D5DB', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.shotAt)}</span>
                         </div>
                         <div style={{ borderLeft: m.postProdAt ? '2px solid #FF9900' : '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px', opacity: m.postProdAt ? 1 : 0.4 }}>
                           <span style={{ display: 'block', fontWeight: '900', color: m.postProdAt ? '#FF9900' : '#888888', textTransform: 'uppercase', fontSize: '8px', letterSpacing: '0.5px' }}>III. Passage Post-Prod</span>
-                          <span style={{ color: '#FFFFFF', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.postProdAt)}</span>
+                          <span style={{ color: '#D1D5DB', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.postProdAt)}</span>
                         </div>
                         <div style={{ borderLeft: m.deliveredAt ? '2px solid #00FF94' : '2px solid rgba(255,255,255,0.1)', paddingLeft: '8px', opacity: m.deliveredAt ? 1 : 0.4 }}>
                           <span style={{ display: 'block', fontWeight: '900', color: m.deliveredAt ? '#00FF94' : '#888888', textTransform: 'uppercase', fontSize: '8px', letterSpacing: '0.5px' }}>IV. Produit Livré</span>
-                          <span style={{ color: '#FFFFFF', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.deliveredAt)}</span>
+                          <span style={{ color: '#D1D5DB', fontWeight: 'bold', fontFamily: 'monospace' }}>{formatDateStringNice(m.deliveredAt)}</span>
                         </div>
                       </div>
                     </div>
@@ -11280,7 +12976,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <div style={{ padding: '8px', backgroundColor: 'rgba(0, 255, 148, 0.1)', borderRadius: '8px', color: '#00FF94' }}>
                   <TrendingUp size={24} />
                 </div>
-                <h3 style={{ fontSize: '20px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#FFFFFF', margin: 0 }}>Analyse de Performance</h3>
+                <h3 style={{ fontSize: '20px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#E5E7EB', margin: 0 }}>Analyse de Performance</h3>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <span style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', display: 'block' }}>Semaine {getCurrentWeekNumber()} // {getDayMonthYear()}</span>
@@ -11292,42 +12988,42 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '24px', marginBottom: '40px' }}>
               <div>
                 <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Taux Livraison</p>
-                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.completionRate.toFixed(1)}%</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#D1D5DB', margin: '0 0 12px 0' }}>{dashboardStats.completionRate.toFixed(1)}%</p>
                 <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
                   <div style={{ height: '100%', backgroundColor: '#00FF94', width: `${dashboardStats.completionRate}%` }} />
                 </div>
               </div>
               <div>
                 <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Production Active</p>
-                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.productionRate.toFixed(1)}%</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#D1D5DB', margin: '0 0 12px 0' }}>{dashboardStats.productionRate.toFixed(1)}%</p>
                 <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
                   <div style={{ height: '100%', backgroundColor: '#00D1FF', width: `${dashboardStats.productionRate}%` }} />
                 </div>
               </div>
               <div>
                 <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Indices Qualité</p>
-                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.stabilityScore.toFixed(0)}%</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#D1D5DB', margin: '0 0 12px 0' }}>{dashboardStats.stabilityScore.toFixed(0)}%</p>
                 <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
                   <div style={{ height: '100%', backgroundColor: '#BD00FF', width: `${dashboardStats.stabilityScore}%` }} />
                 </div>
               </div>
               <div>
                 <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Efficience Réelle</p>
-                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.finalEfficiencyScore.toFixed(1)}%</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#D1D5DB', margin: '0 0 12px 0' }}>{dashboardStats.finalEfficiencyScore.toFixed(1)}%</p>
                 <div style={{ height: '4px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
                   <div style={{ height: '100%', backgroundColor: '#00FF94', width: `${Math.min(dashboardStats.finalEfficiencyScore, 100)}%` }} />
                 </div>
               </div>
               <div>
                 <p style={{ fontSize: '10px', fontWeight: '900', color: '#888', textTransform: 'uppercase', marginBottom: '8px' }}>Missions Totales</p>
-                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#FFFFFF', margin: '0 0 12px 0' }}>{dashboardStats.stats.total}</p>
+                <p style={{ fontSize: '32px', fontWeight: 'black', color: '#D1D5DB', margin: '0 0 12px 0' }}>{dashboardStats.stats.total}</p>
               </div>
             </div>
 
             <div style={{ paddingTop: '32px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
                 <Zap size={16} color="#00FF94" />
-                <h4 style={{ fontSize: '12px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#FFFFFF', margin: 0 }}>Moniteur d'Efficience par Support</h4>
+                <h4 style={{ fontSize: '12px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '2px', color: '#E5E7EB', margin: 0 }}>Moniteur d'Efficience par Support</h4>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
                 {['photo', 'vidéo', 'graphisme', 'autre'].map((support, idx) => {
@@ -11520,7 +13216,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                          </svg>
                          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
                             <span style={{ fontSize: '10px', fontWeight: '900', color: 'rgba(255,255,255,0.4)', letterSpacing: '2px' }}>TOTAL</span>
-                            <span style={{ fontSize: '24px', fontWeight: '900', color: '#fff' }}>{prod + sec}</span>
+                            <span style={{ fontSize: '24px', fontWeight: '900', color: '#D1D5DB' }}>{prod + sec}</span>
                          </div>
                        </>
                      );
@@ -11530,12 +13226,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <div style={{ width: '10px', height: '10px', backgroundColor: '#EBFF00', borderRadius: '2px' }} />
                       <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Production: {activeMissions.length}</span>
-                      <span style={{ fontSize: '11px', color: '#fff', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((activeMissions.length / (activeMissions.length + secondaryMissions.filter(sm => sm.enabled).length || 1)) * 100)}%</span>
+                      <span style={{ fontSize: '11px', color: '#D1D5DB', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((activeMissions.length / (activeMissions.length + secondaryMissions.filter(sm => sm.enabled).length || 1)) * 100)}%</span>
                    </div>
                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <div style={{ width: '10px', height: '10px', backgroundColor: '#00D1FF', borderRadius: '2px' }} />
                       <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>Secondaire: {secondaryMissions.filter(sm => sm.enabled).length}</span>
-                      <span style={{ fontSize: '11px', color: '#fff', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((secondaryMissions.filter(sm => sm.enabled).length / (activeMissions.length + secondaryMissions.filter(sm => sm.enabled).length || 1)) * 100)}%</span>
+                      <span style={{ fontSize: '11px', color: '#D1D5DB', marginLeft: 'auto', fontWeight: 'bold' }}>{Math.round((secondaryMissions.filter(sm => sm.enabled).length / (activeMissions.length + secondaryMissions.filter(sm => sm.enabled).length || 1)) * 100)}%</span>
                    </div>
                 </div>
              </div>
@@ -11614,7 +13310,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   );
 }
 
-function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, allStatuses, pushToGoogleCalendar, pushToGoogleTasks }: { mission: Mission | null, onClose: () => void, onUpdate: (id: string, updates: Partial<Mission>) => void, onRemove: (id: string) => void, refIdColor: string, allStatuses: string[], pushToGoogleCalendar: (m: Mission | SecondaryMission) => void, pushToGoogleTasks: (m: Mission | SecondaryMission) => void }) {
+function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, allStatuses, allFamilies, pushToGoogleCalendar, pushToGoogleTasks }: { mission: Mission | null, onClose: () => void, onUpdate: (id: string, updates: Partial<Mission>) => void, onRemove: (id: string) => void, refIdColor: string, allStatuses: string[], allFamilies: string[], pushToGoogleCalendar: (m: Mission | SecondaryMission) => void, pushToGoogleTasks: (m: Mission | SecondaryMission) => void }) {
   if (!mission) return null;
 
   const [isConfirming, setIsConfirming] = useState(false);
@@ -11757,6 +13453,23 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                 </h3>
                 <div className="space-y-2">
                   <DetailItem label="Réf. Unique" value={mission.refId} colorOverride={refIdColor} />
+                  <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">Famille</span>
+                    <div className="relative">
+                      <select 
+                        value={mission.family || deduceFamily(mission.product) || 'Autre'}
+                        onChange={(e) => onUpdate(mission.id, { family: e.target.value })}
+                        className="bg-transparent border-none p-0 pr-4 text-right text-[11px] font-mono font-black text-accent-purple tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer"
+                      >
+                        {allFamilies.map(f => (
+                          <option key={f} value={f} className="bg-[#1A1A1A] text-white uppercase">{f}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent-purple opacity-40">
+                        <ChevronRight size={8} className="rotate-90 text-accent-purple" style={{ transform: 'rotate(90deg)' }} />
+                      </div>
+                    </div>
+                  </div>
                   <DetailItem label="Couleur" value={mission.color} />
                   <DetailItem label="Argument" value={mission.argumentType} />
                   <DetailItem label="Univers" value={mission.univers} />
@@ -12311,6 +14024,823 @@ function CategoryEditor({ category, onUpdate, isCollapsed, onToggle }: CategoryE
       </motion.div>
       )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+interface FamilyGroupViewProps {
+  filteredMissions: Mission[];
+  setSelectedMissionId: (id: string | null) => void;
+  refIdColor: string;
+  isDeadlineApproaching: (deadlineStr?: string) => boolean;
+  onRenameFamily: (oldName: string, newName: string) => void;
+  onToggleMissionEnabled: (id: string, e: React.MouseEvent) => void;
+  onToggleAllMissionsInFamily: (famName: string, enabled: boolean) => void;
+  onToggleAllMissionsInSubFamily: (famName: string, productName: string, colorName: string, enabled: boolean) => void;
+  onMoveSubFamilyToFamily: (productName: string, colorName: string, targetFamily: string) => void;
+  onMoveMultipleSubFamilies: (subFamiliesToMove: { productName: string, colorName: string }[], targetFamily: string) => void;
+  allFamilies: string[];
+  selectedMissionIds: string[];
+  setSelectedMissionIds: (ids: string[]) => void;
+  onToggleSelectMission: (id: string, e: React.MouseEvent) => void;
+  onMoveMissionToFamily: (missionId: string, targetFamily: string, targetProduct?: string, targetColor?: string) => void;
+  onMoveMultipleMissions: (missionIds: string[], targetFamily: string, targetProduct?: string, targetColor?: string) => void;
+  showDuplicateIndicators: boolean;
+  isDuplicate: (m: Mission) => boolean;
+}
+
+function FamilyGroupView({
+  filteredMissions,
+  setSelectedMissionId,
+  refIdColor,
+  isDeadlineApproaching,
+  onRenameFamily,
+  onToggleMissionEnabled,
+  onToggleAllMissionsInFamily,
+  onToggleAllMissionsInSubFamily,
+  onMoveSubFamilyToFamily,
+  onMoveMultipleSubFamilies,
+  allFamilies,
+  selectedMissionIds,
+  setSelectedMissionIds,
+  onToggleSelectMission,
+  onMoveMissionToFamily,
+  onMoveMultipleMissions,
+  showDuplicateIndicators,
+  isDuplicate,
+}: FamilyGroupViewProps) {
+  // Only group main missions (filteredMissions). Let's make sure we filter out secondary tasks
+  const missionsByFamily: Record<string, Record<string, Mission[]>> = {};
+
+  const [selectedSubFams, setSelectedSubFams] = useState<string[]>([]);
+  const [draggedOverFamName, setDraggedOverFamName] = useState<string | null>(null);
+  const [draggedOverSubFam, setDraggedOverSubFam] = useState<string | null>(null);
+
+  const toggleSubFamilySelection = (fam: string, productName: string, colorName: string) => {
+    const key = `${fam}|${productName}|${colorName}`;
+    setSelectedSubFams(prev => 
+      prev.includes(key) 
+        ? prev.filter(k => k !== key) 
+        : [...prev, key]
+    );
+  };
+
+  const isSubFamilySelected = (fam: string, productName: string, colorName: string) => {
+    return selectedSubFams.includes(`${fam}|${productName}|${colorName}`);
+  };
+
+  filteredMissions.forEach((m) => {
+    // Find or deduce the family
+    const famName = m.family || deduceFamily(m.product) || 'Autre';
+    const subFamKey = `${m.product}|${m.color || 'Sans couleur'}`;
+    
+    if (!missionsByFamily[famName]) {
+      missionsByFamily[famName] = {};
+    }
+    if (!missionsByFamily[famName][subFamKey]) {
+      missionsByFamily[famName][subFamKey] = [];
+    }
+    missionsByFamily[famName][subFamKey].push(m);
+  });
+
+  const familiesList = Object.keys(missionsByFamily).sort();
+
+  const [collapsedFams, setCollapsedFams] = useState<Record<string, boolean>>({});
+  const [collapsedSubFams, setCollapsedSubFams] = useState<Record<string, boolean>>({});
+  
+  const [editingFam, setEditingFam] = useState<string | null>(null);
+  const [newFamName, setNewFamName] = useState<string>('');
+
+  const toggleFam = (fam: string) => {
+    setCollapsedFams(prev => ({ ...prev, [fam]: !prev[fam] }));
+  };
+
+  const toggleSubFam = (subFam: string) => {
+    setCollapsedSubFams(prev => ({ ...prev, [subFam]: !prev[subFam] }));
+  };
+
+  const expandAll = () => {
+    setCollapsedFams({});
+    setCollapsedSubFams({});
+  };
+
+  const collapseAll = () => {
+    const allFams: Record<string, boolean> = {};
+    familiesList.forEach(f => {
+      allFams[f] = true;
+      Object.keys(missionsByFamily[f] || {}).forEach(sf => {
+        allFams[`${f}|${sf}`] = true;
+      });
+    });
+    setCollapsedFams(allFams);
+    setCollapsedSubFams(allFams);
+  };
+
+  // Stats calculations based on filteredMissions
+  const totalMissions = filteredMissions.length;
+  const activeMissions = filteredMissions.filter(m => m.enabled);
+  const activeMissionsCount = activeMissions.length;
+  const inactiveMissionsCount = totalMissions - activeMissionsCount;
+  
+  const completedMissionsCount = activeMissions.filter(m => m.status === 'livré').length;
+  const inProductionCount = activeMissions.filter(m => ['en cours de shoot', 'shooté', 'En post-production'].includes(m.status)).length;
+  const pendingCount = activeMissions.filter(m => m.status === 'en attente' || m.status === 'produit préparé').length;
+  
+  const completionRate = activeMissionsCount > 0 ? (completedMissionsCount / activeMissionsCount) * 105 / 1.05 : 0; // standard mathematical calculation
+  const fixedRate = activeMissionsCount > 0 ? (completedMissionsCount / activeMissionsCount) * 100 : 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Header and Controls */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center text-accent animate-pulse">
+            <Layers size={16} />
+          </div>
+          <div>
+            <h2 className="text-[10px] font-black uppercase tracking-[3px] text-white">Vue par Familles de Produits</h2>
+            <p className="text-[8px] text-text-dim font-mono uppercase">Familles → Sous-Familles [Produit & Couleur] → Missions principales</p>
+          </div>
+        </div>
+        
+        <div className="flex gap-2 items-center">
+          <button 
+            onClick={expandAll}
+            className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Maximize size={10} /> Tout Développer
+          </button>
+          <button 
+            onClick={collapseAll}
+            className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Minimize size={10} /> Tout Réduire
+          </button>
+        </div>
+      </div>
+
+      {/* Selection Action Bar */}
+      <AnimatePresence>
+        {(selectedSubFams.length > 0 || selectedMissionIds.length > 0) && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="bg-accent/10 border border-accent/30 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-2 shadow-[0_0_20px_rgba(0,255,148,0.05)] border-t-accent"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent animate-pulse shrink-0">
+                <Layers size={16} />
+              </div>
+              <div>
+                <h4 className="text-xs font-black uppercase text-white tracking-widest leading-none">
+                  {selectedSubFams.length > 0 && `${selectedSubFams.length} sous-famille${selectedSubFams.length > 1 ? 's' : ''}`}
+                  {selectedSubFams.length > 0 && selectedMissionIds.length > 0 && ' & '}
+                  {selectedMissionIds.length > 0 && `${selectedMissionIds.length} mission${selectedMissionIds.length > 1 ? 's' : ''}`} sélectionnée{selectedSubFams.length + selectedMissionIds.length > 1 ? 's' : ''}
+                </h4>
+                <p className="text-[9px] font-mono text-text-dim mt-0.5 uppercase tracking-wide">
+                  Choisissez la famille de destination pour déplacer les éléments sélectionnés
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-bold text-text-dim uppercase tracking-wider shrink-0">Déplacer vers :</span>
+              <div className="flex gap-1 flex-wrap">
+                {allFamilies.map((targetFam) => (
+                  <button
+                    key={targetFam}
+                    onClick={() => {
+                      if (selectedSubFams.length > 0) {
+                        const subFamsToMove = selectedSubFams.map(id => {
+                          const [, prod, col] = id.split('|');
+                          return { productName: prod, colorName: col };
+                        });
+                        onMoveMultipleSubFamilies(subFamsToMove, targetFam);
+                        setSelectedSubFams([]);
+                      }
+                      if (selectedMissionIds.length > 0) {
+                        onMoveMultipleMissions(selectedMissionIds, targetFam);
+                        setSelectedMissionIds([]);
+                      }
+                    }}
+                    className="px-2.5 py-1 text-[9px] font-black uppercase tracking-widest border border-white/10 hover:border-accent/40 bg-white/5 hover:bg-accent/10 hover:text-accent rounded transition-all cursor-pointer"
+                  >
+                    {targetFam}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="w-[1px] h-6 bg-white/10 mx-1" />
+
+              <button
+                onClick={() => {
+                  setSelectedSubFams([]);
+                  setSelectedMissionIds([]);
+                }}
+                className="p-1 px-2 border border-red-500/20 text-red-400 bg-red-400/5 hover:bg-red-400/10 hover:border-red-500 hover:text-red-500 text-[10px] uppercase font-bold rounded transition-all cursor-pointer"
+              >
+                Annuler
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Dynamic Family View Stats Grid */}
+      {familiesList.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5 shadow-md">
+          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
+            <div className="text-[9px] font-black uppercase text-accent-purple tracking-widest flex items-center gap-1.5 mb-1">
+              <Layers size={12} /> Familles Actives
+            </div>
+            <div>
+              <div className="text-xl font-black text-white">{familiesList.length}</div>
+              <div className="text-[8px] font-mono text-text-dim/60 uppercase">Groupes de familles</div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
+            <div className="text-[9px] font-black uppercase text-accent-blue tracking-widest flex items-center gap-1.5 mb-1">
+              <CheckSquare size={12} /> Missions Actives
+            </div>
+            <div>
+              <div className="text-xl font-black text-white">
+                {activeMissionsCount} <span className="text-[10px] font-normal text-text-dim">/ {totalMissions}</span>
+              </div>
+              <div className="text-[8px] font-mono text-text-dim/60 uppercase">{inactiveMissionsCount} Inactive(s) / OFF</div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
+            <div className="text-[9px] font-black uppercase text-accent tracking-widest flex items-center gap-1.5 mb-1">
+              <Percent size={12} /> Taux de Livraison
+            </div>
+            <div>
+              <div className="text-xl font-black text-accent">{fixedRate.toFixed(1)}%</div>
+              <div className="text-[8px] font-mono text-text-dim/60 uppercase">{completedMissionsCount} livrées sur {activeMissionsCount} actives</div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
+            <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest flex items-center gap-1.5 mb-1">
+              <Activity size={12} /> En Production
+            </div>
+            <div>
+              <div className="text-xl font-black text-accent-yellow">{inProductionCount}</div>
+              <div className="text-[8px] font-mono text-text-dim/60 uppercase">{pendingCount} en attente / préparation</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {familiesList.length === 0 ? (
+        <div className="bg-black/40 border border-white/10 p-10 rounded-2xl text-center">
+          <Box className="mx-auto text-white/10 mb-4 animate-pulse" size={40} />
+          <h3 className="text-white text-xs font-black uppercase tracking-widest mb-1">Aucune Famille Trouvée</h3>
+          <p className="text-[10px] text-text-dim font-mono">Vérifiez vos filtres actifs ou ajoutez une nouvelle mission principale.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {familiesList.map((fam) => {
+            const subFamilies = missionsByFamily[fam];
+            const isFamCollapsed = collapsedFams[fam];
+            
+            const subFamKeys = Object.keys(subFamilies);
+            const familyMissionsList = subFamKeys.flatMap(k => subFamilies[k]);
+            const totalFamilyMissions = familyMissionsList.length;
+            const activeFamilyMissions = familyMissionsList.filter(m => m.enabled);
+            const activeFamilyMissionsCount = activeFamilyMissions.length;
+            const completedFamilyMissionsCount = activeFamilyMissions.filter(m => m.status === 'livré').length;
+            const famCompletionRate = activeFamilyMissionsCount > 0 ? (completedFamilyMissionsCount / activeFamilyMissionsCount) * 100 : 0;
+            
+            // Calculate average rating for the active family missions
+            const ratedFamilyMissions = activeFamilyMissions.filter(m => typeof m.rating === 'number' && m.rating > 0);
+            const familyAvgRating = ratedFamilyMissions.length > 0
+              ? (ratedFamilyMissions.reduce((acc, m) => acc + (m.rating || 0), 0) / ratedFamilyMissions.length).toFixed(1)
+              : '—';
+
+            const isAllFamilyMissionsEnabled = familyMissionsList.every(m => m.enabled) && totalFamilyMissions > 0;
+
+            return (
+              <div 
+                key={fam} 
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (draggedOverFamName !== fam) {
+                    setDraggedOverFamName(fam);
+                  }
+                }}
+                onDragLeave={() => {
+                  if (draggedOverFamName === fam) {
+                    setDraggedOverFamName(null);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDraggedOverFamName(null);
+                  const dragData = e.dataTransfer.getData("text/plain");
+                  if (dragData) {
+                    if (dragData.startsWith("MISSION|")) {
+                      const [, srcFam, mId] = dragData.split('|');
+                      if (srcFam !== fam) {
+                        if (selectedMissionIds.includes(mId)) {
+                          onMoveMultipleMissions(selectedMissionIds, fam);
+                          setSelectedMissionIds([]);
+                        } else {
+                          onMoveMissionToFamily(mId, fam);
+                        }
+                      }
+                    } else {
+                      // Subfamily drag
+                      let srcFam = '';
+                      let prod = '';
+                      let col = '';
+                      if (dragData.startsWith("SUBFAMILY|")) {
+                        [, srcFam, prod, col] = dragData.split('|');
+                      } else {
+                        [srcFam, prod, col] = dragData.split('|');
+                      }
+                      
+                      const subFamKeyStr = `${srcFam}|${prod}|${col}`;
+                      if (selectedSubFams.includes(subFamKeyStr)) {
+                        const subFamsToMove = selectedSubFams.map(id => {
+                          const [, p, c] = id.split('|');
+                          return { productName: p, colorName: c };
+                        });
+                        onMoveMultipleSubFamilies(subFamsToMove, fam);
+                        setSelectedSubFams([]);
+                      } else {
+                        if (srcFam !== fam) {
+                          onMoveSubFamilyToFamily(prod, col, fam);
+                        }
+                      }
+                    }
+                  }
+                }}
+                className={`border border-white/5 rounded-2xl overflow-hidden shadow-xl transition-all duration-200 ${
+                  draggedOverFamName === fam 
+                    ? 'bg-accent/15 border-accent/40 scale-[1.01] shadow-[0_0_20px_rgba(0,255,148,0.15)] relative z-30' 
+                    : 'bg-white/[0.02]'
+                }`}
+              >
+                {/* Family Accordion Header */}
+                <div 
+                  onClick={() => toggleFam(fam)}
+                  className="flex items-center justify-between p-4 bg-white/5 hover:bg-white/[0.08] transition-all cursor-pointer select-none border-b border-white/5"
+                >
+                  <div className="flex items-center gap-4 flex-wrap">
+                    {editingFam === fam ? (
+                      <div 
+                        className="flex items-center gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="text"
+                          value={newFamName}
+                          onChange={(e) => setNewFamName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              onRenameFamily(fam, newFamName);
+                              setEditingFam(null);
+                            } else if (e.key === 'Escape') {
+                              setEditingFam(null);
+                            }
+                          }}
+                          autoFocus
+                          className="px-2 py-1 text-[10px] text-white bg-black/80 border border-accent/50 rounded outline-none focus:border-accent w-40 uppercase font-mono"
+                        />
+                        <button
+                          onClick={() => {
+                            onRenameFamily(fam, newFamName);
+                            setEditingFam(null);
+                          }}
+                          className="p-1 text-accent hover:bg-white/15 rounded transition-colors"
+                          title="Confirmer"
+                        >
+                          <Check size={12} />
+                        </button>
+                        <button
+                          onClick={() => setEditingFam(null)}
+                          className="p-1 text-red-400 hover:bg-white/15 rounded transition-colors"
+                          title="Annuler"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 group/fam-header">
+                        <div className="px-2.5 py-1 rounded bg-accent-purple/20 border border-accent-purple/30 text-[9px] font-mono font-black text-accent-purple tracking-widest uppercase">
+                          {fam}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingFam(fam);
+                            setNewFamName(fam);
+                          }}
+                          className="p-1 text-text-dim hover:text-white bg-white/0 hover:bg-white/10 rounded transition-all opacity-0 group-hover/fam-header:opacity-100 animate-fade-in"
+                          title="Renommer la famille"
+                        >
+                          <Edit2 size={10} />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* ON/OFF Switch for the whole family */}
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-[8px] font-mono font-black uppercase text-white/40 tracking-wider">ON/OFF :</span>
+                      <Toggle 
+                        enabled={isAllFamilyMissionsEnabled} 
+                        onToggle={() => onToggleAllMissionsInFamily(fam, !isAllFamilyMissionsEnabled)} 
+                      />
+                    </div>
+
+                    {/* Stats summary inside header */}
+                    <div className="flex items-center gap-2">
+                      {famCompletionRate > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-accent/10 border border-accent/20 text-[8px] font-mono font-black text-accent tracking-wider uppercase">
+                          {famCompletionRate.toFixed(0)}% LIVRÉ
+                        </span>
+                      )}
+                      {familyAvgRating !== '—' && (
+                        <span className="px-2 py-0.5 rounded bg-accent-yellow/10 border border-accent-yellow/20 text-[8px] font-mono font-black text-accent-yellow tracking-wider uppercase flex items-center gap-1 shadow-[0_0_10px_rgba(235,255,0,0.1)]">
+                          ★ {familyAvgRating}/5 NOTE MOY.
+                        </span>
+                      )}
+                      <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Sous-familles:</span>
+                      <span className="text-xs font-black text-white">{subFamKeys.length}</span>
+                      <span className="text-white/15 px-1">•</span>
+                      <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Missions actives:</span>
+                      <span className="text-xs font-black text-accent">{activeFamilyMissionsCount}</span>
+                      <span className="text-[10px] text-white/30 font-mono">/{totalFamilyMissions}</span>
+                      <span className="text-white/15 px-1">•</span>
+                      <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Note Moyenne:</span>
+                      <span className={`text-xs font-black ${familyAvgRating !== '—' ? 'text-accent-yellow' : 'text-white/30'}`}>
+                        {familyAvgRating}{familyAvgRating !== '—' ? '/5' : ''}
+                      </span>
+
+                      {((selectedSubFams.length > 0 && !selectedSubFams.every(id => id.startsWith(`${fam}|`))) || 
+                        (selectedMissionIds.length > 0 && filteredMissions.some(m => selectedMissionIds.includes(m.id) && m.family !== fam))) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selectedSubFams.length > 0) {
+                              const subFamsToMove = selectedSubFams.map(id => {
+                                const [, prod, col] = id.split('|');
+                                return { productName: prod, colorName: col };
+                              });
+                              onMoveMultipleSubFamilies(subFamsToMove, fam);
+                              setSelectedSubFams([]);
+                            }
+                            if (selectedMissionIds.length > 0) {
+                              const missionsToMove = selectedMissionIds.filter(id => {
+                                const m = filteredMissions.find(x => x.id === id);
+                                return m && m.family !== fam;
+                              });
+                              onMoveMultipleMissions(missionsToMove, fam);
+                              setSelectedMissionIds([]);
+                            }
+                          }}
+                          className="px-2.5 py-1 rounded bg-accent text-black font-mono font-black border border-accent hover:bg-black hover:text-accent hover:border-accent text-[8px] tracking-wider uppercase flex items-center gap-1 shadow-[0_0_12px_rgba(0,255,148,0.35)] ml-3 transition-all cursor-pointer transform hover:scale-105 animate-pulse"
+                        >
+                          Déposer la sélection ici ({
+                            (selectedSubFams.filter(id => !id.startsWith(`${fam}|`)).length) + 
+                            (selectedMissionIds.filter(id => {
+                              const m = filteredMissions.find(x => x.id === id);
+                              return m && m.family !== fam;
+                            }).length)
+                          })
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {isFamCollapsed ? <ChevronDown size={14} className="text-text-dim" /> : <ChevronUp size={14} className="text-text-dim" />}
+                </div>
+
+                {/* Family Content (Subfamilies accordion) */}
+                <AnimatePresence initial={false}>
+                  {!isFamCollapsed && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="p-4 space-y-4 bg-black/20"
+                    >
+                      {subFamKeys.map((subFamKey) => {
+                        const [productName, colorName] = subFamKey.split('|');
+                        const subFamMissions = subFamilies[subFamKey];
+                        const isSubFamCollapsed = collapsedSubFams[`${fam}|${subFamKey}`];
+
+                        const totalSubFamMissions = subFamMissions.length;
+                        const activeSubFamMissions = subFamMissions.filter(m => m.enabled);
+                        const activeSubFamMissionsCount = activeSubFamMissions.length;
+                        const completedSubFamMissionsCount = activeSubFamMissions.filter(m => m.status === 'livré').length;
+                        const subFamCompletionRate = activeSubFamMissionsCount > 0 ? (completedSubFamMissionsCount / activeSubFamMissionsCount) * 100 : 0;
+                        
+                        const isAllSubFamMissionsEnabled = subFamMissions.every(m => m.enabled) && totalSubFamMissions > 0;
+
+                        const subFamId = `${fam}|${productName}|${colorName}`;
+                        const isDraggedOver = draggedOverSubFam === subFamId;
+
+                        return (
+                          <div 
+                            key={subFamKey} 
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (draggedOverSubFam !== subFamId) {
+                                setDraggedOverSubFam(subFamId);
+                              }
+                            }}
+                            onDragLeave={(e) => {
+                              e.stopPropagation();
+                              if (draggedOverSubFam === subFamId) {
+                                setDraggedOverSubFam(null);
+                              }
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDraggedOverSubFam(null);
+                              const dragData = e.dataTransfer.getData("text/plain");
+                              if (dragData) {
+                                if (dragData.startsWith("MISSION|")) {
+                                  const [, srcFam, mId] = dragData.split('|');
+                                  if (selectedMissionIds.includes(mId)) {
+                                    onMoveMultipleMissions(selectedMissionIds, fam, productName, colorName);
+                                    setSelectedMissionIds([]);
+                                  } else {
+                                    onMoveMissionToFamily(mId, fam, productName, colorName);
+                                  }
+                                } else {
+                                  // subfamily drag
+                                  let srcFam = '';
+                                  let prod = '';
+                                  let col = '';
+                                  if (dragData.startsWith("SUBFAMILY|")) {
+                                    [, srcFam, prod, col] = dragData.split('|');
+                                  } else {
+                                    [srcFam, prod, col] = dragData.split('|');
+                                  }
+                                  
+                                  const subFamKeyStr = `${srcFam}|${prod}|${col}`;
+                                  if (selectedSubFams.includes(subFamKeyStr)) {
+                                    const subFamsToMove = selectedSubFams.map(id => {
+                                      const [, p, c] = id.split('|');
+                                      return { productName: p, colorName: c };
+                                    });
+                                    onMoveMultipleSubFamilies(subFamsToMove, fam);
+                                    setSelectedSubFams([]);
+                                  } else {
+                                    if (srcFam !== fam) {
+                                      onMoveSubFamilyToFamily(prod, col, fam);
+                                    }
+                                  }
+                                }
+                              }
+                            }}
+                            className={`border rounded-xl bg-black/40 overflow-hidden transition-all duration-200 ${
+                              isDraggedOver 
+                                ? 'border-accent bg-accent/5 shadow-[0_0_15px_rgba(0,255,148,0.2)] scale-[1.01]' 
+                                : 'border-white/5'
+                            }`}
+                          >
+                            {/* Subfamily Header (Product Badge & Color Badge) & Draggable container */}
+                            <div 
+                              onClick={() => toggleSubFam(`${fam}|${subFamKey}`)}
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = "move";
+                                e.dataTransfer.setData("text/plain", `${fam}|${productName}|${colorName}`);
+                              }}
+                              className="flex items-center justify-between p-3 bg-white/[0.03] hover:bg-white/[0.07] transition-all cursor-pointer select-none active:bg-white/[0.05]"
+                            >
+                              <div className="flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                                {/* Drag Grip Handle */}
+                                <div 
+                                  className="text-white/20 hover:text-accent cursor-grab active:cursor-grabbing p-1 shrink-0 flex items-center justify-center -ml-1"
+                                  title="Glisser-déposer pour déplacer vers une autre famille"
+                                >
+                                  <GripVertical size={13} />
+                                </div>
+
+                                {/* Selection Check Button */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSubFamilySelection(fam, productName, colorName);
+                                  }}
+                                  className={`w-4.5 h-4.5 rounded border flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                                    isSubFamilySelected(fam, productName, colorName)
+                                      ? 'bg-accent border-accent text-black shadow-[0_0_8px_rgba(0,255,148,0.4)]'
+                                      : 'border-white/25 hover:border-white/45 bg-white/5 text-text-dim'
+                                  }`}
+                                  style={{ width: '18px', height: '18px' }}
+                                  title="Sélectionner pour déplacer"
+                                >
+                                  {isSubFamilySelected(fam, productName, colorName) && (
+                                    <Check size={9} strokeWidth={3} />
+                                  )}
+                                </button>
+
+                                {/* Product badge mimicking image style */}
+                                <div className="px-3 py-1 rounded bg-white/10 border border-white/20 text-[11px] font-black uppercase text-white font-mono tracking-wider min-w-[90px] text-center shadow-md ml-1">
+                                  {productName}
+                                </div>
+                                
+                                {/* Color badge */ }
+                                <div className={`px-2.5 py-1 rounded text-[10px] font-semibold text-white font-mono uppercase tracking-wide border ${getColorAccentClass(colorName)}`}>
+                                  {colorName}
+                                </div>
+
+                                {/* Active toggle inside sub-family */}
+                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <span className="text-[7.5px] font-mono font-black uppercase text-white/40 tracking-wider">Activer :</span>
+                                  <Toggle 
+                                    enabled={isAllSubFamMissionsEnabled} 
+                                    onToggle={() => onToggleAllMissionsInSubFamily(fam, productName, colorName, !isAllSubFamMissionsEnabled)} 
+                                  />
+                                </div>
+
+                                {/* Stats inside subfamily header */}
+                                {subFamCompletionRate > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded bg-accent/5 border border-accent/15 text-[8px] font-mono text-accent uppercase">
+                                    {subFamCompletionRate.toFixed(0)}% livré
+                                  </span>
+                                )}
+
+                                <div className="text-[9px] text-text-dim/60 font-mono font-bold uppercase tracking-widest ml-2">
+                                  {activeSubFamMissionsCount}/{totalSubFamMissions} active(s)
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {isSubFamCollapsed ? <ChevronDown size={14} className="text-text-dim/60" /> : <ChevronUp size={14} className="text-text-dim/60" />}
+                              </div>
+                            </div>
+
+                            {/* Subfamily Content (Missions List) */}
+                            <AnimatePresence initial={false}>
+                              {!isSubFamCollapsed && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="border-t border-white/5 divide-y divide-white/5 bg-black/[0.15]"
+                                >
+                                  {subFamMissions.map((m) => {
+                                    const isSelected = selectedMissionIds.includes(m.id);
+                                    const isDup = showDuplicateIndicators && isDuplicate(m);
+                                    
+                                    let itemBorderClass = 'border-l-transparent';
+                                    let itemBgClass = '';
+                                    
+                                    if (isSelected && isDup) {
+                                      itemBorderClass = 'border-l-red-500';
+                                      itemBgClass = 'bg-red-500/10 shadow-[inset_4px_0_0_rgba(0,255,148,0.3)] shadow-[0_0_10px_rgba(239,68,68,0.2)]';
+                                    } else if (isSelected) {
+                                      itemBorderClass = 'border-l-accent';
+                                      itemBgClass = 'bg-accent/10 shadow-[inset_4px_0_0_rgba(0,255,148,0.2)]';
+                                    } else if (isDup) {
+                                      itemBorderClass = 'border-l-red-500';
+                                      itemBgClass = 'bg-red-500/5';
+                                    } else {
+                                      itemBgClass = 'hover:bg-white/[0.04]';
+                                    }
+
+                                    return (
+                                      <div 
+                                        key={m.id} 
+                                        draggable
+                                        onDragStart={(e) => {
+                                          const target = e.target as HTMLElement;
+                                          if (target.closest('button') || target.closest('input') || target.closest('.toggle-switch')) {
+                                            e.preventDefault();
+                                            return;
+                                          }
+                                          e.dataTransfer.effectAllowed = "move";
+                                          e.dataTransfer.setData("text/plain", `MISSION|${fam}|${m.id}`);
+                                        }}
+                                        onDoubleClick={() => setSelectedMissionId(m.id)}
+                                        className={`p-3 relative flex items-center justify-between gap-4 group transition-colors border-l-2 ${itemBorderClass} ${itemBgClass} cursor-grab active:cursor-grabbing ${m.enabled ? '' : 'opacity-40 grayscale-[0.5]'}`}
+                                      >
+                                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                                          {/* Mission Drag Grip Handle */}
+                                          <div 
+                                            className="text-white/20 hover:text-accent cursor-grab active:cursor-grabbing p-1 shrink-0 flex items-center justify-center -ml-2"
+                                            title="Glisser-déposer pour déplacer vers une autre famille"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <GripVertical size={12} />
+                                          </div>
+
+                                          {/* Mission Selection Checkbox */}
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onToggleSelectMission(m.id, e);
+                                            }}
+                                            className={`w-4 h-4 rounded border flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                                              isSelected
+                                                ? 'bg-accent border-accent text-black shadow-[0_0_8px_rgba(0,255,148,0.4)]'
+                                                : 'border-white/20 hover:border-white/40 bg-white/5 text-text-dim'
+                                            }`}
+                                            style={{ width: '16px', height: '16px' }}
+                                            title="Sélectionner la mission"
+                                          >
+                                            {isSelected && (
+                                              <Check size={8} strokeWidth={4} />
+                                            )}
+                                          </button>
+
+                                          {/* Status bulb */}
+                                          <div className={`w-2 h-2 rounded-full shrink-0 ${
+                                            m.status === 'livré' ? 'bg-accent shadow-[0_0_8px_var(--color-accent)]' : 
+                                            m.status === 'en cours de shoot' ? 'bg-accent-blue shadow-[0_0_8px_var(--color-accent-blue)]' : 
+                                            m.status === 'annuler' ? 'bg-red-500' :
+                                            'bg-white/20'
+                                          }`} />
+
+                                          <div className="flex flex-col">
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-[10px] font-mono font-black text-accent-blue" style={{ color: refIdColor }}>
+                                                {m.refId}
+                                              </span>
+                                              <span className="text-[8px] font-mono text-text-dim/50">
+                                                #{m.missionNo}
+                                              </span>
+                                              <div className={`px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-tighter ${
+                                                m.priority === 'High priority' ? 'bg-red-500 text-white' : 
+                                                m.priority === 'Medium priority' ? 'bg-accent-red text-black' : 
+                                                'bg-white/10 text-white'
+                                              }`}>
+                                                {m.priority.split(' ')[0]}
+                                              </div>
+                                              {!m.enabled && (
+                                                <span className="text-[7px] font-bold text-red-500 border border-red-500/20 px-1 py-0.5 rounded bg-red-500/5 uppercase tracking-wider">OFF</span>
+                                              )}
+                                            </div>
+                                            
+                                            <div className="text-[11px] font-medium text-white/80 uppercase tracking-wide mt-0.5 max-w-[280px] truncate">
+                                              {m.argumentType || 'Aucun argument'} <span className="text-white/20 font-light mx-1">|</span> {m.univers || 'Sans univers'} <span className="text-white/20 font-light mx-1">|</span> {m.format || 'Standard'}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-4 shrink-0">
+                                          {/* Individual Mission Toggle Switch */}
+                                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                            <Toggle 
+                                              enabled={m.enabled} 
+                                              onToggle={(e) => onToggleMissionEnabled(m.id, e)} 
+                                            />
+                                          </div>
+
+                                          {/* Deadline */}
+                                          {m.deadline && (
+                                            <div className="flex items-center gap-1.5 text-text-dim text-[10px] font-mono bg-white/5 border border-white/10 px-2 py-0.5 rounded">
+                                              <Clock size={10} />
+                                              <span className={isDeadlineApproaching(m.deadline) && m.status !== 'livré' && m.enabled ? 'text-red-400 font-bold animate-pulse' : ''}>
+                                                {m.deadline}
+                                              </span>
+                                            </div>
+                                          )}
+
+                                          {/* Progress Badge */}
+                                          <div className="flex flex-col items-end pr-1">
+                                            <span className="text-[10px] font-mono font-black text-white">{m.progress}%</span>
+                                            <span className="text-[7px] font-black uppercase text-accent tracking-widest">{m.status}</span>
+                                          </div>
+
+                                          {/* Action trigger button */}
+                                          <button 
+                                            onClick={(e) => { e.stopPropagation(); setSelectedMissionId(m.id); }}
+                                            className="p-1 px-1.5 bg-accent/10 border border-accent/20 text-accent rounded hover:bg-accent/20 transition-all opacity-0 group-hover:opacity-100 flex items-center gap-1 text-[9px] uppercase tracking-widest font-black"
+                                          >
+                                            Détail <CheckSquare size={10} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
