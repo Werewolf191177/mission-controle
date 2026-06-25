@@ -1301,7 +1301,7 @@ LISTE DES COMMANDES :
   const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display'>('branding');
   const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('gemini_custom_api_key') || '');
   const [isSynchroFluxExpanded, setIsSynchroFluxExpanded] = useState<boolean>(() => {
-    const stored = localStorage.getItem('synchro_flux_expanded');
+    const stored = localStorage.getItem('isSynchroFluxExpanded') || localStorage.getItem('synchro_flux_expanded');
     return stored !== 'false';
   });
 
@@ -1811,7 +1811,7 @@ LISTE DES COMMANDES :
         if (savedScheduledExportTime) setScheduledExportTime(savedScheduledExportTime);
 
         // Load extra persistent settings (JSON & Excel points and settings)
-        const savedIsSynchroFluxExpanded = localStorage.getItem('isSynchroFluxExpanded');
+        const savedIsSynchroFluxExpanded = localStorage.getItem('isSynchroFluxExpanded') || localStorage.getItem('synchro_flux_expanded');
         if (savedIsSynchroFluxExpanded !== null) setIsSynchroFluxExpanded(savedIsSynchroFluxExpanded === 'true');
 
         const savedAutoExportCalendarOnCreate = localStorage.getItem('autoExportCalendarOnCreate');
@@ -2537,6 +2537,7 @@ LISTE DES COMMANDES :
 
       // Additional states (remembering the JSON and Excel points and settings)
       localStorage.setItem('isSynchroFluxExpanded', isSynchroFluxExpanded.toString());
+      localStorage.setItem('synchro_flux_expanded', isSynchroFluxExpanded.toString());
       localStorage.setItem('autoExportCalendarOnCreate', autoExportCalendarOnCreate.toString());
       localStorage.setItem('autoExportTasksOnCreate', autoExportTasksOnCreate.toString());
       localStorage.setItem('autoExportMainCalendarOnCreate', autoExportMainCalendarOnCreate.toString());
@@ -3978,6 +3979,42 @@ Formatté via Mission Contrôle V3`;
     setSelectedMissionIds(prev => prev.filter(mid => mid !== id));
   };
 
+  const duplicateSingleMission = (original: Mission) => {
+    const newMissionNo = missionCounter;
+    const newRefId = `${refPrefix} ${refCounter}`;
+
+    const duplicated: Mission = {
+      ...original,
+      id: Math.random().toString(36).substring(2, 9),
+      missionNo: newMissionNo,
+      refId: newRefId,
+      createdAt: Date.now(),
+      updatedAt: undefined,
+      history: [
+        { timestamp: Date.now(), message: `Mission dupliquée (Copie de la mission #${original.missionNo})` }
+      ],
+    };
+
+    setMissions(prev => [duplicated, ...prev]);
+    setMissionCounter(prev => prev + 1);
+    setRefCounter(prev => prev + 1);
+
+    const logEntry: GlobalLogEntry = {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `DUPLICATION : Mission #${duplicated.missionNo} [${duplicated.refId}] créée (Copie de la mission #${original.missionNo}).`,
+      type: 'mission'
+    };
+    setGlobalLogs(prev => [...prev, logEntry]);
+
+    setToast({ 
+      show: true, 
+      message: `Mission dupliquée avec succès (#${duplicated.missionNo}) !`, 
+      type: 'task' 
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+  };
+
   const addManualLog = () => {
     if (!manualLog.trim()) return;
     const logEntry: GlobalLogEntry = {
@@ -4523,6 +4560,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                 </div>
                                 <div className="absolute top-2 right-2 flex gap-1.5 items-center z-10 font-black">
                                   <button 
+                                    onClick={(e) => { e.stopPropagation(); duplicateSingleMission(m); }}
+                                    className="w-5 h-5 rounded border bg-black/60 border-white/20 text-white/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all hover:bg-accent hover:border-accent hover:text-black"
+                                    title="Dupliquer la mission"
+                                  >
+                                    <Copy size={10} />
+                                  </button>
+                                  <button 
                                     onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
                                     className="w-5 h-5 rounded border bg-black/60 border-white/20 text-white/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all hover:bg-red-500 hover:border-red-500 hover:text-white"
                                     title="Supprimer la mission"
@@ -4574,6 +4618,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                       <StarRatingStatic rating={m.rating} size={6} />
                                     </div>
                                   ) : null}
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); duplicateSingleMission(m); }}
+                                    className="w-5 h-5 rounded border border-white/10 text-text-dim opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all hover:bg-accent hover:border-accent hover:text-black"
+                                    title="Dupliquer la mission"
+                                  >
+                                    <Copy size={10} />
+                                  </button>
                                   <button 
                                     onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
                                     className="w-5 h-5 rounded border border-white/10 text-text-dim opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all hover:bg-red-500 hover:border-red-500 hover:text-white"
@@ -7416,6 +7467,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                          <div className="flex items-center gap-2">
                             <span className="text-[11px] font-bold text-white mt-1 group-hover:text-accent transition-colors truncate max-w-[170px] text-left uppercase">{m.product}</span>
                             <button 
+                              onClick={(e) => { e.stopPropagation(); duplicateSingleMission(m); }}
+                              className="opacity-0 group-hover:opacity-100 p-1 text-text-dim hover:text-accent transition-all flex h-6 w-6 items-center justify-center rounded-lg hover:bg-accent/10"
+                              title="Dupliquer"
+                            >
+                              <Copy size={12} />
+                            </button>
+                            <button 
                               onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
                               className="opacity-0 group-hover:opacity-100 p-1 text-text-dim hover:text-red-500 transition-all flex h-6 w-6 items-center justify-center rounded-lg hover:bg-red-500/10"
                               title="Supprimer"
@@ -8489,6 +8547,61 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     setSelectedMissionIds([]);
     setToast({ show: true, message: 'Toute la sélection a été supprimée', type: 'task' });
     setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+  };
+
+  const duplicateMissions = () => {
+    if (selectedMissionIds.length === 0) return;
+
+    let currentMissionNo = missionCounter;
+    let currentRefCounter = refCounter;
+    const duplicatedMissions: Mission[] = [];
+
+    const missionsToDuplicate = [...missions]
+      .filter(m => selectedMissionIds.includes(m.id))
+      .reverse();
+
+    missionsToDuplicate.forEach(original => {
+      const newMissionNo = currentMissionNo;
+      const newRefId = `${refPrefix} ${currentRefCounter}`;
+
+      const duplicated: Mission = {
+        ...original,
+        id: Math.random().toString(36).substring(2, 9),
+        missionNo: newMissionNo,
+        refId: newRefId,
+        createdAt: Date.now(),
+        updatedAt: undefined,
+        history: [
+          { timestamp: Date.now(), message: `Mission dupliquée (Copie de la mission #${original.missionNo})` }
+        ],
+      };
+
+      duplicatedMissions.push(duplicated);
+      currentMissionNo++;
+      currentRefCounter++;
+    });
+
+    duplicatedMissions.reverse();
+
+    setMissions(prev => [...duplicatedMissions, ...prev]);
+    setMissionCounter(currentMissionNo);
+    setRefCounter(currentRefCounter);
+
+    const logMsg = `DUPLICATION GROUPÉE : ${duplicatedMissions.length} mission(s) dupliquée(s).`;
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: logMsg,
+      type: 'mission'
+    }]);
+
+    setToast({ 
+      show: true, 
+      message: `${duplicatedMissions.length} mission(s) dupliquée(s) avec succès !`, 
+      type: 'task' 
+    });
+    setSelectedMissionIds([]);
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
   };
 
   const toggleSelectAll = () => {
@@ -9785,7 +9898,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </div>
                 
                 <div className="flex items-center gap-4">
-                  <div className="flex flex-col gap-1.5 bg-white/5 p-2 rounded-lg border border-white/10 backdrop-blur-sm shadow-2xl transition-all duration-300 min-w-[160px]">
+                  <div 
+                    className="flex flex-col gap-1.5 p-2 rounded-lg border backdrop-blur-sm shadow-2xl transition-all duration-300 min-w-[160px]"
+                    style={{ 
+                      backgroundColor: `${accentColor}18`, 
+                      borderColor: `${accentColor}45` 
+                    }}
+                  >
                     {/* Header Row */}
                     <div className="flex items-center justify-between gap-3 border-b border-white/5 pb-1">
                       <div className="px-1 text-[8px] font-black uppercase leading-tight tracking-widest text-text-dim/60 flex flex-col">
@@ -9797,6 +9916,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           const nextState = !isSynchroFluxExpanded;
                           setIsSynchroFluxExpanded(nextState);
                           localStorage.setItem('synchro_flux_expanded', String(nextState));
+                          localStorage.setItem('isSynchroFluxExpanded', String(nextState));
                         }}
                         className="p-1 hover:bg-white/10 rounded text-text-dim hover:text-white transition-colors cursor-pointer"
                         title={isSynchroFluxExpanded ? "Rétrécir le menu synchro flux" : "Développer le menu synchro flux"}
@@ -11110,6 +11230,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                   <FileText size={14} />
                                 </button>
                                 <button 
+                                  onClick={(e) => { e.stopPropagation(); duplicateSingleMission(m); }}
+                                  className="w-8 h-8 rounded-full flex items-center justify-center text-accent hover:bg-accent/10 transition-all opacity-0 group-hover:opacity-100"
+                                  title="Dupliquer la mission"
+                                >
+                                  <Copy size={14} />
+                                </button>
+                                <button 
                                   onClick={(e) => { e.stopPropagation(); removeMission(m.id); }}
                                   className="w-8 h-8 rounded-full flex items-center justify-center text-text-dim hover:text-red-500 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
                                   title="Supprimer la mission"
@@ -11538,6 +11665,14 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               >
                 <Activity size={12} />
                 Éditions Groupées
+              </button>
+
+              <button 
+                onClick={duplicateMissions}
+                className="flex items-center gap-2 px-4 py-2 bg-accent/20 text-accent border border-accent/30 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-accent/30 transition-all"
+              >
+                <Copy size={12} />
+                Dupliquer
               </button>
 
               <button 
