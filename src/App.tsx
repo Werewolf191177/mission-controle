@@ -96,6 +96,7 @@ import {
 
 import { initAuth, googleSignIn, logout, getAccessToken } from './services/firebaseAuth';
 import type { User } from 'firebase/auth';
+import SecondaryMissionDetailModal from './components/SecondaryMissionDetailModal';
 
 // --- STABLE SUB-COMPONENTS ---
 
@@ -1035,6 +1036,7 @@ export default function App() {
 
   // UI State
   const [selectedMissionId, setSelectedMissionId] = useState<string | null>(null);
+  const [selectedSecondaryMissionForModal, setSelectedSecondaryMissionForModal] = useState<SecondaryMission | null>(null);
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<{ show: boolean, message: string, type: string }>({ show: false, message: '', type: 'calendar' });
   const [isCapturing, setIsCapturing] = useState(false);
@@ -1191,6 +1193,7 @@ export default function App() {
   const [filterQuery, setFilterQuery] = useState('');
   const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
   const [filterProducts, setFilterProducts] = useState<string[]>([]);
+  const [filterFamilies, setFilterFamilies] = useState<string[]>([]);
   const [filterUniverses, setFilterUniverses] = useState<string[]>([]);
   const [filterSupports, setFilterSupports] = useState<string[]>([]);
   const [filterColors, setFilterColors] = useState<string[]>([]);
@@ -1203,6 +1206,7 @@ export default function App() {
   const [filterDateType, setFilterDateType] = useState<'createdAt' | 'deadline'>('createdAt');
   const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
   const [isProductFilterOpen, setIsProductFilterOpen] = useState(false);
+  const [isFamilyFilterOpen, setIsFamilyFilterOpen] = useState(false);
   const [isUniverseFilterOpen, setIsUniverseFilterOpen] = useState(false);
   const [isSupportFilterOpen, setIsSupportFilterOpen] = useState(false);
   const [isColorFilterOpen, setIsColorFilterOpen] = useState(false);
@@ -1210,12 +1214,66 @@ export default function App() {
   const [isPriorityFilterOpen, setIsPriorityFilterOpen] = useState(false);
   const [isEnabledFilterOpen, setIsEnabledFilterOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [collapsedCategories, setCollapsedCategories] = useState<string[]>([]);
-  const [collapsedSettingsSections, setCollapsedSettingsSections] = useState<string[]>([]);
-  const [collapsedMosaicGroups, setCollapsedMosaicGroups] = useState<string[]>([]);
+  
+  const [collapsedCategories, setCollapsedCategories] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('collapsedCategories');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.warn('Error reading collapsedCategories', e);
+    }
+    return [];
+  });
+  
+  const [collapsedSettingsSections, setCollapsedSettingsSections] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('collapsedSettingsSections');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.warn('Error reading collapsedSettingsSections', e);
+    }
+    return [];
+  });
+  
+  const [collapsedMosaicGroups, setCollapsedMosaicGroups] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('collapsedMosaicGroups');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.warn('Error reading collapsedMosaicGroups', e);
+    }
+    return [];
+  });
+  
   const [retractedMosaics, setRetractedMosaics] = useState<boolean>(() => {
     return localStorage.getItem('retractedMosaics') === 'true';
   });
+
+  // Keep these states instantly in memory / local storage when updated
+  useEffect(() => {
+    localStorage.setItem('collapsedCategories', JSON.stringify(collapsedCategories));
+  }, [collapsedCategories]);
+
+  useEffect(() => {
+    localStorage.setItem('collapsedSettingsSections', JSON.stringify(collapsedSettingsSections));
+  }, [collapsedSettingsSections]);
+
+  useEffect(() => {
+    localStorage.setItem('collapsedMosaicGroups', JSON.stringify(collapsedMosaicGroups));
+  }, [collapsedMosaicGroups]);
+
+  useEffect(() => {
+    localStorage.setItem('retractedMosaics', retractedMosaics.toString());
+  }, [retractedMosaics]);
   
   // Journal State
   const [systemDataJson, setSystemDataJson] = useState('');
@@ -1242,6 +1300,10 @@ LISTE DES COMMANDES :
   const [aiInstructions, setAiInstructions] = useState(defaultAiInstructions);
   const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display'>('branding');
   const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('gemini_custom_api_key') || '');
+  const [isSynchroFluxExpanded, setIsSynchroFluxExpanded] = useState<boolean>(() => {
+    const stored = localStorage.getItem('synchro_flux_expanded');
+    return stored !== 'false';
+  });
 
   // Auto Export state
   const [autoExportEnabled, setAutoExportEnabled] = useState(false);
@@ -1468,6 +1530,34 @@ LISTE DES COMMANDES :
     };
     reader.readAsText(file);
     // Reset input
+    e.target.value = '';
+  };
+
+  const handleJsonDirectImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      try {
+        processImport(content);
+        setToast({
+          show: true,
+          message: 'Données JSON importées avec succès !',
+          type: 'task'
+        });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      } catch (err: any) {
+        setToast({
+          show: true,
+          message: `Erreur d'import JSON : ${err.message}`,
+          type: 'alert'
+        });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
+      }
+    };
+    reader.readAsText(file);
     e.target.value = '';
   };
 
@@ -1719,6 +1809,40 @@ LISTE DES COMMANDES :
         
         const savedScheduledExportTime = localStorage.getItem('scheduledExportTime');
         if (savedScheduledExportTime) setScheduledExportTime(savedScheduledExportTime);
+
+        // Load extra persistent settings (JSON & Excel points and settings)
+        const savedIsSynchroFluxExpanded = localStorage.getItem('isSynchroFluxExpanded');
+        if (savedIsSynchroFluxExpanded !== null) setIsSynchroFluxExpanded(savedIsSynchroFluxExpanded === 'true');
+
+        const savedAutoExportCalendarOnCreate = localStorage.getItem('autoExportCalendarOnCreate');
+        if (savedAutoExportCalendarOnCreate !== null) setAutoExportCalendarOnCreate(savedAutoExportCalendarOnCreate === 'true');
+
+        const savedAutoExportTasksOnCreate = localStorage.getItem('autoExportTasksOnCreate');
+        if (savedAutoExportTasksOnCreate !== null) setAutoExportTasksOnCreate(savedAutoExportTasksOnCreate === 'true');
+
+        const savedAutoExportMainCalendarOnCreate = localStorage.getItem('autoExportMainCalendarOnCreate');
+        if (savedAutoExportMainCalendarOnCreate !== null) setAutoExportMainCalendarOnCreate(savedAutoExportMainCalendarOnCreate === 'true');
+
+        const savedAutoExportMainTasksOnCreate = localStorage.getItem('autoExportMainTasksOnCreate');
+        if (savedAutoExportMainTasksOnCreate !== null) setAutoExportMainTasksOnCreate(savedAutoExportMainTasksOnCreate === 'true');
+
+        const savedActiveTab = localStorage.getItem('activeTab');
+        if (savedActiveTab) setActiveTab(savedActiveTab as any);
+
+        const savedSystemSubTab = localStorage.getItem('systemSubTab');
+        if (savedSystemSubTab) setSystemSubTab(savedSystemSubTab as any);
+
+        const savedShowDuplicateIndicators = localStorage.getItem('showDuplicateIndicators');
+        if (savedShowDuplicateIndicators !== null) setShowDuplicateIndicators(savedShowDuplicateIndicators === 'true');
+
+        const savedFilterDuplicates = localStorage.getItem('filterDuplicates');
+        if (savedFilterDuplicates !== null) setFilterDuplicates(savedFilterDuplicates === 'true');
+
+        const savedShowSecondaryInReport = localStorage.getItem('showSecondaryInReport');
+        if (savedShowSecondaryInReport !== null) setShowSecondaryInReport(savedShowSecondaryInReport === 'true');
+
+        const savedSystemDataJson = localStorage.getItem('systemDataJson');
+        if (savedSystemDataJson) setSystemDataJson(savedSystemDataJson);
 
         if (savedSecondaryMissions) {
           const parsed = safeParse(savedSecondaryMissions);
@@ -2410,6 +2534,19 @@ LISTE DES COMMANDES :
       localStorage.setItem('scheduledExportTime', scheduledExportTime);
       const categoriesToSave = categories.map(({ icon, ...rest }) => rest);
       localStorage.setItem('categories', JSON.stringify(categoriesToSave));
+
+      // Additional states (remembering the JSON and Excel points and settings)
+      localStorage.setItem('isSynchroFluxExpanded', isSynchroFluxExpanded.toString());
+      localStorage.setItem('autoExportCalendarOnCreate', autoExportCalendarOnCreate.toString());
+      localStorage.setItem('autoExportTasksOnCreate', autoExportTasksOnCreate.toString());
+      localStorage.setItem('autoExportMainCalendarOnCreate', autoExportMainCalendarOnCreate.toString());
+      localStorage.setItem('autoExportMainTasksOnCreate', autoExportMainTasksOnCreate.toString());
+      localStorage.setItem('activeTab', activeTab);
+      localStorage.setItem('systemSubTab', systemSubTab);
+      localStorage.setItem('showDuplicateIndicators', showDuplicateIndicators.toString());
+      localStorage.setItem('filterDuplicates', filterDuplicates.toString());
+      localStorage.setItem('showSecondaryInReport', showSecondaryInReport.toString());
+      localStorage.setItem('systemDataJson', systemDataJson);
     } catch (e) {
       if (e instanceof Error && e.name === 'QuotaExceededError') {
         console.error('[STORAGE] Quota exceeded. Attempting to prune logs...');
@@ -2431,7 +2568,20 @@ LISTE DES COMMANDES :
         console.error('[STORAGE] Save failed:', e);
       }
     }
-  }, [missions, secondaryMissions, appLogo, headerBgColor, autoExportEnabled, autoExportInterval, scheduledExportEnabled, scheduledExportDays, scheduledExportTime, missionCounter, refPrefix, refCounter, categories, headerBgImage, headerBgOpacity, globalLogs, waveColor, waveOpacity, waveType, appFont, appFontSize, appTextColor, appTextCase, appFontWeight, navActiveColor, suiteSubtitleColor, copyBtnColor, saveBtnColor, missionTitleColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, sortConfigs, viewMode, tableViewState, manualHiddenColumns, compactHiddenColumns, minimalHiddenColumns, collapsedCategories, collapsedSettingsSections, collapsedMosaicGroups, retractedMosaics, aiInstructions, deadlineAlertThreshold, globalDeadline]);
+  }, [
+    missions, secondaryMissions, appLogo, headerBgColor, autoExportEnabled, autoExportInterval,
+    scheduledExportEnabled, scheduledExportDays, scheduledExportTime, missionCounter, refPrefix,
+    refCounter, categories, headerBgImage, headerBgOpacity, globalLogs, waveColor, waveOpacity,
+    waveType, appFont, appFontSize, appTextColor, appTextCase, appFontWeight, navActiveColor,
+    suiteSubtitleColor, copyBtnColor, saveBtnColor, missionTitleColor, refIdColor, accentColor,
+    accentBlueColor, accentPurpleColor, accentOrangeColor, accentPinkColor, accentRedColor,
+    accentYellowColor, sortConfigs, viewMode, tableViewState, manualHiddenColumns, compactHiddenColumns,
+    minimalHiddenColumns, collapsedCategories, collapsedSettingsSections, collapsedMosaicGroups,
+    retractedMosaics, aiInstructions, deadlineAlertThreshold, globalDeadline,
+    isSynchroFluxExpanded, autoExportCalendarOnCreate, autoExportTasksOnCreate,
+    autoExportMainCalendarOnCreate, autoExportMainTasksOnCreate, activeTab, systemSubTab,
+    showDuplicateIndicators, filterDuplicates, showSecondaryInReport, systemDataJson
+  ]);
 
   const saveToLocalStorage = () => {
     performSave();
@@ -2591,295 +2741,7 @@ LISTE DES COMMANDES :
   
   downloadFullExportRef.current = downloadFullExport;
 
-  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const parseExcelDate = (val: any, timeVal?: any): number => {
-      if (!val) return Date.now();
-      
-      if (typeof val === 'number') {
-        const utc_days = Math.floor(val - 25569);
-        const utc_value = utc_days * 86400;
-        const date_info = new Date(utc_value * 1000);
-        
-        const fractional_day = val - Math.floor(val);
-        let total_seconds = Math.floor(86400 * fractional_day);
-        if (timeVal !== undefined) {
-          if (typeof timeVal === 'number' && timeVal < 1) {
-            total_seconds = Math.floor(86400 * timeVal);
-          } else if (String(timeVal).includes(':')) {
-            const parts = String(timeVal).split(':');
-            const hrs = parseInt(parts[0], 10) || 0;
-            const mins = parseInt(parts[1], 10) || 0;
-            const secs = parts[2] ? parseInt(parts[2], 10) || 0 : 0;
-            total_seconds = hrs * 3600 + mins * 60 + secs;
-          }
-        }
-        const hrs = Math.floor(total_seconds / 3600);
-        const mins = Math.floor((total_seconds % 3600) / 60);
-        const secs = total_seconds % 60;
-        return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate(), hrs, mins, secs).getTime();
-      }
-
-      const dateStr = String(val).trim();
-      let parsedTime = { hrs: 0, mins: 0, secs: 0 };
-      if (timeVal !== undefined) {
-        const timeStr = String(timeVal).trim();
-        if (timeStr.includes(':')) {
-          const parts = timeStr.split(':');
-          parsedTime.hrs = parseInt(parts[0], 10) || 0;
-          parsedTime.mins = parseInt(parts[1], 10) || 0;
-          parsedTime.secs = parts[2] ? parseInt(parts[2], 10) || 0 : 0;
-        }
-      }
-
-      // French format: "DD/MM/YYYY" or "DD/MM/YY"
-      const dMatch = dateStr.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4}|\d{2})$/);
-      if (dMatch) {
-        const day = parseInt(dMatch[1], 10);
-        const month = parseInt(dMatch[2], 10) - 1;
-        let year = parseInt(dMatch[3], 10);
-        if (year < 100) year += 2000;
-        const dObj = new Date(year, month, day, parsedTime.hrs, parsedTime.mins, parsedTime.secs);
-        if (!isNaN(dObj.getTime())) {
-          return dObj.getTime();
-        }
-      }
-
-      const parsed = Date.parse(dateStr);
-      if (!isNaN(parsed)) {
-        const dObj = new Date(parsed);
-        if (timeVal !== undefined) {
-          dObj.setHours(parsedTime.hrs, parsedTime.mins, parsedTime.secs, 0);
-        }
-        return dObj.getTime();
-      }
-
-      return Date.now();
-    };
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = new Uint8Array(event.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-        
-        let sheetName = "";
-        if (workbook.SheetNames.includes("Production (Missions)")) {
-          sheetName = "Production (Missions)";
-        } else if (workbook.SheetNames.includes("Missions Production")) {
-          sheetName = "Missions Production";
-        } else {
-          sheetName = workbook.SheetNames[0]; // fallback
-        }
-        
-        const worksheet = workbook.Sheets[sheetName];
-        if (!worksheet) {
-          setToast({ show: true, message: 'Le fichier Excel est invalide ou vide.', type: 'alert' });
-          return;
-        }
-
-        const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        
-        if (rows.length <= 1) {
-          setToast({ show: true, message: 'Aucune donnée trouvée dans le fichier Excel.', type: 'alert' });
-          return;
-        }
-
-        const newMissions: Mission[] = [];
-        let maxMissionNo = missionCounter;
-        let maxRefCounter = refCounter;
-        
-        for (let i = 1; i < rows.length; i++) {
-          const row = rows[i];
-          if (!row || row.length === 0 || (!row[0] && !row[5])) continue;
-          
-          const missionNo = parseInt(String(row[0]), 10) || maxMissionNo;
-          const refId = row[1] ? String(row[1]) : `${refPrefix}-${maxRefCounter}`;
-          
-          const isEnabled = String(row[4]).toUpperCase() === 'OUI' || row[4] === true;
-          
-          const product = row[5] ? String(row[5]) : '';
-          const color = row[6] ? String(row[6]) : '';
-          const argumentType = row[7] ? String(row[7]) : '';
-          const univers = row[8] ? String(row[8]) : '';
-          const format = row[9] ? String(row[9]) : '';
-          const position = row[10] ? String(row[10]) : '';
-          const supportStr = row[11] ? String(row[11]) : '';
-          
-          const photoCountRequested = parseInt(String(row[12]), 10) || 1;
-          const photoCountDelivered = parseInt(String(row[13]), 10) || 0;
-          
-          const priority = row[14] ? String(row[14]) : 'Medium priority';
-          const deadlineRaw = row[15] === '-' ? '' : row[15] ? String(row[15]) : '';
-          const status = row[16] ? String(row[16]) : 'en attente';
-          const progress = parseInt(String(row[17]), 10) || 0;
-          const rating = parseFloat(String(row[18])) || 0;
-          
-          const info = row[21] === '-' ? '' : row[21] ? String(row[21]) : '';
-
-          if (missionNo >= maxMissionNo) maxMissionNo = missionNo + 1;
-          const parsedRefNum = parseInt(refId.split('-')[1], 10);
-          if (!isNaN(parsedRefNum) && parsedRefNum >= maxRefCounter) maxRefCounter = parsedRefNum + 1;
-          
-          const parsedCreatedAt = parseExcelDate(row[2], row[3]);
-
-          const importHistory: MissionLog[] = [
-            { timestamp: parsedCreatedAt, message: 'Mission créée via import Excel' }
-          ];
-          
-          if (progress > 0) {
-            importHistory.push({
-              timestamp: parsedCreatedAt,
-              message: `Progression mise à jour à ${progress}%`
-            });
-          }
-          
-          if (status === 'livré') {
-            importHistory.push({
-              timestamp: parsedCreatedAt,
-              message: 'Statut changé à "livré"'
-            });
-          } else if (status) {
-            importHistory.push({
-              timestamp: parsedCreatedAt,
-              message: `Statut changé à "${status}"`
-            });
-          }
-
-          const newMission: Mission = {
-            id: Math.random().toString(36).substring(2, 9),
-            missionNo,
-            refId,
-            product,
-            color,
-            argumentType,
-            univers,
-            format,
-            position,
-            support: supportStr,
-            priority,
-            status,
-            progress,
-            photoCountRequested,
-            photoCountDelivered,
-            rating,
-            info,
-            deadline: deadlineRaw,
-            createdAt: parsedCreatedAt,
-            updatedAt: status === 'livré' ? parsedCreatedAt : undefined,
-            history: importHistory,
-            enabled: isEnabled
-          };
-          
-          if (!isDuplicate(newMission)) {
-             newMissions.push(newMission);
-          }
-        }
-
-        newMissions.forEach(m => {
-          registerNewProductOrColor(m.product, m.color);
-        });
-
-        setMissions(prev => {
-          const merged = [...prev, ...newMissions];
-          const uniqueIds = new Set();
-          return merged.filter(m => {
-            if (uniqueIds.has(m.id)) return false;
-            uniqueIds.add(m.id);
-            return true;
-          });
-        });
-        
-        setMissionCounter(maxMissionNo);
-        setRefCounter(maxRefCounter);
-        
-        const newSecondaryMissions: SecondaryMission[] = [];
-        let secondarySheetName = "";
-        if (workbook.SheetNames.includes("Missions Secondaires")) {
-          secondarySheetName = "Missions Secondaires";
-        } else if (workbook.SheetNames.includes("Missions secondaires")) {
-          secondarySheetName = "Missions secondaires";
-        }
-        
-        if (secondarySheetName) {
-          const secondaryWorksheet = workbook.Sheets[secondarySheetName];
-          if (secondaryWorksheet) {
-            const secRows: any[] = XLSX.utils.sheet_to_json(secondaryWorksheet, { header: 1 });
-            if (secRows.length > 1) {
-              for (let i = 1; i < secRows.length; i++) {
-                const row = secRows[i];
-                if (!row || row.length === 0 || !row[1]) continue;
-                
-                const id = row[0] ? String(row[0]) : Math.random().toString(36).substring(2, 9);
-                const title = String(row[1]);
-                const priorityRaw = row[2] ? String(row[2]).toLowerCase() : 'medium';
-                const priority: 'low' | 'medium' | 'high' = 
-                  (priorityRaw === 'high' || priorityRaw === 'medium' || priorityRaw === 'low') 
-                    ? priorityRaw 
-                    : 'medium';
-                const status = row[3] ? String(row[3]) : 'A faire';
-                const progress = parseInt(String(row[4]), 10) || 0;
-                const rating = parseFloat(String(row[5])) || 0;
-                
-                let createdAt = parseExcelDate(row[6]);
-                
-                const deadline = row[7] === '-' ? '' : row[7] ? String(row[7]) : '';
-                const note = row[8] === '-' ? '' : row[8] ? String(row[8]) : '';
-                
-                newSecondaryMissions.push({
-                  id,
-                  title,
-                  priority,
-                  status,
-                  progress,
-                  rating,
-                  createdAt,
-                  deadline: deadline || undefined,
-                  enabled: true,
-                  note
-                });
-              }
-            }
-          }
-        }
-
-        if (newSecondaryMissions.length > 0) {
-          setSecondaryMissions(prev => {
-            const merged = [...prev, ...newSecondaryMissions];
-            const uniqueSecIds = new Set();
-            return merged.filter(sm => {
-              if (uniqueSecIds.has(sm.id)) return false;
-              uniqueSecIds.add(sm.id);
-              return true;
-            });
-          });
-        }
-        
-        setGlobalLogs(prev => [...prev, {
-          id: Math.random().toString(36).substring(2, 9),
-          timestamp: Date.now(),
-          message: `SYSTÈME : Importation de ${newMissions.length} missions et ${newSecondaryMissions.length} missions secondaires depuis Excel.`,
-          type: 'system'
-        }]);
-
-        setToast({ 
-          show: true, 
-          message: `${newMissions.length} missions et ${newSecondaryMissions.length} missions secondaires importées avec succès !`, 
-          type: 'task' 
-        });
-        setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 4000);
-      } catch (err: any) {
-        setToast({ show: true, message: `Erreur import Excel: ${err.message}`, type: 'alert' });
-        setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 4000);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    
-    // reset file input
-    if (e.target) e.target.value = '';
-  };
+  // Les importations Excel ont été supprimées au profit des importations JSON.
 
   const pushToGoogleSheets = async () => {
     if (!googleToken) {
@@ -3472,7 +3334,7 @@ Formatté via Mission Contrôle V3`;
       status: selectedStatus,
       progress: getInitialProgress(selectedStatus),
       photoCountRequested: photoRequested,
-      photoCountDelivered: 0,
+      photoCountDelivered: selectedStatus === 'livré' ? 1 : 0,
       rating: selectedRating,
       info,
       imageUrl: selectedImage || undefined,
@@ -3724,7 +3586,7 @@ Formatté via Mission Contrôle V3`;
         : `${removedList.slice(0, 8).join(', ')} et ${removedList.length - 8} autres`;
 
       setGlobalLogs(prev => [...prev, {
-        id: Date.now().toString(),
+        id: `clean-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         timestamp: Date.now(),
         type: 'system',
         message: `NETTOYAGE : ${removedCount} missions en doublon ont été fusionnées/supprimées (${detailMessage}).`
@@ -4023,9 +3885,15 @@ Formatté via Mission Contrôle V3`;
         }
 
         const updated = { ...m, ...updates, history, updatedAt: now };
+
+        let photoCountDelivered = updated.photoCountDelivered;
+        if (updates.status === 'livré' && (photoCountDelivered || 0) === 0) {
+          photoCountDelivered = 1;
+          updated.photoCountDelivered = 1;
+        }
         
         // Photos drive progress (Efficience = Delivered / Requested * 100)
-        if (updates.photoCountRequested !== undefined || updates.photoCountDelivered !== undefined) {
+        if (updates.photoCountRequested !== undefined || updates.photoCountDelivered !== undefined || (updates.status === 'livré' && photoCountDelivered === 1)) {
           const del = updated.photoCountDelivered || 0;
           const req = updated.photoCountRequested || 1;
           updated.progress = Math.round((del / req) * 100);
@@ -4061,9 +3929,6 @@ Formatté via Mission Contrôle V3`;
               break;
             case 'en cours de shoot': 
               updated.progress = 50; 
-              if (!updated.shotAt) {
-                updated.shotAt = getNowLocalDatetimeString();
-              }
               break;
             case 'produit préparé': 
               updated.progress = 25; 
@@ -4232,7 +4097,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
     // 3. Add to system logs
     setGlobalLogs(prev => [...prev, {
-      id: Date.now().toString(),
+      id: `rename-fam-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       timestamp: Date.now(),
       message: `FAMILLE: Renommage de la famille "${oldName}" en "${trimmed}"`,
       type: 'system'
@@ -4256,7 +4121,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     }));
     
     setGlobalLogs(prev => [...prev, {
-      id: Date.now().toString(),
+      id: `toggle-fam-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       timestamp: Date.now(),
       message: `FAMILLE: ${enabled ? 'ACTIVATION' : 'DÉSACTIVATION'} de toutes les missions de la famille "${famName}"`,
       type: 'system'
@@ -4281,7 +4146,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     }));
 
     setGlobalLogs(prev => [...prev, {
-      id: Date.now().toString(),
+      id: `toggle-subfam-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       timestamp: Date.now(),
       message: `FAMILLE: ${enabled ? 'ACTIVATION' : 'DÉSACTIVATION'} de la sous-famille "${productName} (${colorName})"`,
       type: 'system'
@@ -4305,7 +4170,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     }));
 
     setGlobalLogs(prev => [...prev, {
-      id: Date.now().toString(),
+      id: `move-subfam-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       timestamp: Date.now(),
       message: `FAMILLE: Déplacement de la sous-famille "${productName} (${colorName})" vers la famille "${targetFamily}"`,
       type: 'system'
@@ -4330,7 +4195,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     }));
 
     setGlobalLogs(prev => [...prev, {
-      id: Date.now().toString(),
+      id: `move-multi-subfam-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       timestamp: Date.now(),
       message: `FAMILLE: Déplacement de ${subFamiliesToMove.length} sous-familles vers la famille "${targetFamily}"`,
       type: 'system'
@@ -4358,7 +4223,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     }));
 
     setGlobalLogs(prev => [...prev, {
-      id: Date.now().toString(),
+      id: `move-mission-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       timestamp: Date.now(),
       message: `FAMILLE: Déplacement de la mission #${missionId} vers la famille "${targetFamily}"${targetProduct ? ` (sous-famille: ${targetProduct} | ${targetColor})` : ''}`,
       type: 'system'
@@ -4386,7 +4251,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     }));
 
     setGlobalLogs(prev => [...prev, {
-      id: Date.now().toString(),
+      id: `move-multi-missions-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       timestamp: Date.now(),
       message: `FAMILLE: Déplacement de ${missionIds.length} missions vers la famille "${targetFamily}"${targetProduct ? ` (sous-famille: ${targetProduct} | ${targetColor})` : ''}`,
       type: 'system'
@@ -4964,6 +4829,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           {Array.from({ length: new Date(primaryCalendarDate.getFullYear(), primaryCalendarDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
             const dateStr = `${primaryCalendarDate.getFullYear()}-${(primaryCalendarDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
             const dayMissions = filteredMissions.filter(m => m.enabled && m.deadline === dateStr);
+            const daySecondaryMissions = secondaryMissions.filter(m => m.enabled && m.deadline === dateStr);
             const isToday = new Date().toISOString().split('T')[0] === dateStr;
             return (
               <div key={day} className={`min-h-[120px] rounded-xl p-2.5 flex flex-col transition-colors ${isToday ? 'bg-accent/5 border border-accent/30 shadow-[0_0_15px_rgba(0,255,148,0.1)]' : 'bg-black/20 border border-white/5 hover:border-white/20 hover:bg-white/[0.02]'}`}>
@@ -4986,6 +4852,39 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         <span className="font-bold truncate leading-tight group-hover:text-white transition-colors">{m.product}</span>
                         <span className="text-[8px] opacity-60 font-mono truncate">{m.refId}</span>
                       </a>
+                   ))}
+                   
+                   {daySecondaryMissions.map(sm => (
+                      <div 
+                        key={sm.id}
+                        title="Double-cliquez pour éditer la mission secondaire, simple clic pour l’ajouter sur Google Calendar" 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const datesParam = sm.deadline ? new Date(sm.deadline).toISOString().replace(/-|:|\.\d\d\d/g, "") + '/' + new Date(new Date(sm.deadline).getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "") : '';
+                          const href = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('[Mission Sec] ' + sm.title)}&details=${encodeURIComponent(sm.note || '')}&dates=${datesParam}`;
+                          window.open(href, '_blank', 'noopener,noreferrer');
+                        }}
+                        onDoubleClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedSecondaryMissionForModal(sm);
+                        }}
+                        className={`group cursor-pointer hover:scale-[1.02] transition-all text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border border-dashed ${
+                          sm.progress >= 100 
+                            ? 'bg-white/5 border-white/5 text-white/40 line-through' 
+                            : sm.priority === 'high' 
+                            ? 'bg-red-500/5 text-red-400 border-red-500/20 hover:bg-red-500/15' 
+                            : sm.priority === 'medium' 
+                            ? 'bg-accent-yellow/5 text-accent-yellow border-accent-yellow/20 hover:bg-accent-yellow/15' 
+                            : 'bg-accent-blue/5 text-accent-blue border-accent-blue/20 hover:bg-accent-blue/15'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sm.progress >= 100 ? 'bg-white/20' : sm.priority === 'high' ? 'bg-red-500' : sm.priority === 'medium' ? 'bg-accent-yellow' : 'bg-accent-blue'}`} />
+                          <span className="font-bold truncate leading-tight group-hover:text-white transition-colors flex-1">{sm.title}</span>
+                        </div>
+                        <span className="text-[8.5px] opacity-60 font-mono">Sec.</span>
+                      </div>
                    ))}
                  </div>
               </div>
@@ -6810,39 +6709,39 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-white/40">Navigation Accent</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-white/40">Onglets & Boutons Actifs (Navigation)</label>
                         <input type="color" value={navActiveColor} onChange={(e) => setNavActiveColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-white/40">Title Accent</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-white/40">Couleur Logo (Mot 'MISSION')</label>
                         <input type="color" value={missionTitleColor} onChange={(e) => setMissionTitleColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-accent">Principal (Accent)</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent">Accent Principal (Statuts 'Préparé' & 'Livré')</label>
                         <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-blue">Accent Bleu</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-blue">Accent Bleu (Missions Sec., En cours)</label>
                         <input type="color" value={accentBlueColor} onChange={(e) => setAccentBlueColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-purple">Accent Violet</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-purple">Accent Violet (Familles & Univers)</label>
                         <input type="color" value={accentPurpleColor} onChange={(e) => setAccentPurpleColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-orange">Accent Orange</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-orange">Accent Orange (Positions & Filtres)</label>
                         <input type="color" value={accentOrangeColor} onChange={(e) => setAccentOrangeColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-pink">Accent Rose</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-pink">Accent Rose (Couleurs Produits & Supports)</label>
                         <input type="color" value={accentPinkColor} onChange={(e) => setAccentPinkColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-red">Accent Rouge</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-red">Accent Rouge (Urgences & Suppressions)</label>
                         <input type="color" value={accentRedColor} onChange={(e) => setAccentRedColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                      <div className="space-y-3">
-                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-yellow">Accent Jaune</label>
+                        <label className="text-[9px] font-black uppercase tracking-wide text-accent-yellow">Accent Jaune (Notations & Formats)</label>
                         <input type="color" value={accentYellowColor} onChange={(e) => setAccentYellowColor(e.target.value)} className="w-full h-10 rounded-lg cursor-pointer bg-transparent border-none p-0" />
                      </div>
                   </div>
@@ -7736,148 +7635,25 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           const reader = new FileReader();
           reader.onload = (event) => {
             try {
-              const data = new Uint8Array(event.target?.result as ArrayBuffer);
-              const workbook = XLSX.read(data, { type: 'array' });
-              
-              // Find the sheet to parse, skipping known metadata sheets
-              let sheetName = "";
-              const preferredSheets = ["Synthèse Inventaire", "Produits Détails", "Production (Missions)", "Missions Production", "Produits Details", "Details"];
-              for (const pref of preferredSheets) {
-                if (workbook.SheetNames.includes(pref)) {
-                  sheetName = pref;
-                  break;
+              const text = event.target?.result as string;
+              const data = JSON.parse(text);
+              const items = Array.isArray(data) ? data : (data.items || data.products || []);
+              items.forEach((item: any) => {
+                const productVal = item.product || item.nom || item.name || '';
+                if (productVal) {
+                  parsedProducts.push({
+                    product: String(productVal).trim(),
+                    color: String(item.color || item.couleur || 'Neutre').trim(),
+                    quantity: typeof item.quantity === 'number' ? item.quantity : (parseInt(item.quantity || item.qty || item.qte || '1', 10) || 1),
+                    priority: item.priority || item.priorité || 'Medium priority',
+                    info: item.info || item.note || item.commentaire || 'Importé via JSON',
+                    deadline: item.deadline || item.echeance || ''
+                  });
                 }
-              }
-              if (!sheetName) {
-                // Find first sheet that is not a known metadata sheet
-                sheetName = workbook.SheetNames.find(name => !["Infos Inventaire", "Infos Export", "Infos de sauvegarde"].includes(name)) || workbook.SheetNames[0];
-              }
-
-              const worksheet = workbook.Sheets[sheetName];
-              if (!worksheet) {
-                resolve();
-                return;
-              }
-
-              const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-              if (rows.length <= 1) {
-                resolve();
-                return;
-              }
-
-              // Dynamic header finding helper to scan the rows for product indicators
-              const findHeaderRowAndIndices = (allRows: any[][]) => {
-                const productKeywords = ['produit', 'product', 'nom', 'modèle', 'article', 'item', 'name'];
-                const colorKeywords = ['couleur', 'color', 'col', 'teinte'];
-                const qtyKeywords = ['quantité en attente', 'attente', 'quantité', 'quantite', 'qty', 'qte', 'count', 'nombre', 'total', 'pièces', 'pieces'];
-                const priorityKeywords = ['priorité', 'priorite', 'priority'];
-                const infoKeywords = ['info', 'note', 'commentaire', 'description', 'réf', 'ref'];
-                const deadlineKeywords = ['echeance', 'échéance', 'deadline', 'date'];
-
-                const scanLimit = Math.min(allRows.length, 12);
-                for (let rIdx = 0; rIdx < scanLimit; rIdx++) {
-                  const r = allRows[rIdx];
-                  if (!r) continue;
-                  
-                  const rowStrings = r.map(c => String(c || '').trim().toLowerCase());
-                  const prodIdx = rowStrings.findIndex(s => productKeywords.some(kw => s.includes(kw) || s === kw));
-                  
-                  if (prodIdx !== -1) {
-                    const colIdx = rowStrings.findIndex(s => colorKeywords.some(kw => s.includes(kw) || s === kw));
-                    const qIdx = rowStrings.findIndex(s => qtyKeywords.some(kw => s.includes(kw) || s === kw));
-                    const prioIdx = rowStrings.findIndex(s => priorityKeywords.some(kw => s.includes(kw) || s === kw));
-                    const infIdx = rowStrings.findIndex(s => infoKeywords.some(kw => s.includes(kw) || s === kw));
-                    const deadIdx = rowStrings.findIndex(s => deadlineKeywords.some(kw => s.includes(kw) || s === kw));
-
-                    return {
-                      headerRowIndex: rIdx,
-                      productIdx: prodIdx,
-                      colorIdx: colIdx !== -1 ? colIdx : -1,
-                      qtyIdx: qIdx !== -1 ? qIdx : -1,
-                      priorityIdx: prioIdx !== -1 ? prioIdx : -1,
-                      infoIdx: infIdx !== -1 ? infIdx : -1,
-                      deadlineIdx: deadIdx !== -1 ? deadIdx : -1
-                    };
-                  }
-                }
-
-                // Fallback to row 0 default guess
-                return {
-                  headerRowIndex: 0,
-                  productIdx: 0,
-                  colorIdx: 1,
-                  qtyIdx: -1,
-                  priorityIdx: -1,
-                  infoIdx: -1,
-                  deadlineIdx: -1
-                };
-              };
-
-              const { headerRowIndex, productIdx, colorIdx, qtyIdx, priorityIdx, infoIdx, deadlineIdx } = findHeaderRowAndIndices(rows);
-
-              // Helper to check and filter fake rows/metadata completely out
-              const isMetadataValue = (val: string) => {
-                if (!val) return true;
-                const lower = val.trim().toLowerCase();
-                const metadataIndicators = [
-                  'fichier', 
-                  'date d\'export', 
-                  'date dexport',
-                  'heure d\'export', 
-                  'heure dexport',
-                  'total en attente', 
-                  'total préparés', 
-                  'total preparés', 
-                  'total préparé',
-                  'total prepare',
-                  'modèles & couleurs uniques', 
-                  'indicateur', 
-                  'valeur',
-                  'nom du produit', 
-                  'nom de produit',
-                  'produit',
-                  'product',
-                  'id réf',
-                  'id ref',
-                  'infos inventaire',
-                  'synthèse inventaire'
-                ];
-                return metadataIndicators.some(ind => lower === ind || lower.startsWith(ind + ':') || lower.startsWith(ind + ' '));
-              };
-
-              for (let i = headerRowIndex + 1; i < rows.length; i++) {
-                const row = rows[i];
-                if (!row || row.length === 0) continue;
-
-                const productVal = row[productIdx] ? String(row[productIdx]).trim() : '';
-                const colorVal = (colorIdx !== -1 && row[colorIdx]) ? String(row[colorIdx]).trim() : '';
-
-                if (!productVal || isMetadataValue(productVal)) continue;
-
-                let qtyVal = 1;
-                if (qtyIdx !== -1 && row[qtyIdx] !== undefined && row[qtyIdx] !== null) {
-                  const valNum = parseInt(String(row[qtyIdx]), 10);
-                  if (!isNaN(valNum) && valNum > 0) {
-                    qtyVal = valNum;
-                  }
-                }
-
-                const priorityVal = priorityIdx !== -1 && row[priorityIdx] ? String(row[priorityIdx]).trim() : 'Medium priority';
-                const infoVal = infoIdx !== -1 && row[infoIdx] ? String(row[infoIdx]).trim() : `Importé`;
-                const deadlineVal = deadlineIdx !== -1 && row[deadlineIdx] ? String(row[deadlineIdx]).trim() : '';
-
-                parsedProducts.push({
-                  product: productVal,
-                  color: colorVal || 'Neutre',
-                  quantity: qtyVal,
-                  priority: priorityVal,
-                  info: infoVal,
-                  deadline: deadlineVal
-                });
-              }
+              });
               resolve();
             } catch (err) {
-              console.error(`Error parsing file ${file.name}:`, err);
+              console.error(`Error parsing JSON file ${file.name}:`, err);
               resolve();
             }
           };
@@ -7885,7 +7661,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             console.error(`FileReader error on file ${file.name}`);
             resolve();
           };
-          reader.readAsArrayBuffer(file);
+          reader.readAsText(file);
         });
       };
 
@@ -7893,7 +7669,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         await Promise.all(files.map(f => readAndParseFile(f)));
 
         if (parsedProducts.length === 0) {
-          setToast({ show: true, message: 'Aucun produit valide reconnu dans le(s) fichier(s).', type: 'alert' });
+          setToast({ show: true, message: 'Aucun produit valide reconnu dans le(s) fichier(s) JSON.', type: 'alert' });
         } else {
           setInventoryPreviewData(prev => {
             const mergedMap: { [key: string]: { product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string } } = {};
@@ -7910,12 +7686,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             });
             return Object.values(mergedMap);
           });
-          setToast({ show: true, message: 'Fichier(s) importé(s) et cumulé(s) dans la liste de préparation !', type: 'task' });
+          setToast({ show: true, message: 'Fichier(s) JSON importé(s) et cumulé(s) dans la liste de préparation !', type: 'task' });
         }
         setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
       } catch (err: any) {
         console.error(err);
-        setToast({ show: true, message: `Erreur durant le traitement Excel : ${err.message}`, type: 'alert' });
+        setToast({ show: true, message: `Erreur durant le traitement JSON : ${err.message}`, type: 'alert' });
         setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
       }
 
@@ -8050,7 +7826,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* Excel Import Button */}
+            {/* JSON Import Button */}
             <button
               onClick={() => setShowInventoryImport(!showInventoryImport)}
               className={`px-4 py-1.5 rounded text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-2 border shadow-md active:scale-95 ${
@@ -8058,10 +7834,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   ? 'bg-accent-blue/20 border-accent-blue/40 text-accent-blue hover:bg-accent-blue hover:text-black' 
                   : 'bg-accent/10 border-accent/20 text-accent hover:bg-accent hover:text-black hover:shadow-accent/5'
               }`}
-              title="Importer une liste de produits à préparer à partir d'un fichier Excel ou CSV"
+              title="Importer une liste de produits à préparer à partir d'un fichier JSON"
             >
               <Upload size={10} />
-              Importer Excel / CSV
+              Importer JSON
             </button>
 
             {/* Excel Export Button */}
@@ -8145,7 +7921,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <div className="flex flex-col items-center justify-center py-6 px-4 border-2 border-dashed border-white/10 hover:border-accent/30 rounded-xl transition-all cursor-pointer bg-white/[0.01] relative group">
                   <input 
                     type="file" 
-                    accept=".xlsx, .xls, .csv" 
+                    accept=".json" 
                     multiple
                     onChange={handleInventoryFileChange} 
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
@@ -8154,10 +7930,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     <Upload size={20} />
                   </div>
                   <p className="text-[10px] font-bold text-white uppercase tracking-wider text-center">Glissez-déposez ou cliquez pour charger un ou plusieurs fichiers</p>
-                  <p className="text-[8px] font-mono text-text-dim/60 mt-1 uppercase text-center">Formats acceptés : Excel (.xlsx, .xls) ou CSV (.csv)</p>
+                  <p className="text-[8px] font-mono text-text-dim/60 mt-1 uppercase text-center">Formats acceptés : JSON (.json)</p>
                   
                   <div className="mt-4 pt-3 border-t border-white/5 w-full text-[8px] font-mono text-text-dim/50 leading-relaxed max-w-md">
-                    <span className="font-bold text-accent">Astuce :</span> Vous pouvez sélectionner et importer plusieurs fichiers d'un coup. Les informations de métadonnées (comme les entêtes d'exports, l'heure, etc.) sont automatiquement nettoyées et ignorées lors de l'analyse pour ne conserver que la liste des produits réels à préparer.
+                    <span className="font-bold text-accent">Astuce :</span> Vous pouvez sélectionner et importer plusieurs fichiers d'un coup. Les informations des produits réels à préparer seront extraites et importées.
                   </div>
                 </div>
               ) : (
@@ -8256,7 +8032,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         Ajouter d'autres fichiers
                         <input 
                           type="file" 
-                          accept=".xlsx, .xls, .csv" 
+                          accept=".json" 
                           multiple
                           onChange={handleInventoryFileChange} 
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
@@ -8480,11 +8256,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     
     setMissions(prev => prev.map(m => {
       if (selectedMissionIds.includes(m.id)) {
+        let photoCountDelivered = m.photoCountDelivered;
+        if (newStatus === 'livré' && (photoCountDelivered || 0) === 0) {
+          photoCountDelivered = 1;
+        }
         let progress = m.progress;
         switch (newStatus) {
           case 'livré': 
-            if ((m.photoCountDelivered || 0) > 0) {
-              progress = Math.round(((m.photoCountDelivered || 0) / (m.photoCountRequested || 1)) * 100);
+            if ((photoCountDelivered || 0) > 0) {
+              progress = Math.round(((photoCountDelivered || 0) / (m.photoCountRequested || 1)) * 100);
             } else {
               progress = 100;
             }
@@ -8504,7 +8284,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           }
         }
         
-        return { ...m, status: newStatus, progress, history };
+        return { ...m, status: newStatus, progress, photoCountDelivered, history };
       }
       return m;
     }));
@@ -8567,18 +8347,35 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             
             // Calculate progress
             let progress = m.progress;
+            let photoCountDelivered = m.photoCountDelivered;
+            if (newStatus === 'livré' && (photoCountDelivered || 0) === 0) {
+              photoCountDelivered = 1;
+              nextMission.photoCountDelivered = 1;
+            }
             switch (newStatus) {
               case 'livré': 
-                if ((m.photoCountDelivered || 0) > 0) {
-                  progress = Math.round(((m.photoCountDelivered || 0) / (m.photoCountRequested || 1)) * 100);
+                if ((photoCountDelivered || 0) > 0) {
+                  progress = Math.round(((photoCountDelivered || 0) / (m.photoCountRequested || 1)) * 100);
                 } else {
                   progress = 100;
                 }
+                nextMission.deliveredAt = updates.deliveredAt || getNowLocalDatetimeString();
                 break;
-              case 'En post-production': progress = 85; break;
-              case 'shooté': progress = 75; break;
-              case 'en cours de shoot': progress = 50; break;
-              case 'produit préparé': progress = 25; break;
+              case 'En post-production': 
+                progress = 85; 
+                nextMission.postProdAt = updates.postProdAt || getNowLocalDatetimeString();
+                break;
+              case 'shooté': 
+                progress = 75; 
+                nextMission.shotAt = updates.shotAt || getNowLocalDatetimeString();
+                break;
+              case 'en cours de shoot': 
+                progress = 50; 
+                break;
+              case 'produit préparé': 
+                progress = 25; 
+                nextMission.preparedAt = updates.preparedAt || getNowLocalDatetimeString();
+                break;
               case 'en attente': progress = 0; break;
             }
             nextMission.progress = progress;
@@ -8741,6 +8538,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                          m.missionNo.toString().includes(filterQuery);
     const matchesStatus = filterStatuses.length === 0 || filterStatuses.includes(m.status);
     const matchesProduct = filterProducts.length === 0 || filterProducts.includes(m.product);
+    const matchesFamily = filterFamilies.length === 0 || filterFamilies.includes(m.family || deduceFamily(m.product));
     const matchesUniverse = filterUniverses.length === 0 || filterUniverses.includes(m.univers);
     const matchesSupport = filterSupports.length === 0 || (() => {
       const missionSupports = (m.support || '').split(', ').map(s => s === 'video' ? 'vidéo' : s);
@@ -8782,7 +8580,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       return missionDateNum >= start && missionDateNum <= end;
     })();
 
-    return matchesDuplicates && matchesQuery && matchesStatus && matchesProduct && matchesUniverse && matchesSupport && matchesColor && matchesArgument && matchesPriority && matchesEnabled && matchesDate && matchesDeadlineAlert;
+    return matchesDuplicates && matchesQuery && matchesStatus && matchesProduct && matchesUniverse && matchesSupport && matchesColor && matchesArgument && matchesPriority && matchesEnabled && matchesDate && matchesDeadlineAlert && matchesFamily;
   }).sort((a, b) => {
     // Si le filtre d'alerte deadline est actif, on trie par échéance la plus proche en priorité
     if (filterDeadlineAlert) {
@@ -9848,10 +9646,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <Save size={14} />
               </button>
               <button 
-                onClick={() => document.getElementById('excel-sys-import')?.click()}
+                onClick={() => document.getElementById('json-sys-file-import')?.click()}
                 className="w-full flex items-center justify-between p-3 border border-border rounded-md text-text-dim hover:text-white hover:border-accent-blue transition-colors"
               >
-                <span className="text-[11px] font-bold uppercase tracking-wider text-accent-blue">Import Excel</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-accent-blue">Import JSON</span>
                 <Upload size={14} className="text-accent-blue" />
               </button>
                <button 
@@ -9987,51 +9785,95 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </div>
                 
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-3 bg-white/5 p-1.5 rounded-lg border border-white/10 backdrop-blur-sm shadow-2xl">
-                    <div className="px-2 border-r border-white/10 hidden lg:block text-[8px] font-black uppercase leading-tight tracking-widest text-text-dim/60">
-                      <div>SYNCHRO</div>
-                      <div>FLUX</div>
+                  <div className="flex flex-col gap-1.5 bg-white/5 p-2 rounded-lg border border-white/10 backdrop-blur-sm shadow-2xl transition-all duration-300 min-w-[160px]">
+                    {/* Header Row */}
+                    <div className="flex items-center justify-between gap-3 border-b border-white/5 pb-1">
+                      <div className="px-1 text-[8px] font-black uppercase leading-tight tracking-widest text-text-dim/60 flex flex-col">
+                        <span>SYNCHRO</span>
+                        <span>FLUX</span>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          const nextState = !isSynchroFluxExpanded;
+                          setIsSynchroFluxExpanded(nextState);
+                          localStorage.setItem('synchro_flux_expanded', String(nextState));
+                        }}
+                        className="p-1 hover:bg-white/10 rounded text-text-dim hover:text-white transition-colors cursor-pointer"
+                        title={isSynchroFluxExpanded ? "Rétrécir le menu synchro flux" : "Développer le menu synchro flux"}
+                      >
+                        {isSynchroFluxExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      </button>
                     </div>
-                    <button 
-                      onClick={() => document.getElementById('bulk-image-upload')?.click()}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-accent/10 border border-accent/20 text-accent text-[9px] font-black uppercase tracking-widest hover:bg-accent hover:text-black active:scale-95 transition-all rounded shadow-md group"
-                      title="Importer plusieurs images d'un coup"
-                    >
-                      <ImagePlus size={10} className="group-hover:scale-110 transition-transform" />
-                      IMPORTER IMAGES
-                    </button>
-                    <input 
-                      id="bulk-image-upload"
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      onChange={handleBulkImageUpload}
-                      className="hidden"
-                    />
-                    <button 
-                      onClick={() => {
-                        exportSystemData();
-                        setToast({ show: true, message: 'JSON : Copié !', type: 'task' });
-                        setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
-                      }}
-                      className="flex items-center gap-2 px-3 py-1.5 text-white text-[9px] font-black uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all rounded shadow-md"
-                      style={{ backgroundColor: copyBtnColor }}
-                      title="1. Copier le JSON système"
-                    >
-                      <Copy size={10} />
-                      1. COPIER
-                    </button>
-                    <input 
-                      type="text"
-                      placeholder="2. COLLER JSON ICI..."
-                      onChange={(e) => {
-                        if (e.target.value.trim().startsWith('{')) {
-                          processImport(e.target.value);
-                          e.target.value = '';
-                        }
-                      }}
-                      className="bg-black/40 border border-white/10 px-3 py-1.5 text-[9px] font-bold text-accent-blue w-40 outline-none focus:border-accent-blue transition-all rounded placeholder:text-text-dim/40 placeholder:font-normal italic"
-                    />
+
+                    {isSynchroFluxExpanded && (
+                      <div className="flex flex-col gap-2 pt-1 animate-fadeIn">
+                        {/* Section EXCEL */}
+                        <div className="flex items-center">
+                          <button 
+                            onClick={downloadFullExport}
+                            className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-accent/10 border border-accent/20 text-accent text-[9px] font-black uppercase tracking-widest hover:bg-accent hover:text-black active:scale-95 transition-all rounded shadow-md"
+                            title="Exporter les données en Excel"
+                          >
+                            <FileSpreadsheet size={10} />
+                            EXP. EXCEL
+                          </button>
+                        </div>
+
+                        <div className="h-[1px] bg-white/10" />
+
+                        {/* Section JSON */}
+                        <div className="flex items-center gap-1.5">
+                          <button 
+                            onClick={() => document.getElementById('json-sys-file-import')?.click()}
+                            className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-accent-blue/15 border border-accent-blue/35 text-accent-blue text-[9px] font-black uppercase tracking-widest hover:bg-accent-blue hover:text-black active:scale-95 transition-all rounded shadow-md"
+                            title="Importer un fichier JSON (.json)"
+                          >
+                            <Upload size={10} />
+                            IMP. JSON
+                          </button>
+                          <input 
+                            id="json-sys-file-import"
+                            type="file"
+                            accept=".json"
+                            className="hidden"
+                            onChange={handleJsonDirectImport}
+                          />
+                          <button 
+                            onClick={downloadSystemJson}
+                            className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-accent-blue/15 border border-accent-blue/35 text-accent-blue text-[9px] font-black uppercase tracking-widest hover:bg-accent-blue hover:text-black active:scale-95 transition-all rounded shadow-md"
+                            title="Exporter le fichier JSON de sauvegarde"
+                          >
+                            <FileJson size={10} />
+                            EXP. JSON
+                          </button>
+                        </div>
+
+                        <div className="h-[1px] bg-white/10" />
+
+                        {/* JPEG Actions */}
+                        <div className="flex items-center gap-1.5">
+                          <button 
+                            onClick={captureAsJPEG}
+                            disabled={isCapturing}
+                            className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[9px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed disabled:opacity-50"
+                            title="Sauvegarder toutes les données en JPEG"
+                          >
+                            {isCapturing ? <Loader2 size={10} className="animate-spin" /> : <ImageIcon size={10} />}
+                            {isCapturing ? 'Capture...' : 'EXP. JPEG'}
+                          </button>
+
+                          <button 
+                            onClick={exportAllCharts}
+                            disabled={isCapturing}
+                            className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-accent/10 border border-accent/30 rounded text-accent text-[9px] font-black uppercase tracking-widest hover:bg-accent/20 transition-all border-dashed disabled:opacity-50"
+                            title="Télécharger tous les graphiques séparément"
+                          >
+                            {isCapturing ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                            {isCapturing ? 'Batch...' : 'ALL JPEG'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -10045,53 +9887,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 >
                   <Save size={12} />
                   SAUVEGARDER
-                </button>
-                
-                <div className="h-6 w-[1px] bg-white/10 mx-1" />
-
-                <button 
-                  onClick={captureAsJPEG}
-                  disabled={isCapturing}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed disabled:opacity-50"
-                  title="Sauvegarder toutes les données en JPEG"
-                >
-                  {isCapturing ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />}
-                  {isCapturing ? 'Capture...' : 'Export JPEG'}
-                </button>
-
-                <button 
-                  onClick={exportAllCharts}
-                  disabled={isCapturing}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-accent/10 border border-accent/30 rounded text-accent text-[10px] font-black uppercase tracking-widest hover:bg-accent/20 transition-all border-dashed disabled:opacity-50"
-                  title="Télécharger tous les graphiques séparément"
-                >
-                  {isCapturing ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                  {isCapturing ? 'Batch...' : 'Tout Exporter'}
-                </button>
-
-                <button 
-                  onClick={() => document.getElementById('excel-sys-import')?.click()}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[10px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed"
-                  title="Importer des données depuis un fichier Excel"
-                >
-                  <Upload size={12} />
-                  Import Excel
-                </button>
-                <input 
-                  id="excel-sys-import"
-                  type="file"
-                  accept=".xlsx, .xls"
-                  className="hidden"
-                  onChange={handleExcelImport}
-                />
-
-                <button 
-                  onClick={downloadFullExport}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-accent/10 border border-accent/30 rounded text-accent text-[10px] font-black uppercase tracking-widest hover:bg-accent/20 transition-all border-dashed"
-                  title="Exporter toutes les données en format Excel"
-                >
-                  <FileSpreadsheet size={12} />
-                  Export Excel
                 </button>
               </div>
 
@@ -10600,6 +10395,18 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             setIsOpen={setIsUniverseFilterOpen} 
                           />
 
+                          {/* Multi-Select Family */}
+                          <FilterSelect 
+                            label="Famille" 
+                            icon={Layers} 
+                            items={categories.find(c => c.id === 'family')?.items || []} 
+                            selected={filterFamilies} 
+                            setSelected={setFilterFamilies} 
+                            isOpen={isFamilyFilterOpen} 
+                            setIsOpen={setIsFamilyFilterOpen} 
+                            accentColor="text-accent-purple"
+                          />
+
                           {/* Multi-Select Support */}
                           <FilterSelect 
                             label="Support" 
@@ -10653,12 +10460,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                         {/* Quick Actions & Summary */}
                         <div className="flex flex-wrap items-center gap-3 mt-4">
-                          {(filterQuery || filterStatuses.length > 0 || filterProducts.length > 0 || filterColors.length > 0 || filterUniverses.length > 0 || filterSupports.length > 0 || filterArguments.length > 0 || filterPriorities.length > 0 || filterDateStart || filterDateEnd || filterDeadlineAlert) && (
+                          {(filterQuery || filterStatuses.length > 0 || filterProducts.length > 0 || filterColors.length > 0 || filterUniverses.length > 0 || filterSupports.length > 0 || filterArguments.length > 0 || filterPriorities.length > 0 || filterDateStart || filterDateEnd || filterDeadlineAlert || filterFamilies.length > 0) && (
                             <button 
                               onClick={() => {
                                 setFilterQuery('');
                                 setFilterStatuses([]);
                                 setFilterProducts([]);
+                                setFilterFamilies([]);
                                 setFilterColors([]);
                                 setFilterUniverses([]);
                                 setFilterSupports([]);
@@ -10686,7 +10494,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                   {/* Filter Chips Layer */}
                   <AnimatePresence>
-                    {(filterStatuses.length > 0 || filterProducts.length > 0 || filterUniverses.length > 0 || filterSupports.length > 0 || filterPriorities.length > 0 || filterDateStart || filterDateEnd || filterDeadlineAlert) && (
+                    {(filterStatuses.length > 0 || filterProducts.length > 0 || filterUniverses.length > 0 || filterSupports.length > 0 || filterPriorities.length > 0 || filterDateStart || filterDateEnd || filterDeadlineAlert || filterColors.length > 0 || filterArguments.length > 0 || filterFamilies.length > 0) && (
                       <motion.div 
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -10716,6 +10524,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         )}
 
                         {renderFilterChips('Statut', filterStatuses, setFilterStatuses)}
+                        {renderFilterChips('Famille', filterFamilies, setFilterFamilies)}
                         {renderFilterChips('Produit', filterProducts, setFilterProducts)}
                         {renderFilterChips('Couleur', filterColors, setFilterColors)}
                         {renderFilterChips('Univers', filterUniverses, setFilterUniverses)}
@@ -11341,6 +11150,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 onMoveMultipleMissions={moveMultipleMissionsToFamily}
                 showDuplicateIndicators={showDuplicateIndicators}
                 isDuplicate={isDuplicate}
+                setMissions={setMissions}
+                setGlobalLogs={setGlobalLogs}
+                setToast={setToast}
               />
             )}
             </>
@@ -11433,6 +11245,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                       <button 
+                         onClick={() => setSelectedSecondaryMissionForModal(sm)} 
+                         title="Éditer la mission secondaire"
+                         className="p-1.5 text-text-dim hover:text-accent-blue hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
+                       >
+                         <Edit2 size={14} />
+                       </button>
                        <Toggle enabled={sm.enabled} onToggle={() => updateSecondaryMission(sm.id, { enabled: !sm.enabled })} />
                        <button onClick={() => removeSecondaryMission(sm.id)} className="p-1.5 text-text-dim hover:text-red-500 transition-colors">
                          <Trash2 size={14} />
@@ -11608,6 +11427,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     </div>
                   </div>
                   <div className="flex items-center gap-3 pl-4 ml-2 border-l border-white/5">
+                     <button 
+                       onClick={() => setSelectedSecondaryMissionForModal(sm)} 
+                       title="Éditer la mission secondaire"
+                       className="p-1.5 rounded bg-white/5 text-text-dim hover:text-accent-blue hover:bg-accent-blue/10 transition-colors cursor-pointer"
+                     >
+                       <Edit2 size={14} />
+                     </button>
                      <Toggle enabled={sm.enabled} onToggle={() => updateSecondaryMission(sm.id, { enabled: !sm.enabled })} />
                      <button
                        onClick={() => sendToGoogleCalendar(sm)}
@@ -11671,7 +11497,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                      <div className={`text-[11px] font-black mb-3 ${isToday ? 'text-accent' : 'text-text-dim/80'}`}>{day}</div>
                      <div className="flex flex-col gap-1.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
                        {dayMissions.map(m => (
-                          <div key={m.id} title={m.title} className={`group cursor-default text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border ${m.progress >= 100 ? 'bg-white/5 border-white/5 text-white/40 line-through' : m.priority === 'high' ? 'bg-red-500/10 text-red-400 border-red-500/20' : m.priority === 'medium' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20' : 'bg-accent-blue/10 text-accent-blue border-accent-blue/20'}`}>
+                          <div key={m.id} title="Cliquez pour éditer cette mission secondaire" onClick={() => setSelectedSecondaryMissionForModal(m)} className={`group cursor-pointer hover:scale-[1.02] transition-all text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border ${m.progress >= 100 ? 'bg-white/5 border-white/5 text-white/40 line-through' : m.priority === 'high' ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' : m.priority === 'medium' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20 hover:bg-accent-yellow/20' : 'bg-accent-blue/10 text-accent-blue border-accent-blue/20 hover:bg-accent-blue/20'}`}>
                             <span className="font-bold truncate leading-tight group-hover:text-white transition-colors">{m.title}</span>
                           </div>
                        ))}
@@ -12505,8 +12331,30 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             refIdColor={refIdColor}
             allStatuses={categories.find(c => c.id === 'status')?.items || []}
             allFamilies={categories.find(c => c.id === 'family')?.items || []}
+            allColors={categories.find(c => c.id === 'color')?.items || []}
+            allArguments={categories.find(c => c.id === 'argument')?.items || []}
+            allUniverses={categories.find(c => c.id === 'univers')?.items || []}
+            allFormats={categories.find(c => c.id === 'format')?.items || []}
+            allPositions={categories.find(c => c.id === 'position')?.items || []}
+            allSupports={categories.find(c => c.id === 'support')?.items || []}
             pushToGoogleCalendar={pushToGoogleCalendar}
             pushToGoogleTasks={pushToGoogleTasks}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Secondary Mission Detail Modal */}
+      <AnimatePresence>
+        {selectedSecondaryMissionForModal && (
+          <SecondaryMissionDetailModal 
+            mission={selectedSecondaryMissionForModal}
+            onClose={() => setSelectedSecondaryMissionForModal(null)}
+            onUpdate={updateSecondaryMission}
+            onRemove={removeSecondaryMission}
+            sendToGoogleCalendar={sendToGoogleCalendar}
+            sendToGoogleTasks={sendToGoogleTasks}
+            isExporting={isExporting}
+            googleToken={googleToken}
           />
         )}
       </AnimatePresence>
@@ -13310,7 +13158,39 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
   );
 }
 
-function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, allStatuses, allFamilies, pushToGoogleCalendar, pushToGoogleTasks }: { mission: Mission | null, onClose: () => void, onUpdate: (id: string, updates: Partial<Mission>) => void, onRemove: (id: string) => void, refIdColor: string, allStatuses: string[], allFamilies: string[], pushToGoogleCalendar: (m: Mission | SecondaryMission) => void, pushToGoogleTasks: (m: Mission | SecondaryMission) => void }) {
+function MissionDetailModal({ 
+  mission, 
+  onClose, 
+  onUpdate, 
+  onRemove, 
+  refIdColor, 
+  allStatuses, 
+  allFamilies, 
+  allColors,
+  allArguments,
+  allUniverses,
+  allFormats,
+  allPositions,
+  allSupports,
+  pushToGoogleCalendar, 
+  pushToGoogleTasks 
+}: { 
+  mission: Mission | null, 
+  onClose: () => void, 
+  onUpdate: (id: string, updates: Partial<Mission>) => void, 
+  onRemove: (id: string) => void, 
+  refIdColor: string, 
+  allStatuses: string[], 
+  allFamilies: string[], 
+  allColors: string[],
+  allArguments: string[],
+  allUniverses: string[],
+  allFormats: string[],
+  allPositions: string[],
+  allSupports: string[],
+  pushToGoogleCalendar: (m: Mission | SecondaryMission) => void, 
+  pushToGoogleTasks: (m: Mission | SecondaryMission) => void 
+}) {
   if (!mission) return null;
 
   const [isConfirming, setIsConfirming] = useState(false);
@@ -13459,10 +13339,10 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                       <select 
                         value={mission.family || deduceFamily(mission.product) || 'Autre'}
                         onChange={(e) => onUpdate(mission.id, { family: e.target.value })}
-                        className="bg-transparent border-none p-0 pr-4 text-right text-[11px] font-mono font-black text-accent-purple tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer"
+                        className="bg-transparent border-none p-0 pr-4 pl-4 text-center text-[11px] font-mono font-black text-accent-purple tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer text-accent-purple"
                       >
                         {allFamilies.map(f => (
-                          <option key={f} value={f} className="bg-[#1A1A1A] text-white uppercase">{f}</option>
+                          <option key={f} value={f} className="bg-[#1A1A1A] text-white uppercase text-center">{f}</option>
                         ))}
                       </select>
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent-purple opacity-40">
@@ -13470,12 +13350,120 @@ function MissionDetailModal({ mission, onClose, onUpdate, onRemove, refIdColor, 
                       </div>
                     </div>
                   </div>
-                  <DetailItem label="Couleur" value={mission.color} />
-                  <DetailItem label="Argument" value={mission.argumentType} />
-                  <DetailItem label="Univers" value={mission.univers} />
-                  <DetailItem label="Format" value={mission.format} />
-                  <DetailItem label="Position" value={mission.position} />
-                  <DetailItem label="Support" value={mission.support} color="text-accent-pink" />
+
+                  {/* Editable Couleur */}
+                  <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">Couleur</span>
+                    <div className="relative">
+                      <select 
+                        value={mission.color || ''}
+                        onChange={(e) => onUpdate(mission.id, { color: e.target.value })}
+                        className="bg-transparent border-none p-0 pr-4 pl-4 text-center text-[11px] font-mono font-black text-accent-pink tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer text-accent-pink"
+                      >
+                        {Array.from(new Set([mission.color, ...allColors])).filter(Boolean).map(c => (
+                          <option key={c} value={c} className="bg-[#1A1A1A] text-white uppercase text-center">{c}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent-pink opacity-40">
+                        <ChevronRight size={8} className="rotate-90 text-accent-pink" style={{ transform: 'rotate(90deg)' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Editable Argument */}
+                  <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">Argument</span>
+                    <div className="relative">
+                      <select 
+                        value={mission.argumentType || ''}
+                        onChange={(e) => onUpdate(mission.id, { argumentType: e.target.value })}
+                        className="bg-transparent border-none p-0 pr-4 pl-4 text-center text-[11px] font-mono font-black text-accent-blue tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer text-accent-blue"
+                      >
+                        {Array.from(new Set([mission.argumentType, ...allArguments])).filter(Boolean).map(arg => (
+                          <option key={arg} value={arg} className="bg-[#1A1A1A] text-white uppercase text-center">{arg}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent-blue opacity-40">
+                        <ChevronRight size={8} className="rotate-90 text-accent-blue" style={{ transform: 'rotate(90deg)' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Editable Univers */}
+                  <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">Univers</span>
+                    <div className="relative">
+                      <select 
+                        value={mission.univers || ''}
+                        onChange={(e) => onUpdate(mission.id, { univers: e.target.value })}
+                        className="bg-transparent border-none p-0 pr-4 pl-4 text-center text-[11px] font-mono font-black text-accent-purple tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer text-accent-purple"
+                      >
+                        {Array.from(new Set([mission.univers, ...allUniverses])).filter(Boolean).map(u => (
+                          <option key={u} value={u} className="bg-[#1A1A1A] text-white uppercase text-center">{u}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent-purple opacity-40">
+                        <ChevronRight size={8} className="rotate-90 text-accent-purple" style={{ transform: 'rotate(90deg)' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Editable Format */}
+                  <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">Format</span>
+                    <div className="relative">
+                      <select 
+                        value={mission.format || ''}
+                        onChange={(e) => onUpdate(mission.id, { format: e.target.value })}
+                        className="bg-transparent border-none p-0 pr-4 pl-4 text-center text-[11px] font-mono font-black text-accent-yellow tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer text-accent-yellow"
+                      >
+                        {Array.from(new Set([mission.format, ...allFormats])).filter(Boolean).map(fmt => (
+                          <option key={fmt} value={fmt} className="bg-[#1A1A1A] text-white uppercase text-center">{fmt}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent-yellow opacity-40">
+                        <ChevronRight size={8} className="rotate-90 text-accent-yellow" style={{ transform: 'rotate(90deg)' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Editable Position */}
+                  <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">Position</span>
+                    <div className="relative">
+                      <select 
+                        value={mission.position || ''}
+                        onChange={(e) => onUpdate(mission.id, { position: e.target.value })}
+                        className="bg-transparent border-none p-0 pr-4 pl-4 text-center text-[11px] font-mono font-black text-accent-orange tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer text-accent-orange"
+                      >
+                        {Array.from(new Set([mission.position, ...allPositions])).filter(Boolean).map(pos => (
+                          <option key={pos} value={pos} className="bg-[#1A1A1A] text-white uppercase text-center">{pos}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent-orange opacity-40">
+                        <ChevronRight size={8} className="rotate-90 text-accent-orange" style={{ transform: 'rotate(90deg)' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Editable Support */}
+                  <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">Support</span>
+                    <div className="relative">
+                      <select 
+                        value={mission.support || ''}
+                        onChange={(e) => onUpdate(mission.id, { support: e.target.value })}
+                        className="bg-transparent border-none p-0 pr-4 pl-4 text-center text-[11px] font-mono font-black text-accent-pink tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer text-accent-pink"
+                      >
+                        {Array.from(new Set([mission.support, ...allSupports])).filter(Boolean).map(sup => (
+                          <option key={sup} value={sup} className="bg-[#1A1A1A] text-white uppercase text-center">{sup}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent-pink opacity-40">
+                        <ChevronRight size={8} className="rotate-90 text-accent-pink" style={{ transform: 'rotate(90deg)' }} />
+                      </div>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-3 bg-white/5 border border-white/10 rounded-lg">
                       <label className="text-[9px] font-black uppercase tracking-widest text-text-dim block mb-1">
@@ -14031,7 +14019,7 @@ function CategoryEditor({ category, onUpdate, isCollapsed, onToggle }: CategoryE
 interface FamilyGroupViewProps {
   filteredMissions: Mission[];
   setSelectedMissionId: (id: string | null) => void;
-  refIdColor: string;
+  refIdColor: any;
   isDeadlineApproaching: (deadlineStr?: string) => boolean;
   onRenameFamily: (oldName: string, newName: string) => void;
   onToggleMissionEnabled: (id: string, e: React.MouseEvent) => void;
@@ -14047,6 +14035,9 @@ interface FamilyGroupViewProps {
   onMoveMultipleMissions: (missionIds: string[], targetFamily: string, targetProduct?: string, targetColor?: string) => void;
   showDuplicateIndicators: boolean;
   isDuplicate: (m: Mission) => boolean;
+  setMissions: React.Dispatch<React.SetStateAction<Mission[]>>;
+  setGlobalLogs: React.Dispatch<React.SetStateAction<GlobalLogEntry[]>>;
+  setToast: React.Dispatch<React.SetStateAction<{ show: boolean, message: string, type: string }>>;
 }
 
 function FamilyGroupView({
@@ -14068,6 +14059,9 @@ function FamilyGroupView({
   onMoveMultipleMissions,
   showDuplicateIndicators,
   isDuplicate,
+  setMissions,
+  setGlobalLogs,
+  setToast,
 }: FamilyGroupViewProps) {
   // Only group main missions (filteredMissions). Let's make sure we filter out secondary tasks
   const missionsByFamily: Record<string, Record<string, Mission[]>> = {};
@@ -14075,6 +14069,145 @@ function FamilyGroupView({
   const [selectedSubFams, setSelectedSubFams] = useState<string[]>([]);
   const [draggedOverFamName, setDraggedOverFamName] = useState<string | null>(null);
   const [draggedOverSubFam, setDraggedOverSubFam] = useState<string | null>(null);
+
+  // Local state for selected action date/time
+  const [bulkActionDateTime, setBulkActionDateTime] = useState<string>(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
+
+  const [bulkSelectedStatus, setBulkSelectedStatus] = useState<string | null>(null);
+  const [bulkSelectedEnable, setBulkSelectedEnable] = useState<boolean | null>(null);
+
+  const getTargetMissionIds = () => {
+    const ids = new Set<string>();
+    
+    // Add missions from selected individual mission checkboxes
+    selectedMissionIds.forEach(id => ids.add(id));
+    
+    // Add missions from selected sub-families/products
+    selectedSubFams.forEach(subFamKey => {
+      const [famName, productName, colorName] = subFamKey.split('|');
+      filteredMissions.forEach(m => {
+        const currentFam = m.family || deduceFamily(m.product) || 'Autre';
+        const mColor = m.color || 'Sans couleur';
+        if (currentFam === famName && m.product === productName && mColor === colorName) {
+          ids.add(m.id);
+        }
+      });
+    });
+    
+    return Array.from(ids);
+  };
+
+  const handleBulkStatusUpdate = (newStatus: string) => {
+    const targetIds = getTargetMissionIds();
+    if (targetIds.length === 0) return;
+
+    // Calculate progression
+    let progress = 0;
+    switch (newStatus) {
+      case 'livré': progress = 100; break;
+      case 'En post-production': progress = 85; break;
+      case 'shooté': progress = 75; break;
+      case 'en cours de shoot': progress = 50; break;
+      case 'produit préparé': progress = 25; break;
+      case 'en attente': progress = 0; break;
+      case 'annuler': progress = 0; break;
+    }
+
+    setMissions(prevMissions => prevMissions.map(m => {
+      if (targetIds.includes(m.id)) {
+        const updated = { ...m, status: newStatus, progress, updatedAt: Date.now() };
+        
+        // Handle dates
+        if (newStatus === 'produit préparé') {
+          updated.preparedAt = bulkActionDateTime;
+        } else if (newStatus === 'shooté') {
+          updated.shotAt = bulkActionDateTime;
+        } else if (newStatus === 'En post-production') {
+          updated.postProdAt = bulkActionDateTime;
+        } else if (newStatus === 'livré') {
+          updated.deliveredAt = bulkActionDateTime;
+          if ((updated.photoCountDelivered || 0) === 0) {
+            updated.photoCountDelivered = 1;
+            updated.progress = Math.round((1 / (updated.photoCountRequested || 1)) * 100);
+          }
+        } else if (newStatus === 'annuler') {
+          updated.photoCountDelivered = 0;
+        }
+
+        // History
+        const history = m.history ? [...m.history] : [];
+        history.push({ 
+          timestamp: Date.now(), 
+          message: `MISE À JOUR GROUPÉE : Statut changé à "${newStatus}" avec la date "${bulkActionDateTime}"` 
+        });
+        updated.history = history;
+
+        return updated;
+      }
+      return m;
+    }));
+
+    // Log globally
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `MISE À JOUR GROUPÉE : ${targetIds.length} produits modifiés vers le statut "${newStatus}" à la date ${bulkActionDateTime}.`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `${targetIds.length} produits mis à jour vers "${newStatus}" !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+    // Clear selections
+    setSelectedSubFams([]);
+    setSelectedMissionIds([]);
+    setBulkSelectedStatus(null);
+  };
+
+  const handleBulkEnableUpdate = (enabled: boolean) => {
+    const targetIds = getTargetMissionIds();
+    if (targetIds.length === 0) return;
+
+    setMissions(prevMissions => prevMissions.map(m => {
+      if (targetIds.includes(m.id)) {
+        const history = m.history ? [...m.history] : [];
+        history.push({ 
+          timestamp: Date.now(), 
+          message: `MISE À JOUR GROUPÉE : Visibilité modifiée à "${enabled ? 'Actif (ON)' : 'Inactif (OFF)'}"` 
+        });
+        return { ...m, enabled, history, updatedAt: Date.now() };
+      }
+      return m;
+    }));
+
+    // Log globally
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `MISE À JOUR GROUPÉE : ${targetIds.length} produits ${enabled ? 'ACTIVÉS (ON)' : 'DÉSACTIVÉS (OFF)'}.`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `${targetIds.length} produits ${enabled ? 'activés' : 'désactivés'} !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+    // Clear selections
+    setSelectedSubFams([]);
+    setSelectedMissionIds([]);
+    setBulkSelectedEnable(null);
+  };
 
   const toggleSubFamilySelection = (fam: string, productName: string, colorName: string) => {
     const key = `${fam}|${productName}|${colorName}`;
@@ -14105,8 +14238,32 @@ function FamilyGroupView({
 
   const familiesList = Object.keys(missionsByFamily).sort();
 
-  const [collapsedFams, setCollapsedFams] = useState<Record<string, boolean>>({});
-  const [collapsedSubFams, setCollapsedSubFams] = useState<Record<string, boolean>>({});
+  const [collapsedFams, setCollapsedFams] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('collapsedFams');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Error reading collapsedFams', e);
+    }
+    return {};
+  });
+  const [collapsedSubFams, setCollapsedSubFams] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('collapsedSubFams');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Error reading collapsedSubFams', e);
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    localStorage.setItem('collapsedFams', JSON.stringify(collapsedFams));
+  }, [collapsedFams]);
+
+  useEffect(() => {
+    localStorage.setItem('collapsedSubFams', JSON.stringify(collapsedSubFams));
+  }, [collapsedSubFams]);
   
   const [editingFam, setEditingFam] = useState<string | null>(null);
   const [newFamName, setNewFamName] = useState<string>('');
@@ -14186,62 +14343,181 @@ function FamilyGroupView({
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className="bg-accent/10 border border-accent/30 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-2 shadow-[0_0_20px_rgba(0,255,148,0.05)] border-t-accent"
+            className="bg-accent/10 border border-accent/30 p-4 rounded-2xl mb-4 shadow-[0_0_20px_rgba(0,255,148,0.05)] border-t-accent"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent animate-pulse shrink-0">
-                <Layers size={16} />
+            <div className="w-full flex flex-col gap-4">
+              {/* Header Row */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-accent animate-pulse shrink-0">
+                    <Layers size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase text-white tracking-widest leading-none">
+                      {selectedSubFams.length > 0 && `${selectedSubFams.length} produit${selectedSubFams.length > 1 ? 's' : ''}`}
+                      {selectedSubFams.length > 0 && selectedMissionIds.length > 0 && ' & '}
+                      {selectedMissionIds.length > 0 && `${selectedMissionIds.length} mission${selectedMissionIds.length > 1 ? 's' : ''}`} sélectionné{selectedSubFams.length + selectedMissionIds.length > 1 ? 's' : ''}
+                    </h4>
+                    <p className="text-[9px] font-mono text-text-dim mt-0.5 uppercase tracking-wide">
+                      Actions en masse sur les éléments sélectionnés
+                    </p>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => {
+                    setSelectedSubFams([]);
+                    setSelectedMissionIds([]);
+                  }}
+                  className="px-3 py-1.5 border border-red-500/20 text-red-400 bg-red-400/5 hover:bg-red-400/10 hover:border-red-500 hover:text-red-500 text-[9px] uppercase font-black rounded-lg transition-all cursor-pointer self-start sm:self-center"
+                >
+                  Tout désélectionner
+                </button>
               </div>
-              <div>
-                <h4 className="text-xs font-black uppercase text-white tracking-widest leading-none">
-                  {selectedSubFams.length > 0 && `${selectedSubFams.length} sous-famille${selectedSubFams.length > 1 ? 's' : ''}`}
-                  {selectedSubFams.length > 0 && selectedMissionIds.length > 0 && ' & '}
-                  {selectedMissionIds.length > 0 && `${selectedMissionIds.length} mission${selectedMissionIds.length > 1 ? 's' : ''}`} sélectionnée{selectedSubFams.length + selectedMissionIds.length > 1 ? 's' : ''}
-                </h4>
-                <p className="text-[9px] font-mono text-text-dim mt-0.5 uppercase tracking-wide">
-                  Choisissez la famille de destination pour déplacer les éléments sélectionnés
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-bold text-text-dim uppercase tracking-wider shrink-0">Déplacer vers :</span>
-              <div className="flex gap-1 flex-wrap">
-                {allFamilies.map((targetFam) => (
+              {/* Action grid / options */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Section 1: Déplacer */}
+                <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col gap-2">
+                  <span className="text-[9px] font-black text-text-dim/80 uppercase tracking-widest block mb-1">
+                    📂 Déplacer vers une famille :
+                  </span>
+                  <div className="flex gap-1 flex-wrap">
+                    {allFamilies.map((targetFam) => (
+                      <button
+                        key={targetFam}
+                        onClick={() => {
+                          if (selectedSubFams.length > 0) {
+                            const subFamsToMove = selectedSubFams.map(id => {
+                              const [, prod, col] = id.split('|');
+                              return { productName: prod, colorName: col };
+                            });
+                            onMoveMultipleSubFamilies(subFamsToMove, targetFam);
+                            setSelectedSubFams([]);
+                          }
+                          if (selectedMissionIds.length > 0) {
+                            onMoveMultipleMissions(selectedMissionIds, targetFam);
+                            setSelectedMissionIds([]);
+                          }
+                        }}
+                        className="px-2.5 py-1 text-[8px] font-black uppercase tracking-widest border border-white/10 hover:border-accent/40 bg-white/5 hover:bg-accent/10 hover:text-accent rounded transition-all cursor-pointer"
+                      >
+                        {targetFam}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Section 2: Changer le statut */}
+                <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col justify-between gap-3">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+                      <span className="text-[9px] font-black text-accent uppercase tracking-widest">
+                        ⚙️ Changer l'état :
+                      </span>
+                      {/* Date/heure picker inline */}
+                      <div className="flex items-center gap-1 bg-black/50 border border-white/10 rounded px-1.5 py-0.5">
+                        <Clock size={10} className="text-white/40 mr-1" />
+                        <input
+                          type="datetime-local"
+                          value={bulkActionDateTime}
+                          onChange={(e) => setBulkActionDateTime(e.target.value)}
+                          className="bg-transparent border-none text-[8px] text-accent font-bold outline-none cursor-pointer"
+                          title="Date et heure à appliquer à l'état"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-1 flex-wrap">
+                      {[
+                        { id: 'en attente', label: 'En attente' },
+                        { id: 'produit préparé', label: 'En préparation' },
+                        { id: 'en cours de shoot', label: 'En cours de shoot' },
+                        { id: 'shooté', label: 'Shootée' },
+                        { id: 'En post-production', label: 'Post-Prod' },
+                        { id: 'livré', label: 'Livrée' },
+                      ].map((st) => (
+                        <button
+                          key={st.id}
+                          onClick={() => setBulkSelectedStatus(bulkSelectedStatus === st.id ? null : st.id)}
+                          className={`px-2.5 py-1 text-[8px] font-black uppercase tracking-widest border rounded transition-all cursor-pointer ${
+                            bulkSelectedStatus === st.id
+                              ? 'bg-accent/20 border-accent text-accent shadow-[0_0_10px_rgba(0,255,148,0.2)]'
+                              : 'border-white/10 hover:border-accent/40 bg-white/5 hover:bg-accent/10 hover:text-accent'
+                          }`}
+                        >
+                          {st.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <button
-                    key={targetFam}
+                    disabled={!bulkSelectedStatus}
                     onClick={() => {
-                      if (selectedSubFams.length > 0) {
-                        const subFamsToMove = selectedSubFams.map(id => {
-                          const [, prod, col] = id.split('|');
-                          return { productName: prod, colorName: col };
-                        });
-                        onMoveMultipleSubFamilies(subFamsToMove, targetFam);
-                        setSelectedSubFams([]);
-                      }
-                      if (selectedMissionIds.length > 0) {
-                        onMoveMultipleMissions(selectedMissionIds, targetFam);
-                        setSelectedMissionIds([]);
+                      if (bulkSelectedStatus) {
+                        handleBulkStatusUpdate(bulkSelectedStatus);
                       }
                     }}
-                    className="px-2.5 py-1 text-[9px] font-black uppercase tracking-widest border border-white/10 hover:border-accent/40 bg-white/5 hover:bg-accent/10 hover:text-accent rounded transition-all cursor-pointer"
+                    className={`w-full py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                      bulkSelectedStatus
+                        ? 'bg-accent text-black hover:bg-accent/90 shadow-[0_0_12px_rgba(0,255,148,0.25)] cursor-pointer'
+                        : 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed'
+                    }`}
                   >
-                    {targetFam}
+                    Valider le changement d'état
                   </button>
-                ))}
-              </div>
-              
-              <div className="w-[1px] h-6 bg-white/10 mx-1" />
+                </div>
 
-              <button
-                onClick={() => {
-                  setSelectedSubFams([]);
-                  setSelectedMissionIds([]);
-                }}
-                className="p-1 px-2 border border-red-500/20 text-red-400 bg-red-400/5 hover:bg-red-400/10 hover:border-red-500 hover:text-red-500 text-[10px] uppercase font-bold rounded transition-all cursor-pointer"
-              >
-                Annuler
-              </button>
+                {/* Section 3: Activation */}
+                <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col justify-between gap-3">
+                  <div>
+                    <span className="text-[9px] font-black text-text-dim/80 uppercase tracking-widest block mb-1">
+                      ⚡ Activation des missions :
+                    </span>
+                    <p className="text-[8px] text-text-dim/60 leading-normal uppercase">
+                      Activez ou désactivez l'ensemble des missions associées aux éléments sélectionnés.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setBulkSelectedEnable(bulkSelectedEnable === true ? null : true)}
+                      className={`flex-1 py-1.5 border text-[8px] font-black uppercase tracking-widest rounded-lg transition-all cursor-pointer ${
+                        bulkSelectedEnable === true
+                          ? 'bg-accent/20 border-accent text-accent shadow-[0_0_10px_rgba(0,255,148,0.2)]'
+                          : 'border-white/10 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white'
+                      }`}
+                    >
+                      Activer (ON)
+                    </button>
+                    <button
+                      onClick={() => setBulkSelectedEnable(bulkSelectedEnable === false ? null : false)}
+                      className={`flex-1 py-1.5 border text-[8px] font-black uppercase tracking-widest rounded-lg transition-all cursor-pointer ${
+                        bulkSelectedEnable === false
+                          ? 'bg-red-500/20 border-red-500 text-red-400 shadow-[0_0_10px_rgba(239,68,68,0.2)]'
+                          : 'border-white/10 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white'
+                      }`}
+                    >
+                      Désactiver (OFF)
+                    </button>
+                  </div>
+
+                  <button
+                    disabled={bulkSelectedEnable === null}
+                    onClick={() => {
+                      if (bulkSelectedEnable !== null) {
+                        handleBulkEnableUpdate(bulkSelectedEnable);
+                      }
+                    }}
+                    className={`w-full py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                      bulkSelectedEnable !== null
+                        ? 'bg-accent text-black hover:bg-accent/90 shadow-[0_0_12px_rgba(0,255,148,0.25)] cursor-pointer'
+                        : 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed'
+                    }`}
+                  >
+                    Valider l'activation
+                  </button>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}
