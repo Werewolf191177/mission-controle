@@ -445,8 +445,25 @@ const InteractiveStarRating = ({ rating = 0, onRatingChange, size = 12, classNam
 };
 
 function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen, setIsOpen, accentColor = "text-accent" }: any) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isOpen, setIsOpen]);
+
   return (
-    <div className="space-y-2 relative">
+    <div ref={containerRef} className="space-y-2 relative filter-select-container">
       <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2">
         <Icon size={10} /> {label} {selected.length > 0 && <span className="bg-accent text-black px-1 rounded text-[8px]">{selected.length}</span>}
       </label>
@@ -466,17 +483,6 @@ function FilterSelect({ label, icon: Icon, items, selected, setSelected, isOpen,
       <AnimatePresence>
         {isOpen && (
           <div key="filter-container">
-            <motion.div
-              key="filter-backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[60] bg-transparent cursor-default" 
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }} 
-            />
             <motion.div
               key="filter-menu"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -815,14 +821,115 @@ export default function App() {
   });
 
   const toggleAllMissions = (enabled: boolean) => {
-    setMissions(prev => prev.map(m => ({ ...m, enabled })));
+    const isFilteringActive = !!(
+      filterQuery || 
+      filterStatuses.length > 0 || 
+      filterProducts.length > 0 || 
+      filterFamilies.length > 0 || 
+      filterColors.length > 0 || 
+      filterUniverses.length > 0 || 
+      filterSupports.length > 0 || 
+      filterArguments.length > 0 || 
+      filterPriorities.length > 0 || 
+      filterEnabled.length > 0 ||
+      filterDeadlineAlert || 
+      filterDateStart || 
+      filterDateEnd
+    );
+
+    // Filtered vs all depending on filter state
+    const targetPrimaryIds = new Set((isFilteringActive ? filteredMissions : missions).map(m => m.id));
+    
+    const computedFilteredSecondary = secondaryMissions.filter(sm => {
+      const matchesQuery = !filterQuery || 
+                           sm.title.toLowerCase().includes(filterQuery.toLowerCase()) || 
+                           (sm.note && sm.note.toLowerCase().includes(filterQuery.toLowerCase()));
+                           
+      const hasProductFilters = filterProducts.length > 0;
+      const hasFamilyFilters = filterFamilies.length > 0;
+      const hasColorFilters = filterColors.length > 0;
+      const hasUniverseFilters = filterUniverses.length > 0;
+      const hasSupportFilters = filterSupports.length > 0;
+      const hasArgumentFilters = filterArguments.length > 0;
+      
+      if (hasProductFilters || hasFamilyFilters || hasColorFilters || hasUniverseFilters || hasSupportFilters || hasArgumentFilters) {
+        return false;
+      }
+      
+      const matchesStatus = filterStatuses.length === 0 || (() => {
+        const mappedStatuses = filterStatuses.map(s => {
+          if (s === 'en attente') return 'a faire';
+          if (s === 'en cours de shoot' || s === 'En post-production') return 'en cours';
+          if (s === 'livré') return 'mission accomplie';
+          return s.toLowerCase();
+        });
+        const currentStatus = (sm.status || (sm.progress >= 100 ? 'Mission Accomplie' : sm.progress > 0 ? 'En cours' : 'A faire')).toLowerCase();
+        return mappedStatuses.includes(currentStatus);
+      })();
+      
+      const matchesPriority = filterPriorities.length === 0 || filterPriorities.some(fp => {
+        return fp.toLowerCase().startsWith(sm.priority.toLowerCase());
+      });
+      
+      const matchesEnabled = filterEnabled.length === 0 || (
+        (filterEnabled.includes('Actif') && sm.enabled) ||
+        (filterEnabled.includes('Inactif') && !sm.enabled)
+      );
+      
+      const matchesDeadlineAlert = !filterDeadlineAlert || (isDeadlineApproaching(sm.deadline) && sm.status !== 'Mission Accomplie');
+      
+      const matchesDate = (() => {
+        if (!filterDateStart && !filterDateEnd) return true;
+        
+        let missionDateNum: number;
+        if (filterDateType === 'createdAt') {
+          missionDateNum = sm.createdAt;
+        } else {
+          if (!sm.deadline) return false;
+          const d = new Date(sm.deadline);
+          if (isNaN(d.getTime())) return false;
+          missionDateNum = d.getTime();
+        }
+        
+        const startMs = filterDateStart ? new Date(filterDateStart).getTime() : -Infinity;
+        const endMs = filterDateEnd ? new Date(filterDateEnd).setHours(23, 59, 59, 999) : Infinity;
+        
+        return missionDateNum >= startMs && missionDateNum <= endMs;
+      })();
+      
+      return matchesQuery && matchesStatus && matchesPriority && matchesEnabled && matchesDeadlineAlert && matchesDate;
+    });
+
+    const targetSecondaryIds = new Set((isFilteringActive ? computedFilteredSecondary : secondaryMissions).map(sm => sm.id));
+
+    setMissions(prev => prev.map(m => {
+      if (targetPrimaryIds.has(m.id)) {
+        return { ...m, enabled };
+      }
+      return m;
+    }));
+
+    setSecondaryMissions(prev => prev.map(sm => {
+      if (targetSecondaryIds.has(sm.id)) {
+        return { ...sm, enabled };
+      }
+      return sm;
+    }));
+
+    const totalCount = targetPrimaryIds.size + targetSecondaryIds.size;
+
     setGlobalLogs(prev => [...prev, {
       id: Math.random().toString(36).substring(2, 9),
       timestamp: Date.now(),
-      message: `SYSTÈME : ${enabled ? 'ACTIVATION' : 'DÉSACTIVATION'} de toutes les missions (${missions.length} items).`,
+      message: `SYSTÈME : ${enabled ? 'ACTIVATION' : 'DÉSACTIVATION'} de toutes les missions sélectionnées (${totalCount} items).`,
       type: 'manual'
     }]);
-    setToast({ show: true, message: `Toutes les missions ${enabled ? 'activées' : 'désactivées'} !`, type: 'task' });
+
+    setToast({ 
+      show: true, 
+      message: `${totalCount} mission(s) ${enabled ? 'activée(s)' : 'désactivée(s)'} !`, 
+      type: 'task' 
+    });
     setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
   };
 
@@ -982,8 +1089,13 @@ export default function App() {
   // Form State
   const [selectedFamily, setSelectedFamily] = useState('');
   const [isFamilyDropdownOpen, setIsFamilyDropdownOpen] = useState(false);
+  const [familySearch, setFamilySearch] = useState('');
   const [selectedProduct, setSelectedProduct] = useState('');
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
   const [selectedColor, setSelectedColor] = useState('');
+  const [isColorDropdownOpen, setIsColorDropdownOpen] = useState(false);
+  const [colorSearch, setColorSearch] = useState('');
   const [selectedArgument, setSelectedArgument] = useState('');
   const [selectedUnivers, setSelectedUnivers] = useState('');
   const [selectedFormat, setSelectedFormat] = useState('');
@@ -1204,6 +1316,48 @@ export default function App() {
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
   const [filterDateType, setFilterDateType] = useState<'createdAt' | 'deadline'>('createdAt');
+
+  // Effect to automatically retract/clear table selections when clicking outside
+  useEffect(() => {
+    function handleGlobalClick(event: MouseEvent) {
+      if (selectedMissionIds.length === 0) return;
+      
+      const target = event.target as HTMLElement;
+      
+      // If the user clicked on any interactive elements or within interactive container tables/grids, do not clear selections
+      const isInsideKeepZone = 
+        target.closest('table') || 
+        target.closest('.mosaic-view') ||
+        target.closest('.grid-view') ||
+        target.closest('.task-view') ||
+        target.closest('.calendar-view') ||
+        target.closest('.family-view') ||
+        target.closest('.bulk-action-bar') ||
+        target.closest('.filter-select-container') ||
+        target.closest('.modal-content') ||
+        target.closest('.sidebar-container') ||
+        target.closest('.header-container') ||
+        target.closest('.floating-chat-container') ||
+        target.closest('button') || 
+        target.closest('a') ||
+        target.closest('input') ||
+        target.closest('select') ||
+        target.closest('[role="button"]') ||
+        target.closest('.custom-scrollbar') ||
+        target.closest('header') ||
+        target.closest('tr') ||
+        target.closest('.mosaic-item') ||
+        target.closest('.grid-item') ||
+        target.closest('.task-item');
+                                 
+      if (!isInsideKeepZone) {
+        setSelectedMissionIds([]);
+      }
+    }
+    document.addEventListener('mousedown', handleGlobalClick);
+    return () => document.removeEventListener('mousedown', handleGlobalClick);
+  }, [selectedMissionIds]);
+
   const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
   const [isProductFilterOpen, setIsProductFilterOpen] = useState(false);
   const [isFamilyFilterOpen, setIsFamilyFilterOpen] = useState(false);
@@ -1258,6 +1412,18 @@ export default function App() {
     return localStorage.getItem('retractedMosaics') === 'true';
   });
 
+  const [retractedSecondaryMissions, setRetractedSecondaryMissions] = useState<boolean>(() => {
+    return localStorage.getItem('retractedSecondaryMissions') === 'true';
+  });
+
+  const [retractedActionBar, setRetractedActionBar] = useState<boolean>(() => {
+    return localStorage.getItem('retractedActionBar') === 'true';
+  });
+
+  const [retractedIndicators, setRetractedIndicators] = useState<boolean>(() => {
+    return localStorage.getItem('retractedIndicators') === 'true';
+  });
+
   // Keep these states instantly in memory / local storage when updated
   useEffect(() => {
     localStorage.setItem('collapsedCategories', JSON.stringify(collapsedCategories));
@@ -1274,11 +1440,21 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('retractedMosaics', retractedMosaics.toString());
   }, [retractedMosaics]);
+
+  useEffect(() => {
+    localStorage.setItem('retractedSecondaryMissions', retractedSecondaryMissions.toString());
+  }, [retractedSecondaryMissions]);
+
+  useEffect(() => {
+    localStorage.setItem('retractedActionBar', retractedActionBar.toString());
+  }, [retractedActionBar]);
+
+  useEffect(() => {
+    localStorage.setItem('retractedIndicators', retractedIndicators.toString());
+  }, [retractedIndicators]);
   
   // Journal State
   const [systemDataJson, setSystemDataJson] = useState('');
-  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
-  const [isColorDropdownOpen, setIsColorDropdownOpen] = useState(false);
   const [isNavDropdownOpen, setIsNavDropdownOpen] = useState(false);
   const [isViewDropdownOpen, setIsViewDropdownOpen] = useState(false);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
@@ -1413,6 +1589,9 @@ LISTE DES COMMANDES :
       collapsedSettingsSections,
       collapsedMosaicGroups,
       retractedMosaics,
+      retractedSecondaryMissions,
+      retractedActionBar,
+      retractedIndicators,
       
       // Auto Export Settings
       autoExportEnabled,
@@ -1470,6 +1649,9 @@ LISTE DES COMMANDES :
     collapsedSettingsSections,
     collapsedMosaicGroups,
     retractedMosaics,
+    retractedSecondaryMissions,
+    retractedActionBar,
+    retractedIndicators,
     autoExportEnabled,
     autoExportInterval,
     scheduledExportEnabled,
@@ -1949,7 +2131,7 @@ LISTE DES COMMANDES :
             const restored = categories.map((config) => {
               const saved = parsed.find((p: any) => p.id === config.id);
               if (saved) {
-                let finalItems = saved.items || config.items;
+                let finalItems = (saved.items && saved.items.length > 0) ? saved.items : config.items;
                 // Migration: ensures "En post-production" is present in the status items if missing
                 if (config.id === 'status' && !finalItems.includes('En post-production')) {
                   const newItems = [...finalItems];
@@ -2376,6 +2558,9 @@ LISTE DES COMMANDES :
       if (data.collapsedSettingsSections) setCollapsedSettingsSections(data.collapsedSettingsSections);
       if (data.collapsedMosaicGroups) setCollapsedMosaicGroups(data.collapsedMosaicGroups);
       if (data.retractedMosaics !== undefined) setRetractedMosaics(data.retractedMosaics);
+      if (data.retractedSecondaryMissions !== undefined) setRetractedSecondaryMissions(data.retractedSecondaryMissions);
+      if (data.retractedActionBar !== undefined) setRetractedActionBar(data.retractedActionBar);
+      if (data.retractedIndicators !== undefined) setRetractedIndicators(data.retractedIndicators);
       
       if (data.autoExportEnabled !== undefined) setAutoExportEnabled(data.autoExportEnabled);
       if (data.autoExportInterval !== undefined) setAutoExportInterval(data.autoExportInterval);
@@ -2387,7 +2572,12 @@ LISTE DES COMMANDES :
       if (data.categories) {
         const restored = data.categories.map((cat: any) => {
           const original = categories.find(c => c.id === cat.id);
-          return { ...cat, icon: original?.icon || Package };
+          const finalItems = (cat.items && cat.items.length > 0) ? cat.items : (original?.items || []);
+          return { 
+            ...cat, 
+            items: finalItems,
+            icon: original?.icon || Package 
+          };
         });
         setCategories(restored);
       }
@@ -2440,6 +2630,9 @@ LISTE DES COMMANDES :
       if (data.collapsedSettingsSections !== undefined) localStorage.setItem('collapsedSettingsSections', JSON.stringify(data.collapsedSettingsSections));
       if (data.collapsedMosaicGroups !== undefined) localStorage.setItem('collapsedMosaicGroups', JSON.stringify(data.collapsedMosaicGroups));
       if (data.retractedMosaics !== undefined) localStorage.setItem('retractedMosaics', data.retractedMosaics.toString());
+      if (data.retractedSecondaryMissions !== undefined) localStorage.setItem('retractedSecondaryMissions', data.retractedSecondaryMissions.toString());
+      if (data.retractedActionBar !== undefined) localStorage.setItem('retractedActionBar', data.retractedActionBar.toString());
+      if (data.retractedIndicators !== undefined) localStorage.setItem('retractedIndicators', data.retractedIndicators.toString());
       if (data.autoExportEnabled !== undefined) localStorage.setItem('autoExportEnabled', data.autoExportEnabled.toString());
       if (data.autoExportInterval !== undefined) localStorage.setItem('autoExportInterval', data.autoExportInterval.toString());
       if (data.scheduledExportEnabled !== undefined) localStorage.setItem('scheduledExportEnabled', data.scheduledExportEnabled.toString());
@@ -2547,6 +2740,8 @@ LISTE DES COMMANDES :
       localStorage.setItem('showDuplicateIndicators', showDuplicateIndicators.toString());
       localStorage.setItem('filterDuplicates', filterDuplicates.toString());
       localStorage.setItem('showSecondaryInReport', showSecondaryInReport.toString());
+      localStorage.setItem('retractedActionBar', retractedActionBar.toString());
+      localStorage.setItem('retractedIndicators', retractedIndicators.toString());
       localStorage.setItem('systemDataJson', systemDataJson);
     } catch (e) {
       if (e instanceof Error && e.name === 'QuotaExceededError') {
@@ -2581,7 +2776,7 @@ LISTE DES COMMANDES :
     retractedMosaics, aiInstructions, deadlineAlertThreshold, globalDeadline,
     isSynchroFluxExpanded, autoExportCalendarOnCreate, autoExportTasksOnCreate,
     autoExportMainCalendarOnCreate, autoExportMainTasksOnCreate, activeTab, systemSubTab,
-    showDuplicateIndicators, filterDuplicates, showSecondaryInReport, systemDataJson
+    showDuplicateIndicators, filterDuplicates, showSecondaryInReport, retractedActionBar, retractedIndicators, systemDataJson
   ]);
 
   const saveToLocalStorage = () => {
@@ -8743,6 +8938,90 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     return 0;
   });
 
+  const isFilteringActive = !!(
+    filterQuery || 
+    filterStatuses.length > 0 || 
+    filterProducts.length > 0 || 
+    filterFamilies.length > 0 || 
+    filterColors.length > 0 || 
+    filterUniverses.length > 0 || 
+    filterSupports.length > 0 || 
+    filterArguments.length > 0 || 
+    filterPriorities.length > 0 || 
+    filterEnabled.length > 0 ||
+    filterDeadlineAlert || 
+    filterDateStart || 
+    filterDateEnd
+  );
+
+  const filteredSecondaryMissions = secondaryMissions.filter(sm => {
+    const matchesQuery = !filterQuery || 
+                         sm.title.toLowerCase().includes(filterQuery.toLowerCase()) || 
+                         (sm.note && sm.note.toLowerCase().includes(filterQuery.toLowerCase()));
+                         
+    const hasProductFilters = filterProducts.length > 0;
+    const hasFamilyFilters = filterFamilies.length > 0;
+    const hasColorFilters = filterColors.length > 0;
+    const hasUniverseFilters = filterUniverses.length > 0;
+    const hasSupportFilters = filterSupports.length > 0;
+    const hasArgumentFilters = filterArguments.length > 0;
+    
+    if (hasProductFilters || hasFamilyFilters || hasColorFilters || hasUniverseFilters || hasSupportFilters || hasArgumentFilters) {
+      return false;
+    }
+    
+    const matchesStatus = filterStatuses.length === 0 || (() => {
+      const mappedStatuses = filterStatuses.map(s => {
+        if (s === 'en attente') return 'a faire';
+        if (s === 'en cours de shoot' || s === 'En post-production') return 'en cours';
+        if (s === 'livré') return 'mission accomplie';
+        return s.toLowerCase();
+      });
+      const currentStatus = (sm.status || (sm.progress >= 100 ? 'Mission Accomplie' : sm.progress > 0 ? 'En cours' : 'A faire')).toLowerCase();
+      return mappedStatuses.includes(currentStatus);
+    })();
+    
+    const matchesPriority = filterPriorities.length === 0 || filterPriorities.some(fp => {
+      return fp.toLowerCase().startsWith(sm.priority.toLowerCase());
+    });
+    
+    const matchesEnabled = filterEnabled.length === 0 || (
+      (filterEnabled.includes('Actif') && sm.enabled) ||
+      (filterEnabled.includes('Inactif') && !sm.enabled)
+    );
+    
+    const matchesDeadlineAlert = !filterDeadlineAlert || (isDeadlineApproaching(sm.deadline) && sm.status !== 'Mission Accomplie');
+    
+    const matchesDate = (() => {
+      if (!filterDateStart && !filterDateEnd) return true;
+      
+      let missionDateNum: number;
+      if (filterDateType === 'createdAt') {
+        missionDateNum = sm.createdAt;
+      } else {
+        if (!sm.deadline) return false;
+        const d = new Date(sm.deadline);
+        if (isNaN(d.getTime())) return false;
+        missionDateNum = d.getTime();
+      }
+      
+      const startMs = filterDateStart ? new Date(filterDateStart).getTime() : -Infinity;
+      const endMs = filterDateEnd ? new Date(filterDateEnd).setHours(23, 59, 59, 999) : Infinity;
+      
+      return missionDateNum >= startMs && missionDateNum <= endMs;
+    })();
+    
+    return matchesQuery && matchesStatus && matchesPriority && matchesEnabled && matchesDeadlineAlert && matchesDate;
+  });
+
+  const activeRelevantPrimary = isFilteringActive ? filteredMissions : missions;
+  const activeRelevantSecondary = isFilteringActive ? filteredSecondaryMissions : secondaryMissions;
+  
+  const totalRelevantCount = activeRelevantPrimary.length + activeRelevantSecondary.length;
+  const areAllRelevantEnabled = totalRelevantCount > 0 && 
+    activeRelevantPrimary.every(m => m.enabled) && 
+    activeRelevantSecondary.every(m => m.enabled);
+
   const tabs = [
     { id: 'table', label: 'Rapport', icon: Activity },
     { id: 'dashboard', label: 'Monitor', icon: BarChart3 },
@@ -9104,16 +9383,24 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               value={selectedFamily}
                               onChange={(e) => {
                                 setSelectedFamily(e.target.value);
+                                setFamilySearch(e.target.value);
                                 if (!isFamilyDropdownOpen) setIsFamilyDropdownOpen(true);
                               }}
-                              onFocus={() => setIsFamilyDropdownOpen(true)}
+                              onFocus={() => {
+                                setIsFamilyDropdownOpen(true);
+                                setFamilySearch('');
+                              }}
                               placeholder="Famille de produit..."
                               className="w-full bg-card-bg border border-border p-3 pr-10 rounded-md text-white outline-none focus:border-accent transition-all text-sm focus:ring-1 focus:ring-accent/30 relative z-[166]"
                               style={isHex ? { borderColor: `${cat.colorRef}40`, boxShadow: `0 0 0 1px ${cat.colorRef}20` } : {}}
                             />
                             <button
                               type="button"
-                              onClick={() => setIsFamilyDropdownOpen(!isFamilyDropdownOpen)}
+                              onClick={() => {
+                                const willOpen = !isFamilyDropdownOpen;
+                                setIsFamilyDropdownOpen(willOpen);
+                                if (willOpen) setFamilySearch('');
+                              }}
                               className="absolute right-0 top-0 h-full px-3 text-text-dim hover:text-accent transition-colors z-[167]"
                             >
                               <ChevronDown size={14} className={isFamilyDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -9142,7 +9429,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     className="absolute top-full left-0 w-full mt-1 bg-[#1A1A1A] border border-white/10 rounded-md shadow-2xl z-[155] max-h-60 overflow-y-auto custom-scrollbar"
                                   >
                                   {(cat.items || [])
-                                    .filter(item => item.toLowerCase().includes((selectedFamily || '').toLowerCase()))
+                                    .filter(item => item.toLowerCase().includes((familySearch || '').toLowerCase()))
                                     .map(item => (
                                       <button
                                         key={item}
@@ -9156,7 +9443,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                         {item}
                                       </button>
                                     ))}
-                                  {((cat.items || []).filter(item => item.toLowerCase().includes((selectedFamily || '').toLowerCase()))).length === 0 && (
+                                  {((cat.items || []).filter(item => item.toLowerCase().includes((familySearch || '').toLowerCase()))).length === 0 && (
                                     <div className="px-4 py-3 text-[10px] text-white/30 italic">Aucun résultat</div>
                                   )}
                                   </motion.div>
@@ -9171,16 +9458,24 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               value={selectedProduct}
                               onChange={(e) => {
                                 setSelectedProduct(e.target.value);
+                                setProductSearch(e.target.value);
                                 if (!isProductDropdownOpen) setIsProductDropdownOpen(true);
                               }}
-                              onFocus={() => setIsProductDropdownOpen(true)}
+                              onFocus={() => {
+                                setIsProductDropdownOpen(true);
+                                setProductSearch('');
+                              }}
                               placeholder="Nom du produit..."
                               className="w-full bg-card-bg border border-border p-3 pr-10 rounded-md text-white outline-none focus:border-accent transition-all text-sm focus:ring-1 focus:ring-accent/30 relative z-[161]"
                               style={isHex ? { borderColor: `${cat.colorRef}40`, boxShadow: `0 0 0 1px ${cat.colorRef}20` } : {}}
                             />
                             <button
                               type="button"
-                              onClick={() => setIsProductDropdownOpen(!isProductDropdownOpen)}
+                              onClick={() => {
+                                const willOpen = !isProductDropdownOpen;
+                                setIsProductDropdownOpen(willOpen);
+                                if (willOpen) setProductSearch('');
+                              }}
                               className="absolute right-0 top-0 h-full px-3 text-text-dim hover:text-accent transition-colors z-[162]"
                             >
                               <ChevronDown size={14} className={isProductDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -9209,7 +9504,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     className="absolute top-full left-0 w-full mt-1 bg-[#1A1A1A] border border-white/10 rounded-md shadow-2xl z-[155] max-h-60 overflow-y-auto custom-scrollbar"
                                   >
                                   {(cat.items || [])
-                                    .filter(item => item.toLowerCase().includes((selectedProduct || '').toLowerCase()))
+                                    .filter(item => item.toLowerCase().includes((productSearch || '').toLowerCase()))
                                     .map(item => (
                                       <button
                                         key={item}
@@ -9222,7 +9517,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                         {item}
                                       </button>
                                     ))}
-                                  {((cat.items || []).filter(item => item.toLowerCase().includes((selectedProduct || '').toLowerCase()))).length === 0 && (
+                                  {((cat.items || []).filter(item => item.toLowerCase().includes((productSearch || '').toLowerCase()))).length === 0 && (
                                     <div className="px-4 py-3 text-[10px] text-white/30 italic">Aucun résultat</div>
                                   )}
                                 </motion.div>
@@ -9237,16 +9532,24 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               value={selectedColor}
                               onChange={(e) => {
                                 setSelectedColor(e.target.value);
+                                setColorSearch(e.target.value);
                                 if (!isColorDropdownOpen) setIsColorDropdownOpen(true);
                               }}
-                              onFocus={() => setIsColorDropdownOpen(true)}
+                              onFocus={() => {
+                                setIsColorDropdownOpen(true);
+                                setColorSearch('');
+                              }}
                               placeholder="Couleur du produit..."
                               className="w-full bg-card-bg border border-border p-3 pr-10 rounded-md text-white outline-none focus:border-accent transition-all text-sm focus:ring-1 focus:ring-accent/30 relative z-[161]"
                               style={isHex ? { borderColor: `${cat.colorRef}40`, boxShadow: `0 0 0 1px ${cat.colorRef}20` } : {}}
                             />
                             <button
                               type="button"
-                              onClick={() => setIsColorDropdownOpen(!isColorDropdownOpen)}
+                              onClick={() => {
+                                const willOpen = !isColorDropdownOpen;
+                                setIsColorDropdownOpen(willOpen);
+                                if (willOpen) setColorSearch('');
+                              }}
                               className="absolute right-0 top-0 h-full px-3 text-text-dim hover:text-accent transition-colors z-[162]"
                             >
                               <ChevronDown size={14} className={isColorDropdownOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -9275,7 +9578,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     className="absolute top-full left-0 w-full mt-1 bg-[#1A1A1A] border border-white/10 rounded-md shadow-2xl z-[155] max-h-60 overflow-y-auto custom-scrollbar"
                                   >
                                   {(cat.items || [])
-                                    .filter(item => item.toLowerCase().includes((selectedColor || '').toLowerCase()))
+                                    .filter(item => item.toLowerCase().includes((colorSearch || '').toLowerCase()))
                                     .map(item => (
                                       <button
                                         key={item}
@@ -9289,7 +9592,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                         {item}
                                       </button>
                                     ))}
-                                  {((cat.items || []).filter(item => item.toLowerCase().includes((selectedColor || '').toLowerCase()))).length === 0 && (
+                                  {((cat.items || []).filter(item => item.toLowerCase().includes((colorSearch || '').toLowerCase()))).length === 0 && (
                                     <div className="px-4 py-3 text-[10px] text-white/30 italic">Aucun résultat</div>
                                   )}
                                 </motion.div>
@@ -10011,10 +10314,41 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               </div>
 
               {activeTab === 'table' && (
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => setIsAdvancedSortOpen(true)}
+                <div className="flex items-center gap-4 flex-wrap">
+                  <button
+                    onClick={() => setRetractedActionBar(!retractedActionBar)}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1.5 border cursor-pointer ${
+                      retractedActionBar 
+                        ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/30 hover:bg-accent-blue/30 shadow-[0_0_15px_rgba(0,209,255,0.15)]' 
+                        : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white'
+                    }`}
+                    title={retractedActionBar ? "Déployer les outils" : "Rétracter les outils"}
+                  >
+                    {retractedActionBar ? (
+                      <>
+                        <Maximize size={12} />
+                        Déployer Outils
+                      </>
+                    ) : (
+                      <>
+                        <Minimize size={12} />
+                        Rétracter Outils
+                      </>
+                    )}
+                  </button>
+
+                  <AnimatePresence initial={false}>
+                    {!retractedActionBar && (
+                      <motion.div
+                        initial={{ opacity: 0, scaleX: 0, width: 0 }}
+                        animate={{ opacity: 1, scaleX: 1, width: "auto" }}
+                        exit={{ opacity: 0, scaleX: 0, width: 0 }}
+                        transition={{ duration: 0.4, ease: "linear" }}
+                        style={{ originX: 0 }}
+                        className="flex items-center gap-2 flex-wrap origin-left overflow-hidden"
+                      >
+                        <button 
+                          onClick={() => setIsAdvancedSortOpen(true)}
                       className={`flex items-center gap-2 px-3 py-1.5 border rounded text-[10px] font-black uppercase tracking-widest transition-all ${
                         sortConfigs.length > 0 
                           ? 'bg-accent-blue text-black border-accent-blue shadow-[0_0_15px_rgba(0,209,255,0.3)]' 
@@ -10309,7 +10643,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                          <Calendar size={14} />
                        </button>
                      </div>
-                  </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2 px-3 py-1 bg-white/5 border border-white/10 rounded-full">
@@ -10322,16 +10658,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     <div className="flex items-center gap-3 px-3 py-1.5 bg-white/5 border border-white/10 rounded-md">
                       <div className="flex flex-col">
                         <span className="text-[7px] text-text-dim uppercase font-black tracking-tighter">Flux Global</span>
-                        <span className={`text-[9px] font-black uppercase tracking-widest transition-colors ${missions.every(m => m.enabled) && missions.length > 0 ? 'text-accent' : 'text-red-400'}`}>
-                          {missions.every(m => m.enabled) && missions.length > 0 ? 'TOUT ACTIF' : 'TOUT INACTIF'}
+                        <span className={`text-[9px] font-black uppercase tracking-widest transition-colors ${areAllRelevantEnabled ? 'text-accent' : 'text-red-400'}`}>
+                          {areAllRelevantEnabled ? 'TOUT ACTIF' : 'TOUT INACTIF'}
                         </span>
                       </div>
                       <Toggle 
-                        enabled={missions.every(m => m.enabled) && missions.length > 0}
+                        enabled={areAllRelevantEnabled}
                         onToggle={(e) => {
                           e.stopPropagation();
-                          const areAllEnabled = missions.every(m => m.enabled) && missions.length > 0;
-                          toggleAllMissions(!areAllEnabled);
+                          toggleAllMissions(!areAllRelevantEnabled);
                         }}
                       />
                     </div>
@@ -10410,7 +10745,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         initial={{ height: 0, opacity: 0, overflow: 'hidden' }}
                         animate={{ height: 'auto', opacity: 1, transitionEnd: { overflow: 'visible' } }}
                         exit={{ height: 0, opacity: 0, overflow: 'hidden' }}
-                        className="mb-6"
+                        className="mb-6 space-y-4"
                       >
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-9 gap-4 p-5 bg-white/5 border border-white/10 rounded-xl backdrop-blur-md relative z-20">
                           {/* Search */}
@@ -11280,6 +11615,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 setMissions={setMissions}
                 setGlobalLogs={setGlobalLogs}
                 setToast={setToast}
+                retractedIndicators={retractedIndicators}
+                setRetractedIndicators={setRetractedIndicators}
               />
             )}
             </>
@@ -11287,33 +11624,87 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         </div>
 
         {/* Secondary Missions Segment */}
-        <div className="space-y-6 pt-12 border-t border-white/5">
+        <div className="space-y-6 pt-12 relative">
+          {/* Animated Separator Line */}
+          <div className="absolute top-0 left-0 right-0 h-[1px] bg-white/5">
+            <motion.div 
+              className="h-full bg-accent-blue/50" 
+              initial={{ scaleX: 1 }}
+              animate={{ scaleX: retractedSecondaryMissions ? 0 : 1 }}
+              transition={{ duration: 0.4, ease: "linear" }}
+              style={{ originX: 0 }}
+            />
+          </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-accent-blue/20 rounded-lg text-accent-blue">
+            <button 
+              onClick={() => setRetractedSecondaryMissions(!retractedSecondaryMissions)}
+              className="p-2 bg-accent-blue/20 rounded-lg text-accent-blue hover:bg-accent-blue/30 transition-all cursor-pointer flex items-center gap-1.5"
+              title={retractedSecondaryMissions ? "Développer les missions secondaires" : "Rétracter les missions secondaires"}
+            >
               <List size={18} />
-            </div>
-            <div>
-              <h2 className="text-sm font-black uppercase tracking-[4px] text-white">Missions Secondaires</h2>
+              <ChevronDown size={14} className={`transition-transform duration-300 ${retractedSecondaryMissions ? '-rotate-90 text-text-dim/60' : ''}`} />
+            </button>
+            <div 
+              onClick={() => setRetractedSecondaryMissions(!retractedSecondaryMissions)}
+              className="cursor-pointer select-none group/title"
+            >
+              <h2 className="text-sm font-black uppercase tracking-[4px] text-white group-hover/title:text-accent-blue transition-colors flex items-center gap-2">
+                Missions Secondaires
+              </h2>
               <p className="text-[9px] font-mono text-accent-blue/60 uppercase tracking-widest mt-1">Marketing, Studio, Logistique & Divers</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
-             <div className="flex bg-black/40 border border-white/10 rounded-lg p-1">
-               <button onClick={() => setSecondaryViewMode('grid')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><LayoutGrid size={12}/> Grid</button>
-               <button onClick={() => setSecondaryViewMode('task')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'task' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><List size={12}/> Task</button>
-               <button onClick={() => setSecondaryViewMode('calendar')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'calendar' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><Calendar size={12}/> Calendrier</button>
-             </div>
+            <button
+              onClick={() => setRetractedSecondaryMissions(!retractedSecondaryMissions)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1.5 border cursor-pointer ${
+                retractedSecondaryMissions 
+                  ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/30 hover:bg-accent-blue/30' 
+                  : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white'
+              }`}
+              title={retractedSecondaryMissions ? "Développer les missions" : "Rétracter les missions"}
+            >
+              {retractedSecondaryMissions ? (
+                <>
+                  <Maximize size={12} />
+                  Déployer
+                </>
+              ) : (
+                <>
+                  <Minimize size={12} />
+                  Rétracter
+                </>
+              )}
+            </button>
+             {!retractedSecondaryMissions && (
+               <div className="flex bg-black/40 border border-white/10 rounded-lg p-1">
+                 <button onClick={() => setSecondaryViewMode('grid')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><LayoutGrid size={12}/> Grid</button>
+                 <button onClick={() => setSecondaryViewMode('task')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'task' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><List size={12}/> Task</button>
+                 <button onClick={() => setSecondaryViewMode('calendar')} className={`px-3 py-1 flex gap-2 items-center text-[10px] font-bold uppercase rounded ${secondaryViewMode === 'calendar' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}><Calendar size={12}/> Calendrier</button>
+               </div>
+             )}
              <div className="text-[10px] font-mono text-text-dim/60 uppercase">
-               {secondaryMissions.length} Missions Actives
+               {filteredSecondaryMissions.length !== secondaryMissions.length 
+                  ? `${filteredSecondaryMissions.length} / ${secondaryMissions.length} Missions`
+                  : `${secondaryMissions.length} Missions Actives`}
              </div>
           </div>
         </div>
 
-        {secondaryViewMode === 'grid' && (
+        <AnimatePresence initial={false}>
+          {!retractedSecondaryMissions && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3 }}
+              className="space-y-6 overflow-hidden"
+            >
+            {secondaryViewMode === 'grid' && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           <AnimatePresence initial={false}>
-            {secondaryMissions.length === 0 ? (
+            {filteredSecondaryMissions.length === 0 ? (
               <motion.div 
                 key="empty-secondary-missions"
                 initial={{ opacity: 0 }}
@@ -11324,7 +11715,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <p className="text-[10px] uppercase font-black tracking-widest">Aucune mission secondaire</p>
               </motion.div>
             ) : (
-              secondaryMissions.map((sm) => (
+              filteredSecondaryMissions.map((sm) => (
                 <motion.div
                   key={sm.id}
                   initial={{ opacity: 0, y: 20 }}
@@ -11511,13 +11902,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
         {secondaryViewMode === 'task' && (
           <div className="space-y-3">
-            {secondaryMissions.length === 0 ? (
+            {filteredSecondaryMissions.length === 0 ? (
               <div className="py-12 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center gap-4 opacity-30">
                 <PackageSearch size={40} className="text-text-dim" />
                 <p className="text-[10px] uppercase font-black tracking-widest">Aucune mission secondaire</p>
               </div>
             ) : (
-              secondaryMissions.map((sm) => (
+              filteredSecondaryMissions.map((sm) => (
                 <div key={sm.id} className={`flex items-center gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-xl hover:bg-white/[0.04] transition-all custom-shadow ${sm.enabled ? '' : 'opacity-50 grayscale'}`}>
                   <button 
                     onClick={() => updateSecondaryMission(sm.id, { progress: sm.progress >= 100 ? 0 : 100 })}
@@ -11617,7 +12008,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               ))}
               {Array.from({ length: new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
                 const dateStr = `${calendarDate.getFullYear()}-${(calendarDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-                const dayMissions = secondaryMissions.filter(m => m.deadline === dateStr);
+                const dayMissions = filteredSecondaryMissions.filter(m => m.deadline === dateStr);
                 const isToday = new Date().toISOString().split('T')[0] === dateStr;
                 return (
                   <div key={day} className={`min-h-[120px] rounded-xl p-2.5 flex flex-col transition-colors ${isToday ? 'bg-accent/5 border border-accent/30 shadow-[0_0_15px_rgba(0,255,148,0.1)]' : 'bg-black/20 border border-white/5 hover:border-white/20 hover:bg-white/[0.02]'}`}>
@@ -11635,6 +12026,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             </div>
           </div>
         )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   )}
@@ -11646,10 +12040,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       <AnimatePresence>
         {selectedMissionIds.length > 0 && (
           <motion.div 
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[250] bg-black/90 backdrop-blur-xl border border-white/10 rounded-full px-6 py-4 flex items-center gap-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)] border-t-accent/30"
+            initial={{ y: 100, opacity: 0, x: '-50%' }}
+            animate={{ y: 0, opacity: 1, x: '-50%' }}
+            exit={{ y: 100, opacity: 0, x: '-50%' }}
+            className="fixed bottom-8 left-1/2 z-[250] bg-black/95 backdrop-blur-xl border border-white/10 border-t-accent/30 rounded-full px-6 py-4 flex items-center gap-6 shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
           >
             <div className="flex items-center gap-2 pr-6 border-r border-white/10">
               <div className="w-6 h-6 bg-accent text-black rounded-full flex items-center justify-center text-[10px] font-black">
@@ -11703,7 +12097,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
               <button 
                 onClick={() => setSelectedMissionIds([])}
-                className="text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white transition-colors ml-2"
+                className="text-[9px] font-black uppercase tracking-widest text-text-dim hover:text-white transition-colors ml-2 cursor-pointer"
               >
                 Tout Désélectionner
               </button>
@@ -14173,6 +14567,8 @@ interface FamilyGroupViewProps {
   setMissions: React.Dispatch<React.SetStateAction<Mission[]>>;
   setGlobalLogs: React.Dispatch<React.SetStateAction<GlobalLogEntry[]>>;
   setToast: React.Dispatch<React.SetStateAction<{ show: boolean, message: string, type: string }>>;
+  retractedIndicators: boolean;
+  setRetractedIndicators: (val: boolean) => void;
 }
 
 function FamilyGroupView({
@@ -14197,13 +14593,138 @@ function FamilyGroupView({
   setMissions,
   setGlobalLogs,
   setToast,
+  retractedIndicators,
+  setRetractedIndicators,
 }: FamilyGroupViewProps) {
   // Only group main missions (filteredMissions). Let's make sure we filter out secondary tasks
   const missionsByFamily: Record<string, Record<string, Mission[]>> = {};
 
   const [selectedSubFams, setSelectedSubFams] = useState<string[]>([]);
+
+  // Effect to automatically retract/clear subfamily selections when clicking outside
+  useEffect(() => {
+    function handleGlobalClick(event: MouseEvent) {
+      if (selectedSubFams.length === 0) return;
+      
+      const target = event.target as HTMLElement;
+      
+      const isInsideKeepZone = 
+        target.closest('.family-view') || 
+        target.closest('.bulk-action-bar') ||
+        target.closest('.modal-content') ||
+        target.closest('.sidebar-container') ||
+        target.closest('.header-container') ||
+        target.closest('.floating-chat-container') ||
+        target.closest('button') || 
+        target.closest('a') ||
+        target.closest('input') ||
+        target.closest('select') ||
+        target.closest('[role="button"]') ||
+        target.closest('.custom-scrollbar') ||
+        target.closest('header');
+                                 
+      if (!isInsideKeepZone) {
+        setSelectedSubFams([]);
+      }
+    }
+    document.addEventListener('mousedown', handleGlobalClick);
+    return () => document.removeEventListener('mousedown', handleGlobalClick);
+  }, [selectedSubFams]);
+
   const [draggedOverFamName, setDraggedOverFamName] = useState<string | null>(null);
   const [draggedOverSubFam, setDraggedOverSubFam] = useState<string | null>(null);
+
+  // Inline editing state for subfamily product/color
+  const [editingSubFam, setEditingSubFam] = useState<{ fam: string; product: string; color: string; field: 'product' | 'color' } | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+
+  // Inline editing state for mission refId
+  const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
+  const [editRefIdValue, setEditRefIdValue] = useState<string>('');
+
+  const handleSaveProduct = (fam: string, oldProduct: string, color: string, newProduct: string) => {
+    const val = newProduct.trim();
+    if (!val || val === oldProduct) {
+      setEditingSubFam(null);
+      return;
+    }
+    
+    // Find all missions in this subfamily and update their product name
+    setMissions(prev => prev.map(m => {
+      const currentFam = m.family || deduceFamily(m.product) || 'Autre';
+      const mColor = m.color || 'Sans couleur';
+      if (currentFam === fam && m.product === oldProduct && mColor === color) {
+        return { ...m, product: val };
+      }
+      return m;
+    }));
+    
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `EDITION : Modification du nom de produit de "${oldProduct}" à "${val}" dans la famille "${fam}".`,
+      type: 'manual'
+    }]);
+    
+    setToast({ show: true, message: `Produit renommé en "${val}" !`, type: 'task' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    setEditingSubFam(null);
+  };
+
+  const handleSaveColor = (fam: string, product: string, oldColor: string, newColor: string) => {
+    const val = newColor.trim();
+    if (!val || val === oldColor) {
+      setEditingSubFam(null);
+      return;
+    }
+    
+    // Find all missions in this subfamily and update their color
+    setMissions(prev => prev.map(m => {
+      const currentFam = m.family || deduceFamily(m.product) || 'Autre';
+      const mColor = m.color || 'Sans couleur';
+      if (currentFam === fam && m.product === product && mColor === oldColor) {
+        return { ...m, color: val };
+      }
+      return m;
+    }));
+    
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `EDITION : Modification de la couleur de "${oldColor}" à "${val}" pour le produit "${product}".`,
+      type: 'manual'
+    }]);
+    
+    setToast({ show: true, message: `Couleur renommée en "${val}" !`, type: 'task' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    setEditingSubFam(null);
+  };
+
+  const handleSaveRefId = (missionId: string, oldRefId: string, newRefId: string) => {
+    const val = newRefId.trim();
+    if (!val || val === oldRefId) {
+      setEditingMissionId(null);
+      return;
+    }
+    
+    setMissions(prev => prev.map(m => {
+      if (m.id === missionId) {
+        return { ...m, refId: val };
+      }
+      return m;
+    }));
+    
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `EDITION : Référence de la mission modifiée de "${oldRefId}" à "${val}".`,
+      type: 'manual'
+    }]);
+    
+    setToast({ show: true, message: `Référence renommée en "${val}" !`, type: 'task' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+    setEditingMissionId(null);
+  };
 
   // Local state for selected action date/time
   const [bulkActionDateTime, setBulkActionDateTime] = useState<string>(() => {
@@ -14660,48 +15181,97 @@ function FamilyGroupView({
 
       {/* Dynamic Family View Stats Grid */}
       {familiesList.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5 shadow-md">
-          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
-            <div className="text-[9px] font-black uppercase text-accent-purple tracking-widest flex items-center gap-1.5 mb-1">
-              <Layers size={12} /> Familles Actives
-            </div>
-            <div>
-              <div className="text-xl font-black text-white">{familiesList.length}</div>
-              <div className="text-[8px] font-mono text-text-dim/60 uppercase">Groupes de familles</div>
-            </div>
+        <div className="relative pt-2">
+          {/* Animated Separator Line */}
+          <div className="absolute top-0 left-0 right-0 h-[1px] bg-white/5">
+            <motion.div 
+              className="h-full bg-accent-purple/50" 
+              initial={{ scaleX: 1 }}
+              animate={{ scaleX: retractedIndicators ? 0 : 1 }}
+              transition={{ duration: 0.4, ease: "linear" }}
+              style={{ originX: 0 }}
+            />
           </div>
 
-          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
-            <div className="text-[9px] font-black uppercase text-accent-blue tracking-widest flex items-center gap-1.5 mb-1">
-              <CheckSquare size={12} /> Missions Actives
-            </div>
-            <div>
-              <div className="text-xl font-black text-white">
-                {activeMissionsCount} <span className="text-[10px] font-normal text-text-dim">/ {totalMissions}</span>
-              </div>
-              <div className="text-[8px] font-mono text-text-dim/60 uppercase">{inactiveMissionsCount} Inactive(s) / OFF</div>
-            </div>
+          <div className="flex items-center justify-between mb-3 mt-4">
+            <button
+              onClick={() => setRetractedIndicators(!retractedIndicators)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1.5 border cursor-pointer ${
+                retractedIndicators 
+                  ? 'bg-accent-purple/20 text-accent-purple border-accent-purple/30 hover:bg-accent-purple/30 shadow-[0_0_15px_rgba(217,70,239,0.15)]' 
+                  : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white'
+              }`}
+              title={retractedIndicators ? "Déployer les indicateurs" : "Rétracter les indicateurs"}
+            >
+              {retractedIndicators ? (
+                <>
+                  <Maximize size={12} />
+                  Déployer Indicateurs
+                </>
+              ) : (
+                <>
+                  <Minimize size={12} />
+                  Rétracter Indicateurs
+                </>
+              )}
+            </button>
           </div>
 
-          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
-            <div className="text-[9px] font-black uppercase text-accent tracking-widest flex items-center gap-1.5 mb-1">
-              <Percent size={12} /> Taux de Livraison
-            </div>
-            <div>
-              <div className="text-xl font-black text-accent">{fixedRate.toFixed(1)}%</div>
-              <div className="text-[8px] font-mono text-text-dim/60 uppercase">{completedMissionsCount} livrées sur {activeMissionsCount} actives</div>
-            </div>
-          </div>
+          <AnimatePresence initial={false}>
+            {!retractedIndicators && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.4, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5 shadow-md mb-4">
+                  <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
+                    <div className="text-[9px] font-black uppercase text-accent-purple tracking-widest flex items-center gap-1.5 mb-1">
+                      <Layers size={12} /> Familles Actives
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-white">{familiesList.length}</div>
+                      <div className="text-[8px] font-mono text-text-dim/60 uppercase">Groupes de familles</div>
+                    </div>
+                  </div>
 
-          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
-            <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest flex items-center gap-1.5 mb-1">
-              <Activity size={12} /> En Production
-            </div>
-            <div>
-              <div className="text-xl font-black text-accent-yellow">{inProductionCount}</div>
-              <div className="text-[8px] font-mono text-text-dim/60 uppercase">{pendingCount} en attente / préparation</div>
-            </div>
-          </div>
+                  <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
+                    <div className="text-[9px] font-black uppercase text-accent-blue tracking-widest flex items-center gap-1.5 mb-1">
+                      <CheckSquare size={12} /> Missions Actives
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-white">
+                        {activeMissionsCount} <span className="text-[10px] font-normal text-text-dim">/ {totalMissions}</span>
+                      </div>
+                      <div className="text-[8px] font-mono text-text-dim/60 uppercase">{inactiveMissionsCount} Inactive(s) / OFF</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
+                    <div className="text-[9px] font-black uppercase text-accent tracking-widest flex items-center gap-1.5 mb-1">
+                      <Percent size={12} /> Taux de Livraison
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-accent">{fixedRate.toFixed(1)}%</div>
+                      <div className="text-[8px] font-mono text-text-dim/60 uppercase">{completedMissionsCount} livrées sur {activeMissionsCount} actives</div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-between hover:bg-white/[0.04] transition-all">
+                    <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest flex items-center gap-1.5 mb-1">
+                      <Activity size={12} /> En Production
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-accent-yellow">{inProductionCount}</div>
+                      <div className="text-[8px] font-mono text-text-dim/60 uppercase">{pendingCount} en attente / préparation</div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
@@ -15058,14 +15628,70 @@ function FamilyGroupView({
                                 </button>
 
                                 {/* Product badge mimicking image style */}
-                                <div className="px-3 py-1 rounded bg-white/10 border border-white/20 text-[11px] font-black uppercase text-white font-mono tracking-wider min-w-[90px] text-center shadow-md ml-1">
-                                  {productName}
-                                </div>
+                                {editingSubFam?.fam === fam && editingSubFam?.product === productName && editingSubFam?.color === colorName && editingSubFam?.field === 'product' ? (
+                                  <input
+                                    type="text"
+                                    value={editValue}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={() => handleSaveProduct(fam, productName, colorName, editValue)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleSaveProduct(fam, productName, colorName, editValue);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingSubFam(null);
+                                      }
+                                    }}
+                                    className="px-3 py-1 rounded bg-black border border-accent text-[11px] font-black uppercase text-accent font-mono tracking-wider min-w-[90px] text-center shadow-md ml-1 outline-none focus:ring-1 focus:ring-accent"
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ) : (
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingSubFam({ fam, product: productName, color: colorName, field: 'product' });
+                                      setEditValue(productName);
+                                    }}
+                                    className="group/badge px-3 py-1 rounded bg-white/10 border border-white/20 hover:border-accent/40 text-[11px] font-black uppercase text-white font-mono tracking-wider min-w-[90px] text-center shadow-md ml-1 cursor-pointer transition-all flex items-center justify-center gap-1"
+                                    title="Cliquez pour modifier le produit"
+                                  >
+                                    <span>{productName}</span>
+                                    <Edit2 size={9} className="opacity-0 group-hover/badge:opacity-100 text-accent transition-opacity shrink-0" />
+                                  </div>
+                                )}
                                 
                                 {/* Color badge */ }
-                                <div className={`px-2.5 py-1 rounded text-[10px] font-semibold text-white font-mono uppercase tracking-wide border ${getColorAccentClass(colorName)}`}>
-                                  {colorName}
-                                </div>
+                                {editingSubFam?.fam === fam && editingSubFam?.product === productName && editingSubFam?.color === colorName && editingSubFam?.field === 'color' ? (
+                                  <input
+                                    type="text"
+                                    value={editValue}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={() => handleSaveColor(fam, productName, colorName, editValue)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleSaveColor(fam, productName, colorName, editValue);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingSubFam(null);
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 rounded bg-black border border-accent text-[10px] font-semibold text-accent font-mono uppercase tracking-wide ml-1 outline-none focus:ring-1 focus:ring-accent max-w-[120px] text-center"
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ) : (
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingSubFam({ fam, product: productName, color: colorName, field: 'color' });
+                                      setEditValue(colorName);
+                                    }}
+                                    className={`group/colorpx px-2.5 py-1 rounded text-[10px] font-semibold text-white font-mono uppercase tracking-wide border cursor-pointer transition-all flex items-center justify-center gap-1 ml-1 ${getColorAccentClass(colorName)}`}
+                                    title="Cliquez pour modifier la couleur"
+                                  >
+                                    <span>{colorName}</span>
+                                    <Edit2 size={9} className="opacity-0 group-hover/colorpx:opacity-100 text-accent transition-opacity shrink-0" />
+                                  </div>
+                                )}
 
                                 {/* Active toggle inside sub-family */}
                                 <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -15178,9 +15804,38 @@ function FamilyGroupView({
 
                                           <div className="flex flex-col">
                                             <div className="flex items-center gap-2">
-                                              <span className="text-[10px] font-mono font-black text-accent-blue" style={{ color: refIdColor }}>
-                                                {m.refId}
-                                              </span>
+                                              {editingMissionId === m.id ? (
+                                                <input
+                                                  type="text"
+                                                  value={editRefIdValue}
+                                                  onChange={(e) => setEditRefIdValue(e.target.value)}
+                                                  onBlur={() => handleSaveRefId(m.id, m.refId, editRefIdValue)}
+                                                  onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                      handleSaveRefId(m.id, m.refId, editRefIdValue);
+                                                    } else if (e.key === 'Escape') {
+                                                      setEditingMissionId(null);
+                                                    }
+                                                  }}
+                                                  className="bg-black border border-accent text-[10px] font-mono font-black text-accent px-1.5 py-0.5 rounded outline-none focus:ring-1 focus:ring-accent max-w-[120px]"
+                                                  autoFocus
+                                                  onClick={(e) => e.stopPropagation()}
+                                                />
+                                              ) : (
+                                                <span 
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditingMissionId(m.id);
+                                                    setEditRefIdValue(m.refId);
+                                                  }}
+                                                  className="group/ref text-[10px] font-mono font-black text-accent-blue hover:text-accent border-b border-dashed border-transparent hover:border-accent-blue/40 cursor-pointer transition-all flex items-center gap-1"
+                                                  style={{ color: refIdColor }}
+                                                  title="Cliquez pour modifier la référence"
+                                                >
+                                                  <span>{m.refId}</span>
+                                                  <Edit2 size={8} className="opacity-0 group-hover/ref:opacity-100 text-accent transition-opacity shrink-0" />
+                                                </span>
+                                              )}
                                               <span className="text-[8px] font-mono text-text-dim/50">
                                                 #{m.missionNo}
                                               </span>
@@ -15196,7 +15851,7 @@ function FamilyGroupView({
                                               )}
                                             </div>
                                             
-                                            <div className="text-[11px] font-medium text-white/80 uppercase tracking-wide mt-0.5 max-w-[280px] truncate">
+                                            <div className="text-[11px] font-medium text-white/80 uppercase tracking-wide mt-0.5 max-w-full md:max-w-xl lg:max-w-2xl xl:max-w-4xl truncate">
                                               {m.argumentType || 'Aucun argument'} <span className="text-white/20 font-light mx-1">|</span> {m.univers || 'Sans univers'} <span className="text-white/20 font-light mx-1">|</span> {m.format || 'Standard'}
                                             </div>
                                           </div>
