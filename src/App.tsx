@@ -100,6 +100,7 @@ import {
 import { initAuth, googleSignIn, logout, getAccessToken } from './services/firebaseAuth';
 import type { User } from 'firebase/auth';
 import SecondaryMissionDetailModal from './components/SecondaryMissionDetailModal';
+import AnalogDateTimePicker from './components/AnalogDateTimePicker';
 
 // --- IMAGE COMPRESSION & OPTIMIZATION UTILITY ---
 const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<string> => {
@@ -13713,11 +13714,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     {bulkEditUpdatePreparedAt && <span className="text-[8px] font-bold text-accent uppercase tracking-widest bg-accent/10 px-1.5 py-0.5 rounded">Modifier</span>}
                   </div>
                   <div className={bulkEditUpdatePreparedAt ? "opacity-100" : "opacity-45 pointer-events-none"}>
-                    <input 
-                      type="datetime-local"
+                    <AnalogDateTimePicker 
                       value={bulkEditPreparedAt}
-                      onChange={(e) => setBulkEditPreparedAt(e.target.value)}
-                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent font-bold outline-none focus:border-accent/50"
+                      onChange={(val) => setBulkEditPreparedAt(val)}
+                      accentColor="accent"
                     />
                   </div>
                 </div>
@@ -13737,11 +13737,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     {bulkEditUpdateShotAt && <span className="text-[8px] font-bold text-accent-blue uppercase tracking-widest bg-accent-blue/10 px-1.5 py-0.5 rounded">Modifier</span>}
                   </div>
                   <div className={bulkEditUpdateShotAt ? "opacity-100" : "opacity-45 pointer-events-none"}>
-                    <input 
-                      type="datetime-local"
+                    <AnalogDateTimePicker 
                       value={bulkEditShotAt}
-                      onChange={(e) => setBulkEditShotAt(e.target.value)}
-                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent-blue font-bold outline-none focus:border-accent-blue/50"
+                      onChange={(val) => setBulkEditShotAt(val)}
+                      accentColor="accent-blue"
                     />
                   </div>
                 </div>
@@ -13761,11 +13760,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     {bulkEditUpdatePostProdAt && <span className="text-[8px] font-bold text-accent-purple uppercase tracking-widest bg-accent-purple/10 px-1.5 py-0.5 rounded">Modifier</span>}
                   </div>
                   <div className={bulkEditUpdatePostProdAt ? "opacity-100" : "opacity-45 pointer-events-none"}>
-                    <input 
-                      type="datetime-local"
+                    <AnalogDateTimePicker 
                       value={bulkEditPostProdAt}
-                      onChange={(e) => setBulkEditPostProdAt(e.target.value)}
-                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent-purple font-bold outline-none focus:border-accent-purple/50"
+                      onChange={(val) => setBulkEditPostProdAt(val)}
+                      accentColor="accent-purple"
                     />
                   </div>
                 </div>
@@ -13785,11 +13783,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     {bulkEditUpdateDeliveredAt && <span className="text-[8px] font-bold text-accent-pink uppercase tracking-widest bg-accent-pink/10 px-1.5 py-0.5 rounded">Modifier</span>}
                   </div>
                   <div className={bulkEditUpdateDeliveredAt ? "opacity-100" : "opacity-45 pointer-events-none"}>
-                    <input 
-                      type="datetime-local"
+                    <AnalogDateTimePicker 
                       value={bulkEditDeliveredAt}
-                      onChange={(e) => setBulkEditDeliveredAt(e.target.value)}
-                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-accent-pink font-bold outline-none focus:border-accent-pink/50"
+                      onChange={(val) => setBulkEditDeliveredAt(val)}
+                      accentColor="accent-pink"
                     />
                   </div>
                 </div>
@@ -15755,49 +15752,37 @@ function MissionDetailModal({
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-1">
                       <div>
-                        <label className="text-[8px] font-black uppercase tracking-wider text-accent block mb-1">
-                          Produit Préparé
-                        </label>
-                        <input 
-                          type="datetime-local"
+                        <AnalogDateTimePicker 
                           value={mission.preparedAt || ''}
-                          onChange={(e) => onUpdate(mission.id, { preparedAt: e.target.value })}
-                          className="w-full bg-black/40 border border-white/10 rounded p-1 text-[10px] text-accent font-bold outline-none focus:border-accent/50 cursor-text"
+                          onChange={(val) => onUpdate(mission.id, { preparedAt: val })}
+                          accentColor="accent"
+                          label="Produit Préparé"
                         />
                       </div>
                       <div>
-                        <label className="text-[8px] font-black uppercase tracking-wider text-accent-blue block mb-1">
-                          Shooté
-                        </label>
-                        <input 
-                          type="datetime-local"
+                        <AnalogDateTimePicker 
                           value={mission.shotAt || ''}
-                          onChange={(e) => onUpdate(mission.id, { shotAt: e.target.value })}
-                          className="w-full bg-black/40 border border-white/10 rounded p-1 text-[10px] text-accent-blue font-bold outline-none focus:border-accent-blue/50 cursor-text"
+                          onChange={(val) => onUpdate(mission.id, { shotAt: val })}
+                          accentColor="accent-blue"
+                          label="Shooté"
                         />
                       </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="text-[8px] font-black uppercase tracking-wider text-accent-purple block mb-1">
-                          Passé en Post-Prod
-                        </label>
-                        <input 
-                          type="datetime-local"
+                        <AnalogDateTimePicker 
                           value={mission.postProdAt || ''}
-                          onChange={(e) => onUpdate(mission.id, { postProdAt: e.target.value })}
-                          className="w-full bg-black/40 border border-white/10 rounded p-1 text-[10px] text-accent-purple font-bold outline-none focus:border-accent-purple/50 cursor-text"
+                          onChange={(val) => onUpdate(mission.id, { postProdAt: val })}
+                          accentColor="accent-purple"
+                          label="Passé en Post-Prod"
                         />
                       </div>
                       <div>
-                        <label className="text-[8px] font-black uppercase tracking-wider text-accent-pink block mb-1">
-                          Livré
-                        </label>
-                        <input 
-                          type="datetime-local"
+                        <AnalogDateTimePicker 
                           value={mission.deliveredAt || ''}
-                          onChange={(e) => onUpdate(mission.id, { deliveredAt: e.target.value })}
-                          className="w-full bg-black/40 border border-white/10 rounded p-1 text-[10px] text-accent-pink font-bold outline-none focus:border-accent-pink/50 cursor-text"
+                          onChange={(val) => onUpdate(mission.id, { deliveredAt: val })}
+                          accentColor="accent-pink"
+                          label="Livré"
                         />
                       </div>
                     </div>
@@ -16805,14 +16790,12 @@ function FamilyGroupView({
                         ⚙️ Changer l'état :
                       </span>
                       {/* Date/heure picker inline */}
-                      <div className="flex items-center gap-1 bg-black/50 border border-white/10 rounded px-1.5 py-0.5">
-                        <Clock size={10} className="text-white/40 mr-1" />
-                        <input
-                          type="datetime-local"
+                      <div className="flex items-center gap-1 bg-black/50 border border-white/10 rounded px-2.5 py-1">
+                        <AnalogDateTimePicker
                           value={bulkActionDateTime}
-                          onChange={(e) => setBulkActionDateTime(e.target.value)}
-                          className="bg-transparent border-none text-[8px] text-accent font-bold outline-none cursor-pointer"
-                          title="Date et heure à appliquer à l'état"
+                          onChange={(val) => setBulkActionDateTime(val)}
+                          accentColor="accent"
+                          minimal={true}
                         />
                       </div>
                     </div>
