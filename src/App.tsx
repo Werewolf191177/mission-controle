@@ -7,6 +7,8 @@ import * as XLSX from 'xlsx';
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { 
   Plus, 
+  Keyboard,
+  HelpCircle,
   Trash2, 
   Settings, 
   Copy, 
@@ -84,7 +86,8 @@ import {
   Bot,
   Send,
   Edit2,
-  Percent
+  Percent,
+  Pin
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import html2canvas from 'html2canvas';
@@ -97,6 +100,39 @@ import {
 import { initAuth, googleSignIn, logout, getAccessToken } from './services/firebaseAuth';
 import type { User } from 'firebase/auth';
 import SecondaryMissionDetailModal from './components/SecondaryMissionDetailModal';
+
+// --- IMAGE COMPRESSION & OPTIMIZATION UTILITY ---
+const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width = width * ratio;
+          height = height * ratio;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        } else {
+          resolve(reader.result as string);
+        }
+      };
+      img.onerror = () => reject(new Error("Erreur lors du chargement de l'image"));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error("Erreur de lecture du fichier"));
+    reader.readAsDataURL(file);
+  });
+};
 
 // --- STABLE SUB-COMPONENTS ---
 
@@ -354,6 +390,19 @@ const getColorAccentClass = (color: string): string => {
   if (low.includes('white') || low.includes('cr')) return 'border-white/20 text-white bg-white/5 hover:bg-white/10 hover:border-white/30';
   if (low.includes('blue')) return 'border-blue-500/30 text-blue-400 bg-blue-500/5 hover:bg-blue-500/10 hover:border-blue-500/40';
   return 'border-accent-purple/35 text-accent-purple bg-accent-purple/5 hover:bg-accent-purple/10 hover:border-accent-purple/40';
+};
+
+const hexToRgba = (hex: string, opacity: number): string => {
+  if (!hex || !hex.startsWith('#')) return `rgba(189, 0, 255, ${opacity})`;
+  let cleanHex = hex.substring(1);
+  if (cleanHex.length === 3) {
+    cleanHex = cleanHex.split('').map(char => char + char).join('');
+  }
+  const num = parseInt(cleanHex, 16);
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 };
 
 const StarRatingStatic = ({ rating = 0, size = 8 }: { rating?: number, size?: number }) => (
@@ -726,6 +775,29 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
   );
 };
 
+const defaultShortcuts = {
+  help: 'q',
+  tabTable: '1',
+  tabDashboard: '2',
+  tabInventory: '3',
+  tabJournal: '4',
+  tabSystem: '5',
+  viewTable: 'l',
+  viewMosaic: 'g',
+  viewTask: 't',
+  viewCalendar: 'c',
+  viewFamily: 'f',
+  focusSearch: 's',
+  toggleFilters: 'r',
+  toggleMiddle: 'h',
+  exportJpeg: 'p',
+  toggleWeekly: 'w',
+  toggleMonthly: 'm',
+  toggleSidebar: 'b',
+  exportJson: 'e',
+  importJson: 'i'
+};
+
 const getApiUrl = (endpoint: string) => {
   const isPreview = window.location.hostname === 'localhost' || window.location.hostname.includes('run.app');
   return isPreview ? endpoint : `https://mission-controle.onrender.com${endpoint}`;
@@ -811,14 +883,70 @@ export default function App() {
 
   const [isMiddleTierVisible, setIsMiddleTierVisible] = useState(true);
 
-  const [visibleTimelineSeries, setVisibleTimelineSeries] = useState({
-    prepares: false,
-    shooting: false,
-    postProd: false,
-    livreesCumulees: true,
-    livreesJour: false,
-    progression: true
+  const [isWeeklyChartCollapsed, setIsWeeklyChartCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem('isWeeklyChartCollapsed');
+    return saved !== null ? JSON.parse(saved) : false;
   });
+  const [isMonthlyChartCollapsed, setIsMonthlyChartCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem('isMonthlyChartCollapsed');
+    return saved !== null ? JSON.parse(saved) : false;
+  });
+
+  const [visibleTimelineSeries, setVisibleTimelineSeries] = useState<{
+    prepares: boolean;
+    shooting: boolean;
+    postProd: boolean;
+    livreesCumulees: boolean;
+    livreesJour: boolean;
+    progression: boolean;
+  }>(() => {
+    const saved = localStorage.getItem('visibleTimelineSeries');
+    return saved !== null ? JSON.parse(saved) : {
+      prepares: false,
+      shooting: false,
+      postProd: false,
+      livreesCumulees: true,
+      livreesJour: false,
+      progression: true
+    };
+  });
+
+  const [visibleMonthlyTimelineSeries, setVisibleMonthlyTimelineSeries] = useState<{
+    prepares: boolean;
+    shooting: boolean;
+    postProd: boolean;
+    livreesCumulees: boolean;
+    livreesJour: boolean;
+    progression: boolean;
+  }>(() => {
+    const saved = localStorage.getItem('visibleMonthlyTimelineSeries');
+    return saved !== null ? JSON.parse(saved) : {
+      prepares: false,
+      shooting: false,
+      postProd: false,
+      livreesCumulees: true,
+      livreesJour: false,
+      progression: true
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('isWeeklyChartCollapsed', JSON.stringify(isWeeklyChartCollapsed));
+  }, [isWeeklyChartCollapsed]);
+
+  useEffect(() => {
+    localStorage.setItem('isMonthlyChartCollapsed', JSON.stringify(isMonthlyChartCollapsed));
+  }, [isMonthlyChartCollapsed]);
+
+  const visibleTimelineSeriesStr = JSON.stringify(visibleTimelineSeries);
+  useEffect(() => {
+    localStorage.setItem('visibleTimelineSeries', visibleTimelineSeriesStr);
+  }, [visibleTimelineSeriesStr]);
+
+  const visibleMonthlyTimelineSeriesStr = JSON.stringify(visibleMonthlyTimelineSeries);
+  useEffect(() => {
+    localStorage.setItem('visibleMonthlyTimelineSeries', visibleMonthlyTimelineSeriesStr);
+  }, [visibleMonthlyTimelineSeriesStr]);
 
   const toggleAllMissions = (enabled: boolean) => {
     const isFilteringActive = !!(
@@ -1078,10 +1206,34 @@ export default function App() {
   const [autoExportMainTasksOnCreate, setAutoExportMainTasksOnCreate] = useState<boolean>(false);
   const [secondaryViewMode, setSecondaryViewMode] = useState<'grid' | 'task' | 'calendar'>('grid');
   const [calendarDate, setCalendarDate] = useState(new Date());
+
+  // Custom family sorting order
+  const [customFamilyOrder, setCustomFamilyOrder] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('customFamilyOrder');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Track families manually created by the user to show on the board even if empty,
+  // without automatically displaying all settings/default families.
+  const [manuallyCreatedFamilies, setManuallyCreatedFamilies] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('manuallyCreatedFamilies');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [sidebarTab, setSidebarTab] = useState<'production' | 'secondary'>('production');
   const [filterDuplicates, setFilterDuplicates] = useState(false);
   const [showDuplicateIndicators, setShowDuplicateIndicators] = useState(true);
   const [showCleanDuplicatesModal, setShowCleanDuplicatesModal] = useState(false);
+  const [showAddFamilyModal, setShowAddFamilyModal] = useState(false);
+  const [showShortcutsHelpModal, setShowShortcutsHelpModal] = useState(false);
+  const [newFamilyName, setNewFamilyName] = useState('');
   const [missionCounter, setMissionCounter] = useState(1);
   const [refPrefix, setRefPrefix] = useState('NK');
   const [refCounter, setRefCounter] = useState(882);
@@ -1152,6 +1304,64 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<{ show: boolean, message: string, type: string }>({ show: false, message: '', type: 'calendar' });
   const [isCapturing, setIsCapturing] = useState(false);
+
+  const [quickAddInputs, setQuickAddInputs] = useState<Record<string, string>>({});
+
+  const handleAddCategoryItem = (catId: string) => {
+    const value = quickAddInputs[catId];
+    if (!value || !value.trim()) return;
+    const trimmed = value.trim();
+
+    // Check if it already exists
+    const category = rawCategories.find(c => c.id === catId);
+    if (category && category.items.some((i: string) => i.toLowerCase() === trimmed.toLowerCase())) {
+      setToast({
+        show: true,
+        message: `L'élément "${trimmed}" existe déjà !`,
+        type: 'system'
+      });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      return;
+    }
+
+    setCategories(prevCategories => {
+      const updatedCategories = prevCategories.map(cat => {
+        if (cat.id === catId) {
+          const items = cat.items ? [...cat.items] : [];
+          return { ...cat, items: [...items, trimmed] };
+        }
+        return cat;
+      });
+
+      // Show toast
+      setToast({
+        show: true,
+        message: `"${trimmed}" ajouté avec succès !`,
+        type: 'task'
+      });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+      // Save updated categories to localStorage immediately
+      const categoriesToSave = updatedCategories.map(({ icon, ...rest }) => rest);
+      localStorage.setItem('categories', JSON.stringify(categoriesToSave));
+
+      // Clear the input
+      setQuickAddInputs(prev => ({ ...prev, [catId]: '' }));
+
+      // Also set the newly created item as selected for convenience!
+      if (catId === 'argument') setSelectedArgument(trimmed);
+      if (catId === 'univers') setSelectedUnivers(trimmed);
+
+      return updatedCategories;
+    });
+
+    setGlobalLogs(prev => [...prev, {
+      id: `quick-add-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      timestamp: Date.now(),
+      message: `RÉGLAGES : Ajout rapide de "${trimmed}" dans ${catId === 'argument' ? "Type d'argument" : catId === 'univers' ? "Univers" : catId}`,
+      type: 'manual'
+    }]);
+  };
   const [activeTab, setActiveTab] = useState<'table' | 'dashboard' | 'journal' | 'system' | 'inventory'>('table');
   const [inventorySearch, setInventorySearch] = useState('');
   const [showPreparedHistory, setShowPreparedHistory] = useState(false);
@@ -1317,46 +1527,7 @@ export default function App() {
   const [filterDateEnd, setFilterDateEnd] = useState('');
   const [filterDateType, setFilterDateType] = useState<'createdAt' | 'deadline'>('createdAt');
 
-  // Effect to automatically retract/clear table selections when clicking outside
-  useEffect(() => {
-    function handleGlobalClick(event: MouseEvent) {
-      if (selectedMissionIds.length === 0) return;
-      
-      const target = event.target as HTMLElement;
-      
-      // If the user clicked on any interactive elements or within interactive container tables/grids, do not clear selections
-      const isInsideKeepZone = 
-        target.closest('table') || 
-        target.closest('.mosaic-view') ||
-        target.closest('.grid-view') ||
-        target.closest('.task-view') ||
-        target.closest('.calendar-view') ||
-        target.closest('.family-view') ||
-        target.closest('.bulk-action-bar') ||
-        target.closest('.filter-select-container') ||
-        target.closest('.modal-content') ||
-        target.closest('.sidebar-container') ||
-        target.closest('.header-container') ||
-        target.closest('.floating-chat-container') ||
-        target.closest('button') || 
-        target.closest('a') ||
-        target.closest('input') ||
-        target.closest('select') ||
-        target.closest('[role="button"]') ||
-        target.closest('.custom-scrollbar') ||
-        target.closest('header') ||
-        target.closest('tr') ||
-        target.closest('.mosaic-item') ||
-        target.closest('.grid-item') ||
-        target.closest('.task-item');
-                                 
-      if (!isInsideKeepZone) {
-        setSelectedMissionIds([]);
-      }
-    }
-    document.addEventListener('mousedown', handleGlobalClick);
-    return () => document.removeEventListener('mousedown', handleGlobalClick);
-  }, [selectedMissionIds]);
+  // Selection persistence: we keep checkbox selections active until explicitly cleared by the user (either by unchecking or clicking "Tout Désélectionner") as requested by the user.
 
   const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
   const [isProductFilterOpen, setIsProductFilterOpen] = useState(false);
@@ -1368,6 +1539,8 @@ export default function App() {
   const [isPriorityFilterOpen, setIsPriorityFilterOpen] = useState(false);
   const [isEnabledFilterOpen, setIsEnabledFilterOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarHovered, setIsSidebarHovered] = useState(false);
+  const isSidebarVisuallyOpen = isSidebarOpen || isSidebarHovered;
   
   const [collapsedCategories, setCollapsedCategories] = useState<string[]>(() => {
     try {
@@ -1474,7 +1647,19 @@ LISTE DES COMMANDES :
 @Google Tasks : Sync Tâches.
 /help : Aide efficace.`;
   const [aiInstructions, setAiInstructions] = useState(defaultAiInstructions);
-  const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display'>('branding');
+  const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display' | 'shortcuts'>('branding');
+  const [customShortcuts, setCustomShortcuts] = useState(() => {
+    const saved = localStorage.getItem('customShortcuts');
+    if (saved) {
+      try {
+        return { ...defaultShortcuts, ...JSON.parse(saved) };
+      } catch (e) {
+        return defaultShortcuts;
+      }
+    }
+    return defaultShortcuts;
+  });
+  const [recordingShortcut, setRecordingShortcut] = useState<string | null>(null);
   const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('gemini_custom_api_key') || '');
   const [isSynchroFluxExpanded, setIsSynchroFluxExpanded] = useState<boolean>(() => {
     const stored = localStorage.getItem('isSynchroFluxExpanded') || localStorage.getItem('synchro_flux_expanded');
@@ -1600,8 +1785,14 @@ LISTE DES COMMANDES :
       scheduledExportDays,
       scheduledExportTime,
       
+      // Custom family sorting order
+      customFamilyOrder,
+      
       // Custom categories definitions
-      categories: categories.map(({ icon, ...rest }) => rest)
+      categories: categories.map(({ icon, ...rest }) => rest),
+
+      // Custom Keyboard Shortcuts
+      customShortcuts
     };
     return JSON.stringify(data, null, 2);
   }, [
@@ -1657,7 +1848,9 @@ LISTE DES COMMANDES :
     scheduledExportEnabled,
     scheduledExportDays,
     scheduledExportTime,
-    categories
+    customFamilyOrder,
+    categories,
+    customShortcuts
   ]);
 
   const copySystemJson = () => {
@@ -2014,6 +2207,15 @@ LISTE DES COMMANDES :
         const savedSystemSubTab = localStorage.getItem('systemSubTab');
         if (savedSystemSubTab) setSystemSubTab(savedSystemSubTab as any);
 
+        const savedShortcuts = localStorage.getItem('customShortcuts');
+        if (savedShortcuts) {
+          try {
+            setCustomShortcuts(prev => ({ ...defaultShortcuts, ...JSON.parse(savedShortcuts) }));
+          } catch (e) {
+            // fallback
+          }
+        }
+
         const savedShowDuplicateIndicators = localStorage.getItem('showDuplicateIndicators');
         if (savedShowDuplicateIndicators !== null) setShowDuplicateIndicators(savedShowDuplicateIndicators === 'true');
 
@@ -2164,6 +2366,8 @@ LISTE DES COMMANDES :
   }, []);
 
 
+
+
   const captureAsJPEG = async () => {
     const reportElement = document.getElementById('global-report-container');
     if (!reportElement) return;
@@ -2250,6 +2454,166 @@ LISTE DES COMMANDES :
       setIsCapturing(false);
     }
   };
+
+  const captureAsJPEGRef = useRef(captureAsJPEG);
+  useEffect(() => {
+    captureAsJPEGRef.current = captureAsJPEG;
+  }, [captureAsJPEG]);
+
+  const downloadSystemJsonRef = useRef(downloadSystemJson);
+  useEffect(() => {
+    downloadSystemJsonRef.current = downloadSystemJson;
+  }, [downloadSystemJson]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (recordingShortcut !== null) {
+        return;
+      }
+
+      // 0. Shortcuts Help Modal trigger (Ctrl+Q or Shift+Q or Ctrl+Shift+Q)
+      if (e.key.toLowerCase() === customShortcuts.help && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey)) {
+        e.preventDefault();
+        setShowShortcutsHelpModal(prev => !prev);
+        return;
+      }
+
+      // 1. Tab navigation shortcuts (Ctrl+1 to Ctrl+5, or Alt+1 to Alt+5, or Cmd+1 to Cmd+5)
+      const isModifier = e.ctrlKey || e.metaKey || e.altKey;
+      if (isModifier && !e.shiftKey) {
+        // Tab switching
+        let targetTab: 'table' | 'dashboard' | 'inventory' | 'journal' | 'system' | null = null;
+        if (e.key === customShortcuts.tabTable) targetTab = 'table';
+        else if (e.key === customShortcuts.tabDashboard) targetTab = 'dashboard';
+        else if (e.key === customShortcuts.tabInventory) targetTab = 'inventory';
+        else if (e.key === customShortcuts.tabJournal) targetTab = 'journal';
+        else if (e.key === customShortcuts.tabSystem) targetTab = 'system';
+
+        if (targetTab) {
+          e.preventDefault();
+          setActiveTab(targetTab);
+          return;
+        }
+      }
+
+      // 2. Alt/Option + key shortcuts for specific view modes & actions
+      if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        const keyLower = e.key.toLowerCase();
+        
+        // Mode views (Table tab must be active or will be set active)
+        if (keyLower === customShortcuts.viewTable) {
+          e.preventDefault();
+          setActiveTab('table');
+          setViewMode('table');
+        } else if (keyLower === customShortcuts.viewMosaic) {
+          e.preventDefault();
+          setActiveTab('table');
+          setViewMode('mosaic');
+        } else if (keyLower === customShortcuts.viewTask) {
+          e.preventDefault();
+          setActiveTab('table');
+          setViewMode('task');
+        } else if (keyLower === customShortcuts.viewCalendar) {
+          e.preventDefault();
+          setActiveTab('table');
+          setViewMode('calendar');
+        } else if (keyLower === customShortcuts.viewFamily) {
+          e.preventDefault();
+          setActiveTab('table');
+          setViewMode('family');
+        }
+        
+        // Quick Actions & Toggles
+        else if (keyLower === customShortcuts.focusSearch) {
+          e.preventDefault();
+          setActiveTab('table');
+          setIsFilterVisible(true);
+          setTimeout(() => {
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) {
+              searchInput.focus();
+              (searchInput as HTMLInputElement).select();
+            }
+          }, 100);
+        } else if (keyLower === customShortcuts.toggleFilters) {
+          e.preventDefault();
+          setActiveTab('table');
+          setIsFilterVisible(prev => !prev);
+        } else if (keyLower === customShortcuts.toggleMiddle) {
+          e.preventDefault();
+          setIsMiddleTierVisible(prev => !prev);
+        } else if (keyLower === customShortcuts.exportJpeg) {
+          e.preventDefault();
+          captureAsJPEGRef.current();
+        } else if (keyLower === customShortcuts.toggleWeekly) {
+          e.preventDefault();
+          setActiveTab('dashboard');
+          setIsWeeklyChartCollapsed(prev => !prev);
+        } else if (keyLower === customShortcuts.toggleMonthly) {
+          e.preventDefault();
+          setActiveTab('dashboard');
+          setIsMonthlyChartCollapsed(prev => !prev);
+        } else if (keyLower === customShortcuts.toggleSidebar) {
+          e.preventDefault();
+          setIsSidebarOpen(prev => {
+            const next = !prev;
+            if (next) {
+              setIsSidebarHovered(false);
+            }
+            return next;
+          });
+        } else if (keyLower === customShortcuts.exportJson) {
+          e.preventDefault();
+          downloadSystemJsonRef.current();
+        } else if (keyLower === customShortcuts.importJson) {
+          e.preventDefault();
+          jsonFileInputRef.current?.click();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    };
+  }, [customShortcuts, recordingShortcut]);
+
+  // Effect to capture keyboard shortcuts when in recording mode
+  useEffect(() => {
+    if (!recordingShortcut) return;
+
+    const handleGlobalCapture = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'Escape') {
+        setRecordingShortcut(null);
+        return;
+      }
+
+      // Ignore modifier key presses on their own
+      if (['Control', 'Shift', 'Alt', 'Meta', 'CapsLock', 'Tab'].includes(e.key)) {
+        return;
+      }
+
+      const keyToSet = e.key.toLowerCase();
+      
+      setCustomShortcuts(prev => {
+        const next = { ...prev, [recordingShortcut]: keyToSet };
+        localStorage.setItem('customShortcuts', JSON.stringify(next));
+        return next;
+      });
+
+      setToast({ show: true, message: `Raccourci mis à jour : ${keyToSet.toUpperCase()}`, type: 'task' });
+      setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 2000);
+      setRecordingShortcut(null);
+    };
+
+    window.addEventListener('keydown', handleGlobalCapture, true);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalCapture, true);
+    };
+  }, [recordingShortcut]);
 
   // Helper function for capturing an element to JPEG
   const captureElementToJpeg = async (id: string, fileName: string, options: { pixelRatio?: number; quality?: number; skipDownload?: boolean } = {}) => {
@@ -2517,6 +2881,7 @@ LISTE DES COMMANDES :
       if (data.refCounter !== undefined) setRefCounter(data.refCounter);
       if (data.deadlineAlertThreshold !== undefined) setDeadlineAlertThreshold(data.deadlineAlertThreshold);
       if (data.globalDeadline !== undefined) setGlobalDeadline(data.globalDeadline);
+      if (data.customShortcuts !== undefined) setCustomShortcuts(prev => ({ ...prev, ...data.customShortcuts }));
       
       if (data.appLogo !== undefined) setAppLogo(data.appLogo);
       if (data.headerBgColor) setHeaderBgColor(data.headerBgColor);
@@ -2569,6 +2934,7 @@ LISTE DES COMMANDES :
       if (data.scheduledExportTime) setScheduledExportTime(data.scheduledExportTime);
 
       if (data.globalLogs) setGlobalLogs(data.globalLogs);
+      if (data.customFamilyOrder) setCustomFamilyOrder(data.customFamilyOrder);
       if (data.categories) {
         const restored = data.categories.map((cat: any) => {
           const original = categories.find(c => c.id === cat.id);
@@ -2640,6 +3006,8 @@ LISTE DES COMMANDES :
       if (data.scheduledExportTime) localStorage.setItem('scheduledExportTime', data.scheduledExportTime);
       
       if (data.globalLogs !== undefined) localStorage.setItem('globalLogs', JSON.stringify(data.globalLogs));
+      if (data.customFamilyOrder !== undefined) localStorage.setItem('customFamilyOrder', JSON.stringify(data.customFamilyOrder));
+      if (data.customShortcuts !== undefined) localStorage.setItem('customShortcuts', JSON.stringify(data.customShortcuts));
       if (data.categories !== undefined) {
         const catsToSave = data.categories.map(({ icon, ...rest }: any) => rest);
         localStorage.setItem('categories', JSON.stringify(catsToSave));
@@ -2743,6 +3111,8 @@ LISTE DES COMMANDES :
       localStorage.setItem('retractedActionBar', retractedActionBar.toString());
       localStorage.setItem('retractedIndicators', retractedIndicators.toString());
       localStorage.setItem('systemDataJson', systemDataJson);
+      localStorage.setItem('customFamilyOrder', JSON.stringify(customFamilyOrder));
+      localStorage.setItem('customShortcuts', JSON.stringify(customShortcuts));
     } catch (e) {
       if (e instanceof Error && e.name === 'QuotaExceededError') {
         console.error('[STORAGE] Quota exceeded. Attempting to prune logs...');
@@ -2776,7 +3146,7 @@ LISTE DES COMMANDES :
     retractedMosaics, aiInstructions, deadlineAlertThreshold, globalDeadline,
     isSynchroFluxExpanded, autoExportCalendarOnCreate, autoExportTasksOnCreate,
     autoExportMainCalendarOnCreate, autoExportMainTasksOnCreate, activeTab, systemSubTab,
-    showDuplicateIndicators, filterDuplicates, showSecondaryInReport, retractedActionBar, retractedIndicators, systemDataJson
+    showDuplicateIndicators, filterDuplicates, showSecondaryInReport, retractedActionBar, retractedIndicators, systemDataJson, customFamilyOrder, customShortcuts
   ]);
 
   const saveToLocalStorage = () => {
@@ -3151,15 +3521,30 @@ Formatté via Mission Contrôle V3`;
     performSaveRef.current = performSave;
   }, [performSave]);
 
-  // Auto-save logic
+  // Reactive and immediate auto-save logic with a 500ms debounce
   useEffect(() => {
-    const interval = setInterval(() => {
+    const timer = setTimeout(() => {
       performSaveRef.current();
-      console.log('[SYSTEM] Auto-save completed at ' + new Date().toLocaleTimeString());
-    }, 60000); // Every 60 seconds
+      console.log('[SYSTEM] Reactive auto-save completed at ' + new Date().toLocaleTimeString());
+    }, 500); // Save 500ms after the last change
     
-    return () => clearInterval(interval);
-  }, []);
+    return () => clearTimeout(timer);
+  }, [
+    missions, secondaryMissions, globalLogs, appLogo, headerBgColor, autoExportEnabled,
+    autoExportInterval, scheduledExportEnabled, scheduledExportDays, scheduledExportTime,
+    missionCounter, refPrefix, refCounter, categories, headerBgImage, headerBgOpacity,
+    waveColor, waveOpacity, waveType, appFont, appFontSize, appTextColor, appTextCase,
+    appFontWeight, navActiveColor, suiteSubtitleColor, copyBtnColor, saveBtnColor,
+    missionTitleColor, refIdColor, accentColor, accentBlueColor, accentPurpleColor,
+    accentOrangeColor, accentPinkColor, accentRedColor, accentYellowColor, sortConfigs,
+    viewMode, tableViewState, manualHiddenColumns, compactHiddenColumns, minimalHiddenColumns,
+    collapsedCategories, collapsedSettingsSections, collapsedMosaicGroups, retractedMosaics,
+    aiInstructions, deadlineAlertThreshold, globalDeadline, isSynchroFluxExpanded,
+    autoExportCalendarOnCreate, autoExportTasksOnCreate, autoExportMainCalendarOnCreate,
+    autoExportMainTasksOnCreate, activeTab, systemSubTab, showDuplicateIndicators,
+    filterDuplicates, showSecondaryInReport, retractedActionBar, retractedIndicators,
+    systemDataJson, customFamilyOrder, customShortcuts
+  ]);
 
   // Initialize selections with first items if available
   useEffect(() => {
@@ -3886,18 +4271,17 @@ Formatté via Mission Contrôle V3`;
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) { // 2MB limit for base64 storage
-        setToast({ show: true, message: "L'image est trop volumineuse (max 2MB)", type: 'task' });
-        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage(reader.result as string);
-        setToast({ show: true, message: 'Image JPEG injectée avec succès !', type: 'calendar' });
-        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
-      };
-      reader.readAsDataURL(file);
+      resizeImage(file, 800, 800)
+        .then((compressedBase64) => {
+          setSelectedImage(compressedBase64);
+          setToast({ show: true, message: 'Image injectée et optimisée avec succès !', type: 'calendar' });
+          setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+        })
+        .catch((err) => {
+          console.error(err);
+          setToast({ show: true, message: "Échec de l'optimisation de l'image", type: 'system' });
+          setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+        });
     }
   };
 
@@ -3912,6 +4296,95 @@ Formatté via Mission Contrôle V3`;
     const timestamp = Date.now();
     const logId = Math.random().toString(36).substring(2, 9);
     
+    // Compute final states first to ensure precise logging for both direct and synchronized changes
+    let finalStatus = updates.status !== undefined ? updates.status : missionBefore.status;
+    let finalProgress = updates.progress !== undefined ? updates.progress : missionBefore.progress;
+    let finalPhotoCountDelivered = updates.photoCountDelivered !== undefined ? updates.photoCountDelivered : missionBefore.photoCountDelivered;
+    
+    let finalPreparedAt = updates.preparedAt !== undefined ? updates.preparedAt : missionBefore.preparedAt;
+    let finalShotAt = updates.shotAt !== undefined ? updates.shotAt : missionBefore.shotAt;
+    let finalPostProdAt = updates.postProdAt !== undefined ? updates.postProdAt : missionBefore.postProdAt;
+    let finalDeliveredAt = updates.deliveredAt !== undefined ? updates.deliveredAt : missionBefore.deliveredAt;
+
+    // Apply status-based progress and default-date triggers
+    if (updates.status) {
+      switch (updates.status) {
+        case 'livré': 
+          if ((finalPhotoCountDelivered || 0) === 0) {
+            finalProgress = 100;
+          } else {
+            const del = finalPhotoCountDelivered || 0;
+            const req = missionBefore.photoCountRequested || 1;
+            finalProgress = Math.round((del / req) * 100);
+          }
+          if (!finalDeliveredAt) {
+            finalDeliveredAt = getNowLocalDatetimeString();
+          }
+          break;
+        case 'En post-production': 
+          finalProgress = 85; 
+          if (!finalPostProdAt) {
+            finalPostProdAt = getNowLocalDatetimeString();
+          }
+          break;
+        case 'shooté': 
+          finalProgress = 75; 
+          if (!finalShotAt) {
+            finalShotAt = getNowLocalDatetimeString();
+          }
+          break;
+        case 'en cours de shoot': 
+          finalProgress = 50; 
+          break;
+        case 'produit préparé': 
+          finalProgress = 25; 
+          if (!finalPreparedAt) {
+            finalPreparedAt = getNowLocalDatetimeString();
+          }
+          break;
+        case 'en attente': 
+          finalProgress = 0; 
+          break;
+        case 'annuler': 
+          finalProgress = 0; 
+          finalPhotoCountDelivered = 0;
+          break;
+      }
+    }
+
+    // Synchronize status and progress from dates if dates were updated directly but status wasn't changed explicitly
+    if (!updates.status && missionBefore.status !== 'annuler' && (updates.preparedAt !== undefined || updates.shotAt !== undefined || updates.postProdAt !== undefined || updates.deliveredAt !== undefined)) {
+      if (finalDeliveredAt && finalDeliveredAt.trim() !== '') {
+        if (finalStatus !== 'livré') {
+          finalStatus = 'livré';
+          if ((finalPhotoCountDelivered || 0) === 0) {
+            finalPhotoCountDelivered = 1;
+          }
+          const del = finalPhotoCountDelivered || 1;
+          const req = missionBefore.photoCountRequested || 1;
+          finalProgress = Math.round((del / req) * 100);
+        }
+      } else if (finalPostProdAt && finalPostProdAt.trim() !== '') {
+        if (finalStatus !== 'En post-production') {
+          finalStatus = 'En post-production';
+          finalProgress = 85;
+        }
+      } else if (finalShotAt && finalShotAt.trim() !== '') {
+        if (finalStatus !== 'shooté') {
+          finalStatus = 'shooté';
+          finalProgress = 75;
+        }
+      } else if (finalPreparedAt && finalPreparedAt.trim() !== '') {
+        if (finalStatus !== 'produit préparé') {
+          finalStatus = 'produit préparé';
+          finalProgress = 25;
+        }
+      } else {
+        finalStatus = 'en attente';
+        finalProgress = 0;
+      }
+    }
+
     // Group technical changes
     const technicalFields: (keyof Mission)[] = ['product', 'color', 'univers', 'support', 'deadline', 'priority', 'format', 'position', 'argumentType'];
     const technicalChanges = technicalFields.filter(f => updates[f] !== undefined && updates[f] !== missionBefore[f]);
@@ -3957,20 +4430,56 @@ Formatté via Mission Contrôle V3`;
       }
     }
 
-    if (updates.status && updates.status !== missionBefore.status) {
+    if (finalStatus !== missionBefore.status) {
       logsToAdd.push({ 
         id: logId + '-status', 
         timestamp, 
-        message: `MISE À JOUR : Mission #${missionBefore.missionNo} (${missionBefore.product}) -> "${updates.status}".`, 
+        message: `MISE À JOUR : Mission #${missionBefore.missionNo} (${missionBefore.product}) -> "${finalStatus}".`, 
         type: 'mission' 
       });
     }
 
-    if (updates.progress !== undefined && updates.progress !== missionBefore.progress) {
+    if (finalPreparedAt !== missionBefore.preparedAt) {
+      logsToAdd.push({ 
+        id: logId + '-preparedAt', 
+        timestamp, 
+        message: `ÉDITION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - Date Produit Préparé -> "${formatDateStringNice(finalPreparedAt)}"`, 
+        type: 'mission' 
+      });
+    }
+
+    if (finalShotAt !== missionBefore.shotAt) {
+      logsToAdd.push({ 
+        id: logId + '-shotAt', 
+        timestamp, 
+        message: `ÉDITION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - Date Shooté -> "${formatDateStringNice(finalShotAt)}"`, 
+        type: 'mission' 
+      });
+    }
+
+    if (finalPostProdAt !== missionBefore.postProdAt) {
+      logsToAdd.push({ 
+        id: logId + '-postProdAt', 
+        timestamp, 
+        message: `ÉDITION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - Date Passé en Post-Prod -> "${formatDateStringNice(finalPostProdAt)}"`, 
+        type: 'mission' 
+      });
+    }
+
+    if (finalDeliveredAt !== missionBefore.deliveredAt) {
+      logsToAdd.push({ 
+        id: logId + '-deliveredAt', 
+        timestamp, 
+        message: `ÉDITION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] - Date Livré -> "${formatDateStringNice(finalDeliveredAt)}"`, 
+        type: 'mission' 
+      });
+    }
+
+    if (finalProgress !== missionBefore.progress) {
       const timerKey = `prod-progress-${id}`;
       if (logDebounceTimers.current[timerKey]) clearTimeout(logDebounceTimers.current[timerKey]);
       
-      const pMessage = `PROGRESSION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] -> ${updates.progress}%.`;
+      const pMessage = `PROGRESSION : Mission #${missionBefore.missionNo} [${missionBefore.refId}] -> ${finalProgress}%.`;
       
       logDebounceTimers.current[timerKey] = setTimeout(() => {
         setGlobalLogs(prev => {
@@ -4053,6 +4562,11 @@ Formatté via Mission Contrôle V3`;
           if (msg.startsWith('Note mise à jour')) msgPrefix = 'Note';
           if (msg.startsWith('Priorité changée')) msgPrefix = 'Priorité';
           if (msg.startsWith('Produit')) msgPrefix = 'Produit';
+          if (msg.startsWith('Date Produit Préparé')) msgPrefix = 'Date Produit Préparé';
+          if (msg.startsWith('Date Shooté')) msgPrefix = 'Date Shooté';
+          if (msg.startsWith('Date Passé en Post-Prod')) msgPrefix = 'Date Passé en Post-Prod';
+          if (msg.startsWith('Date Livré')) msgPrefix = 'Date Livré';
+          if (msg.startsWith('STATUT')) msgPrefix = 'STATUT';
 
           if (lastH && lastH.message.startsWith(msgPrefix) && now - lastH.timestamp < 30000) {
             history[history.length - 1] = { timestamp: now, message: msg };
@@ -4061,11 +4575,11 @@ Formatté via Mission Contrôle V3`;
           }
         };
 
-        if (updates.status && updates.status !== m.status) {
-          addHistoryEntry(`STATUT : ${m.status} -> ${updates.status}`);
+        if (finalStatus !== m.status) {
+          addHistoryEntry(`STATUT : ${m.status} -> ${finalStatus}`);
         }
-        if (updates.progress !== undefined && updates.progress !== m.progress) {
-          addHistoryEntry(`Progression mise à jour à ${updates.progress}%`);
+        if (finalProgress !== m.progress) {
+          addHistoryEntry(`Progression mise à jour à ${finalProgress}%`);
         }
         if (updates.rating !== undefined && updates.rating !== m.rating) {
           addHistoryEntry(`Note mise à jour à ${updates.rating}/5`);
@@ -4078,6 +4592,18 @@ Formatté via Mission Contrôle V3`;
         }
         if (updates.info !== undefined && updates.info !== m.info) {
            addHistoryEntry(`Notes : "${updates.info}"`);
+        }
+        if (finalPreparedAt !== m.preparedAt) {
+          addHistoryEntry(`Date Produit Préparé : ${formatDateStringNice(finalPreparedAt)}`);
+        }
+        if (finalShotAt !== m.shotAt) {
+          addHistoryEntry(`Date Shooté : ${formatDateStringNice(finalShotAt)}`);
+        }
+        if (finalPostProdAt !== m.postProdAt) {
+          addHistoryEntry(`Date Passé en Post-Prod : ${formatDateStringNice(finalPostProdAt)}`);
+        }
+        if (finalDeliveredAt !== m.deliveredAt) {
+          addHistoryEntry(`Date Livré : ${formatDateStringNice(finalDeliveredAt)}`);
         }
 
         const updated = { ...m, ...updates, history, updatedAt: now };
@@ -4137,6 +4663,40 @@ Formatté via Mission Contrôle V3`;
               updated.progress = 0; 
               updated.photoCountDelivered = 0;
               break;
+          }
+        }
+
+        // Synchronize status and progress from dates if dates were updated directly but status wasn't changed explicitly
+        if (!updates.status && updated.status !== 'annuler' && (updates.preparedAt !== undefined || updates.shotAt !== undefined || updates.postProdAt !== undefined || updates.deliveredAt !== undefined)) {
+          if (updated.deliveredAt && updated.deliveredAt.trim() !== '') {
+            if (updated.status !== 'livré') {
+              updated.status = 'livré';
+              if ((updated.photoCountDelivered || 0) === 0) {
+                updated.photoCountDelivered = 1;
+              }
+              const del = updated.photoCountDelivered || 1;
+              const req = updated.photoCountRequested || 1;
+              updated.progress = Math.round((del / req) * 100);
+            }
+          } else if (updated.postProdAt && updated.postProdAt.trim() !== '') {
+            if (updated.status !== 'En post-production') {
+              updated.status = 'En post-production';
+              updated.progress = 85;
+            }
+          } else if (updated.shotAt && updated.shotAt.trim() !== '') {
+            if (updated.status !== 'shooté') {
+              updated.status = 'shooté';
+              updated.progress = 75;
+            }
+          } else if (updated.preparedAt && updated.preparedAt.trim() !== '') {
+            if (updated.status !== 'produit préparé') {
+              updated.status = 'produit préparé';
+              updated.progress = 25;
+            }
+          } else {
+            // If all step dates are cleared, reset to 'en attente'
+            updated.status = 'en attente';
+            updated.progress = 0;
           }
         }
         return updated;
@@ -4299,6 +4859,141 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     setCategories(prev => prev.map(c => c.id === catId ? { ...c, ...updates } : c));
   };
 
+  const addFamily = (familyName: string) => {
+    if (!familyName || !familyName.trim()) return;
+    const trimmed = familyName.trim();
+
+    setCategories(prevCategories => {
+      let alreadyExists = false;
+      const updatedCategories = prevCategories.map(cat => {
+        if (cat.id === 'family') {
+          const items = cat.items ? [...cat.items] : [];
+          if (items.some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+            alreadyExists = true;
+            return cat;
+          }
+          return { ...cat, items: [...items, trimmed] };
+        }
+        return cat;
+      });
+
+      if (alreadyExists) {
+        setToast({
+          show: true,
+          message: `La famille "${trimmed}" existe déjà !`,
+          type: 'system'
+        });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+        return prevCategories;
+      }
+
+      setGlobalLogs(prev => [...prev, {
+        id: `add-fam-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        timestamp: Date.now(),
+        message: `FAMILLE: Ajout de la nouvelle famille "${trimmed}"`,
+        type: 'manual'
+      }]);
+
+      setToast({
+        show: true,
+        message: `Nouvelle famille "${trimmed}" ajoutée avec succès !`,
+        type: 'task'
+      });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+      // Add to customFamilyOrder state and save to localStorage
+      setCustomFamilyOrder(prev => {
+        const next = prev.includes(trimmed) ? prev : [...prev, trimmed];
+        localStorage.setItem('customFamilyOrder', JSON.stringify(next));
+        return next;
+      });
+
+      // Add to manuallyCreatedFamilies and save to localStorage
+      setManuallyCreatedFamilies(prev => {
+        const next = prev.some(f => f.toLowerCase() === trimmed.toLowerCase()) ? prev : [...prev, trimmed];
+        localStorage.setItem('manuallyCreatedFamilies', JSON.stringify(next));
+        return next;
+      });
+
+      // Save updated categories to localStorage immediately as well
+      const categoriesToSave = updatedCategories.map(({ icon, ...rest }) => rest);
+      localStorage.setItem('categories', JSON.stringify(categoriesToSave));
+
+      return updatedCategories;
+    });
+  };
+
+  const deleteFamily = (familyName: string, definitive: boolean = false) => {
+    if (!familyName || !familyName.trim()) return;
+    const trimmed = familyName.trim();
+
+    setCategories(prevCategories => {
+      const updatedCategories = prevCategories.map(cat => {
+        if (cat.id === 'family') {
+          const items = cat.items ? cat.items.filter(item => item.toLowerCase() !== trimmed.toLowerCase()) : [];
+          return { ...cat, items };
+        }
+        return cat;
+      });
+
+      // Also update customFamilyOrder
+      setCustomFamilyOrder(prev => {
+        const next = prev.filter(f => f.toLowerCase() !== trimmed.toLowerCase());
+        localStorage.setItem('customFamilyOrder', JSON.stringify(next));
+        return next;
+      });
+
+      // Also remove from manuallyCreatedFamilies
+      setManuallyCreatedFamilies(prev => {
+        const next = prev.filter(f => f.toLowerCase() !== trimmed.toLowerCase());
+        localStorage.setItem('manuallyCreatedFamilies', JSON.stringify(next));
+        return next;
+      });
+
+      // Update or delete missions belonging to this family
+      setMissions(prevMissions => {
+        let updatedMissions;
+        if (definitive) {
+          // completely delete the missions belonging to this family
+          updatedMissions = prevMissions.filter(m => !m.family || m.family.toLowerCase() !== trimmed.toLowerCase());
+        } else {
+          // Reclassify to 'Autre'
+          updatedMissions = prevMissions.map(m => {
+            if (m.family && m.family.toLowerCase() === trimmed.toLowerCase()) {
+              return { ...m, family: 'Autre' };
+            }
+            return m;
+          });
+        }
+        localStorage.setItem('missions', JSON.stringify(updatedMissions));
+        return updatedMissions;
+      });
+
+      setGlobalLogs(prev => [...prev, {
+        id: `del-fam-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        timestamp: Date.now(),
+        message: definitive 
+          ? `FAMILLE: Suppression DÉFINITIVE de la famille "${trimmed}" (toutes les missions associées ont été supprimées)`
+          : `FAMILLE: Suppression de la famille "${trimmed}" (reclassement des missions vers "Autre")`,
+        type: 'manual'
+      }]);
+
+      setToast({
+        show: true,
+        message: definitive 
+          ? `Famille "${trimmed}" et ses missions supprimées définitivement !`
+          : `Famille "${trimmed}" supprimée avec succès !`,
+        type: 'task'
+      });
+      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+      const categoriesToSave = updatedCategories.map(({ icon, ...rest }) => rest);
+      localStorage.setItem('categories', JSON.stringify(categoriesToSave));
+
+      return updatedCategories;
+    });
+  };
+
   const renameFamily = (oldName: string, newName: string) => {
     if (!newName || !newName.trim() || oldName === newName) return;
     const trimmed = newName.trim();
@@ -4311,6 +5006,20 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       }
       return m;
     }));
+
+    // Also update customFamilyOrder
+    setCustomFamilyOrder(prev => {
+      const next = prev.map(f => f === oldName ? trimmed : f);
+      localStorage.setItem('customFamilyOrder', JSON.stringify(next));
+      return next;
+    });
+
+    // Also update manuallyCreatedFamilies
+    setManuallyCreatedFamilies(prev => {
+      const next = prev.map(f => f.toLowerCase() === oldName.toLowerCase() ? trimmed : f);
+      localStorage.setItem('manuallyCreatedFamilies', JSON.stringify(next));
+      return next;
+    });
 
     // 2. Update the options inside categories list
     setCategories(prevCategories => prevCategories.map(cat => {
@@ -4673,20 +5382,44 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             if (missionsInStatus.length === 0) return null;
             
             const isCollapsed = collapsedMosaicGroups.includes(status);
+            const hasActiveMissions = missionsInStatus.some(m => m.enabled);
+            const statusColor = (() => {
+              switch (status.toLowerCase()) {
+                case 'livré':
+                  return accentColor;
+                case 'en cours de shoot':
+                  return accentBlueColor;
+                case 'en post-production':
+                  return accentOrangeColor;
+                case 'produit préparé':
+                  return accentYellowColor;
+                case 'annuler':
+                  return accentRedColor;
+                case 'en attente':
+                  return accentPinkColor;
+                case 'shooté':
+                  return accentPurpleColor;
+                default:
+                  return accentColor;
+              }
+            })();
             
             return (
               <div key={status} className="space-y-4">
                 <button 
                   onClick={() => toggleGroup(status)}
-                  className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group hover:bg-white/[0.08] transition-all"
+                  className="w-full flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group hover:bg-white/[0.08] transition-all animate-all"
+                  style={{
+                    backgroundColor: hasActiveMissions 
+                      ? hexToRgba(statusColor, 0.12)
+                      : undefined
+                  }}
                 >
                   <div className="flex items-center gap-4">
-                    <div className={`w-2 h-2 rounded-full ${
-                      status === 'livré' ? 'bg-accent' : 
-                      status === 'en cours de shoot' ? 'bg-accent-blue' : 
-                      status === 'annuler' ? 'bg-red-500' :
-                      'bg-white/20'
-                    }`} />
+                    <div 
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: statusColor }}
+                    />
                     <span className="text-[11px] font-black uppercase tracking-[2px] text-white/90">{status}</span>
                     <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-[8px] font-mono text-text-dim">
                       {missionsInStatus.length} {missionsInStatus.length > 1 ? 'missions' : 'mission'}
@@ -5408,6 +6141,142 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     };
   });
 
+  const last12Months = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - (11 - i));
+    const startObj = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
+    const endObj = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+    return {
+      monthStart: startObj.getTime(),
+      monthEnd: endObj.getTime() + 1,
+      label: d.toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })
+    };
+  });
+
+  const monthlyTimelineData = last12Months.map(monthInfo => {
+    const monthStart = monthInfo.monthStart;
+    const monthEnd = monthInfo.monthEnd;
+    
+    // Filter currently active missions to count deliveries for this specific month
+    const deliveredCount = activeMissions.filter(m => {
+      if (m.deliveredAt) {
+        const tDelivered = new Date(m.deliveredAt).getTime();
+        if (!isNaN(tDelivered)) {
+          return tDelivered >= monthStart && tDelivered < monthEnd;
+        }
+      }
+
+      if (m.status !== 'livré') return false;
+      
+      const becameDeliveredThisMonth = (m.history || []).some(h => {
+        const msgLower = h.message.toLowerCase();
+        const isInRange = h.timestamp >= monthStart && h.timestamp < monthEnd;
+        if (!isInRange) return false;
+        
+        return msgLower.includes('-> livré') || 
+               msgLower.includes('-> "livré"') || 
+               msgLower.includes('statut changé à "livré"') ||
+               msgLower.includes('changé à "livré"') ||
+               (msgLower.includes('statut') && msgLower.includes('livré'));
+      });
+      
+      const updatedThisMonth = m.updatedAt && m.updatedAt >= monthStart && m.updatedAt < monthEnd;
+      
+      return becameDeliveredThisMonth || updatedThisMonth;
+    }).length;
+
+    const missionsAtMonth = activeMissions.filter(m => {
+      const tDelivered = m.deliveredAt ? new Date(m.deliveredAt).getTime() : null;
+      const tPostProd = m.postProdAt ? new Date(m.postProdAt).getTime() : null;
+      const tShot = m.shotAt ? new Date(m.shotAt).getTime() : null;
+      const tPrepared = m.preparedAt ? new Date(m.preparedAt).getTime() : null;
+
+      const minTime = Math.min(
+        m.createdAt,
+        tPrepared && !isNaN(tPrepared) ? tPrepared : Infinity,
+        tShot && !isNaN(tShot) ? tShot : Infinity,
+        tPostProd && !isNaN(tPostProd) ? tPostProd : Infinity,
+        tDelivered && !isNaN(tDelivered) ? tDelivered : Infinity
+      );
+      return minTime < monthEnd;
+    });
+    
+    let prepCount = 0;
+    let shootCount = 0;
+    let postProdCount = 0;
+    let deliveredTotal = 0;
+
+    missionsAtMonth.forEach(m => {
+      const statusAtEnd = getHistoricalStatusAtInstant(m, monthEnd);
+      if (statusAtEnd === 'produit préparé') {
+        prepCount++;
+      } else if (statusAtEnd === 'en cours de shoot' || statusAtEnd === 'shooté') {
+        shootCount++;
+      } else if (statusAtEnd === 'En post-production') {
+        postProdCount++;
+      } else if (statusAtEnd === 'livré') {
+        deliveredTotal++;
+      }
+    });
+
+    const calculateHistoricalProgress = (m: Mission) => {
+       const tDelivered = m.deliveredAt ? new Date(m.deliveredAt).getTime() : null;
+       const tPostProd = m.postProdAt ? new Date(m.postProdAt).getTime() : null;
+       const tShot = m.shotAt ? new Date(m.shotAt).getTime() : null;
+       const tPrepared = m.preparedAt ? new Date(m.preparedAt).getTime() : null;
+
+       const minTime = Math.min(
+         m.createdAt,
+         tPrepared && !isNaN(tPrepared) ? tPrepared : Infinity,
+         tShot && !isNaN(tShot) ? tShot : Infinity,
+         tPostProd && !isNaN(tPostProd) ? tPostProd : Infinity,
+         tDelivered && !isNaN(tDelivered) ? tDelivered : Infinity
+       );
+       if (minTime > monthEnd) return 0;
+
+       if (tDelivered && !isNaN(tDelivered) && tDelivered < monthEnd) {
+         return 100;
+       }
+       if (tPostProd && !isNaN(tPostProd) && tPostProd < monthEnd) {
+         return 85;
+       }
+       if (tShot && !isNaN(tShot) && tShot < monthEnd) {
+         return 75;
+       }
+       if (tPrepared && !isNaN(tPrepared) && tPrepared < monthEnd) {
+         return 25;
+       }
+
+       if ((tPrepared && !isNaN(tPrepared) && tPrepared > monthEnd) ||
+           (tShot && !isNaN(tShot) && tShot > monthEnd) ||
+           (tPostProd && !isNaN(tPostProd) && tPostProd > monthEnd) ||
+           (tDelivered && !isNaN(tDelivered) && tDelivered > monthEnd)) {
+         return 0;
+       }
+
+       const relevantHistory = (m.history || []).filter(h => h.timestamp < monthEnd && h.message.includes('Progression'));
+       if (relevantHistory.length > 0) {
+          const lastMsg = relevantHistory[relevantHistory.length - 1].message;
+          const match = lastMsg.match(/(\d+)%/);
+          if (match) return parseInt(match[1]);
+       }
+       return minTime < monthEnd ? (minTime > monthStart ? 0 : m.progress) : 0; 
+    };
+
+    const totalProgress = missionsAtMonth.reduce((acc, m) => acc + calculateHistoricalProgress(m), 0);
+    const avgProgMonth = missionsAtMonth.length > 0 ? totalProgress / missionsAtMonth.length : 0;
+
+    return {
+      name: monthInfo.label,
+      MissionsLivrees: deliveredCount,
+      ProgressionMoyenne: Math.round(avgProgMonth),
+      ProduitsPrepares: prepCount,
+      Shooting: shootCount,
+      PostProduction: postProdCount,
+      LivreesCumulees: deliveredTotal
+    };
+  });
+
   const renderDashboardView = () => {
     const { 
       stats, secondaryStats, requestedBySupport, deliveredBySupport, 
@@ -5705,120 +6574,293 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </button>
 
                 <div className="w-px h-6 bg-white/10 mx-1 opacity-0 group-hover/chart:opacity-100" />
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 mt-2 md:mt-0 select-none">
-                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Produits préparés stockés">
-                    <input 
-                      type="checkbox" 
-                      className="accent-[#EBFF00] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
-                      checked={visibleTimelineSeries.prepares} 
-                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, prepares: e.target.checked }))}
-                    />
-                    <div className="w-2 h-2 rounded-full bg-[#EBFF00] shadow-[0_0_8px_rgba(235,255,0,0.5)]" />
-                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">1. Préparés</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions en cours de shooting ou shootées">
-                    <input 
-                      type="checkbox" 
-                      className="accent-[#00D1FF] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
-                      checked={visibleTimelineSeries.shooting} 
-                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, shooting: e.target.checked }))}
-                    />
-                    <div className="w-2 h-2 rounded-full bg-[#00D1FF] shadow-[0_0_8px_rgba(0,209,255,0.5)]" />
-                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">2. Shooting</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions en post-production">
-                    <input 
-                      type="checkbox" 
-                      className="accent-[#FF9900] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
-                      checked={visibleTimelineSeries.postProd} 
-                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, postProd: e.target.checked }))}
-                    />
-                    <div className="w-2 h-2 rounded-full bg-[#FF9900] shadow-[0_0_8px_rgba(255,153,0,0.5)]" />
-                    <span className="text-[9px] font-black text-white/60 uppercase tracking-widest">3. Post-Prod</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Historique total des missions livrées">
-                    <input 
-                      type="checkbox" 
-                      className="accent-[#00FF94] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
-                      checked={visibleTimelineSeries.livreesCumulees} 
-                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, livreesCumulees: e.target.checked }))}
-                    />
-                    <div className="w-2 h-2 rounded-full bg-[#00FF94] shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
-                    <span className="text-[9px] font-black text-white/70 uppercase tracking-widest">4. Livrées</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions livrées spécifiquement ce jour là">
-                    <input 
-                      type="checkbox" 
-                      className="accent-accent-blue rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
-                      checked={visibleTimelineSeries.livreesJour} 
-                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, livreesJour: e.target.checked }))}
-                    />
-                    <div className="w-2.5 h-1 bg-accent-blue" />
-                    <span className="text-[9px] font-black text-white/40 uppercase tracking-widest">(Jour)</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Progression moyenne globale active (%)">
-                    <input 
-                      type="checkbox" 
-                      className="accent-white rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
-                      checked={visibleTimelineSeries.progression} 
-                      onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, progression: e.target.checked }))}
-                    />
-                    <div className="w-3 h-0.5 border-t border-dashed border-white/40" />
-                    <span className="text-[9px] font-black text-white/40 uppercase tracking-widest">Progression</span>
-                  </label>
-                </div>
+                
+                {!isWeeklyChartCollapsed && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 mt-2 md:mt-0 select-none">
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Produits préparés stockés">
+                      <input 
+                        type="checkbox" 
+                        className="accent-[#EBFF00] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleTimelineSeries.prepares} 
+                        onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, prepares: e.target.checked }))}
+                      />
+                      <div className="w-2 h-2 rounded-full bg-[#EBFF00] shadow-[0_0_8px_rgba(235,255,0,0.5)]" />
+                      <span className="text-[11px] font-black text-white/60 uppercase tracking-widest">1. Préparés</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions en cours de shooting ou shootées">
+                      <input 
+                        type="checkbox" 
+                        className="accent-[#00D1FF] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleTimelineSeries.shooting} 
+                        onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, shooting: e.target.checked }))}
+                      />
+                      <div className="w-2 h-2 rounded-full bg-[#00D1FF] shadow-[0_0_8px_rgba(0,209,255,0.5)]" />
+                      <span className="text-[11px] font-black text-white/60 uppercase tracking-widest">2. Shooting</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions en post-production">
+                      <input 
+                        type="checkbox" 
+                        className="accent-[#FF9900] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleTimelineSeries.postProd} 
+                        onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, postProd: e.target.checked }))}
+                      />
+                      <div className="w-2 h-2 rounded-full bg-[#FF9900] shadow-[0_0_8px_rgba(255,153,0,0.5)]" />
+                      <span className="text-[11px] font-black text-white/60 uppercase tracking-widest">3. Post-Prod</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Historique total des missions livrées">
+                      <input 
+                        type="checkbox" 
+                        className="accent-[#00FF94] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleTimelineSeries.livreesCumulees} 
+                        onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, livreesCumulees: e.target.checked }))}
+                      />
+                      <div className="w-2 h-2 rounded-full bg-[#00FF94] shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
+                      <span className="text-[11px] font-black text-white/70 uppercase tracking-widest">4. Livrées</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions livrées spécifiquement ce jour là">
+                      <input 
+                        type="checkbox" 
+                        className="accent-accent-blue rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleTimelineSeries.livreesJour} 
+                        onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, livreesJour: e.target.checked }))}
+                      />
+                      <div className="w-2.5 h-1 bg-accent-blue" />
+                      <span className="text-[11px] font-black text-white/40 uppercase tracking-widest">(Jour)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Progression moyenne globale active (%)">
+                      <input 
+                        type="checkbox" 
+                        className="accent-white rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleTimelineSeries.progression} 
+                        onChange={(e) => setVisibleTimelineSeries(prev => ({ ...prev, progression: e.target.checked }))}
+                      />
+                      <div className="w-3 h-0.5 border-t border-dashed border-white/40" />
+                      <span className="text-[11px] font-black text-white/40 uppercase tracking-widest">Progression</span>
+                    </label>
+                  </div>
+                )}
                 
                 <div className="w-px h-6 bg-white/10 mx-1" />
-                
+
                 <button 
-                  onClick={handleRefreshScore}
-                  className={`p-2 rounded-lg transition-all ${isRefreshingScore ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/5 text-white/40 hover:text-white hover:bg-white/10'}`}
-                  title="Recalculer les données analytiques"
+                  onClick={() => setIsWeeklyChartCollapsed(!isWeeklyChartCollapsed)}
+                  className="p-2 bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 hover:border-white/30 rounded-lg transition-all"
+                  title={isWeeklyChartCollapsed ? "Déployer le graphique" : "Rétracter le graphique"}
                 >
-                  <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                  {isWeeklyChartCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
                 </button>
              </div>
            </div>
            
-           <div className={`h-80 w-full transition-opacity duration-300 ${isRefreshingScore ? 'opacity-40 grayscale-[0.5]' : 'opacity-100'}`}>
-             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'refreshing' : 'stable'}>
-               <ComposedChart data={timelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                 <CartesianGrid strokeDasharray="1 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                 <XAxis 
-                   dataKey="name" 
-                   tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: 'bold' }} 
-                   axisLine={false} 
-                   tickLine={false} 
-                   dy={10}
-                 />
-                 <YAxis 
-                   yAxisId="left" 
-                   tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9, fontFamily: 'monospace' }} 
-                   axisLine={false} 
-                   tickLine={false} 
-                 />
-                 <YAxis 
-                   yAxisId="right" 
-                   orientation="right" 
-                   tick={{ fill: 'rgba(0,255,148,0.3)', fontSize: 9, fontFamily: 'monospace' }} 
-                   axisLine={false} 
-                   tickLine={false} 
-                 />
-                 <RechartsTooltip 
-                   cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                   contentStyle={{ backgroundColor: '#0A0A0A', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '10px', textTransform: 'uppercase', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
-                   itemStyle={{ padding: '2px 0' }}
-                 />
-                 {visibleTimelineSeries.livreesJour && <Bar yAxisId="left" dataKey="MissionsLivrees" fill="var(--color-accent-blue)" name="Livrées (Jour)" radius={[2, 2, 0, 0]} maxBarSize={30} opacity={0.6} />}
-                 {visibleTimelineSeries.prepares && <Line yAxisId="left" type="monotone" dataKey="ProduitsPrepares" name="Préparés" stroke="#EBFF00" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#EBFF00', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
-                  {visibleTimelineSeries.shooting && <Line yAxisId="left" type="monotone" dataKey="Shooting" name="En Shooting" stroke="#00D1FF" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#00D1FF', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
-                  {visibleTimelineSeries.postProd && <Line yAxisId="left" type="monotone" dataKey="PostProduction" name="Post-Prod" stroke="#FF9900" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#FF9900', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
-                  {visibleTimelineSeries.livreesCumulees && <Line yAxisId="left" type="monotone" dataKey="LivreesCumulees" name="Livrées (Total)" stroke="#00FF94" strokeWidth={4} dot={{ fill: '#0A0A0A', stroke: '#00FF94', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />}
-                  
-                  {visibleTimelineSeries.progression && <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" name="Progression (%)" stroke="rgba(255,255,255,0.3)" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={{ r: 4 }} />}
-               </ComposedChart>
-             </ResponsiveContainer>
+           <AnimatePresence>
+             {!isWeeklyChartCollapsed && (
+               <motion.div
+                 initial={{ height: 0, opacity: 0 }}
+                 animate={{ height: "auto", opacity: 1 }}
+                 exit={{ height: 0, opacity: 0 }}
+                 transition={{ duration: 0.3 }}
+                 className="overflow-hidden"
+               >
+                 <div className={`h-80 w-full transition-opacity duration-300 ${isRefreshingScore ? 'opacity-40 grayscale-[0.5]' : 'opacity-100'}`}>
+                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'refreshing' : 'stable'}>
+                     <ComposedChart data={timelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                       <CartesianGrid strokeDasharray="1 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                       <XAxis 
+                         dataKey="name" 
+                         tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 'bold' }} 
+                         axisLine={false} 
+                         tickLine={false} 
+                         dy={10}
+                       />
+                       <YAxis 
+                         yAxisId="left" 
+                         tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontFamily: 'monospace' }} 
+                         axisLine={false} 
+                         tickLine={false} 
+                       />
+                       <YAxis 
+                         yAxisId="right" 
+                         orientation="right" 
+                         tick={{ fill: 'rgba(0,255,148,0.3)', fontSize: 11, fontFamily: 'monospace' }} 
+                         axisLine={false} 
+                         tickLine={false} 
+                       />
+                       <RechartsTooltip 
+                         cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                         contentStyle={{ backgroundColor: '#0A0A0A', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '11px', textTransform: 'uppercase', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
+                         itemStyle={{ padding: '2px 0' }}
+                       />
+                       {visibleTimelineSeries.livreesJour && <Bar yAxisId="left" dataKey="MissionsLivrees" fill="var(--color-accent-blue)" name="Livrées (Jour)" radius={[2, 2, 0, 0]} maxBarSize={30} opacity={0.6} />}
+                       {visibleTimelineSeries.prepares && <Line yAxisId="left" type="monotone" dataKey="ProduitsPrepares" name="Préparés" stroke="#EBFF00" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#EBFF00', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                       {visibleTimelineSeries.shooting && <Line yAxisId="left" type="monotone" dataKey="Shooting" name="En Shooting" stroke="#00D1FF" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#00D1FF', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                       {visibleTimelineSeries.postProd && <Line yAxisId="left" type="monotone" dataKey="PostProduction" name="Post-Prod" stroke="#FF9900" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#FF9900', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                       {visibleTimelineSeries.livreesCumulees && <Line yAxisId="left" type="monotone" dataKey="LivreesCumulees" name="Livrées (Total)" stroke="#00FF94" strokeWidth={4} dot={{ fill: '#0A0A0A', stroke: '#00FF94', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />}
+                       
+                       {visibleTimelineSeries.progression && <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" name="Progression (%)" stroke="rgba(255,255,255,0.3)" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={{ r: 4 }} />}
+                     </ComposedChart>
+                   </ResponsiveContainer>
+                 </div>
+               </motion.div>
+             )}
+           </AnimatePresence>
+        </motion.div>
+
+        {/* Monthly Timeline Chart */}
+        <motion.div 
+          id="chart-timeline-monthly"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`bg-black/40 border border-white/10 p-8 rounded-2xl relative overflow-hidden shadow-xl group/chart hover:border-accent/20 transition-all ${isRefreshingScore ? 'animate-pulse ring-1 ring-accent/30' : ''} mt-6`}
+        >
+           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
+             <div className="flex items-center gap-4">
+               <div className={`p-2.5 bg-accent/10 border border-accent/20 rounded-xl text-accent shadow-[0_0_20px_rgba(0,255,148,0.1)] transition-all ${isRefreshingScore ? 'scale-110 shadow-[0_0_30px_rgba(0,255,148,0.3)]' : ''}`}>
+                 <Activity size={20} className={isRefreshingScore ? 'animate-pulse' : ''} />
+               </div>
+               <div>
+                 <h2 className="text-sm font-black uppercase tracking-[5px] text-white leading-tight">Vecteur d'Évolution Mensuelle</h2>
+                 <p className="text-[10px] text-text-dim uppercase tracking-[3px] mt-1 font-mono">Stream: Active // Sampling: Mensuel</p>
+               </div>
+             </div>
+             <div className="flex items-center gap-4 px-2 py-1.5 bg-white/5 border border-white/10 rounded-xl backdrop-blur-sm">
+                <button 
+                  onClick={() => exportChartAsJPEG('chart-timeline-monthly', 'Evolution Mensuelle')}
+                  className="p-2 bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 hover:border-white/30 rounded-lg transition-all opacity-0 group-hover/chart:opacity-100"
+                  title="Exporter ce graphique"
+                >
+                  <Download size={14} />
+                </button>
+
+                <div className="w-px h-6 bg-white/10 mx-1 opacity-0 group-hover/chart:opacity-100" />
+                
+                {!isMonthlyChartCollapsed && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 mt-2 md:mt-0 select-none">
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Produits préparés stockés">
+                      <input 
+                        type="checkbox" 
+                        className="accent-[#EBFF00] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleMonthlyTimelineSeries.prepares} 
+                        onChange={(e) => setVisibleMonthlyTimelineSeries(prev => ({ ...prev, prepares: e.target.checked }))}
+                      />
+                      <div className="w-2 h-2 rounded-full bg-[#EBFF00] shadow-[0_0_8px_rgba(235,255,0,0.5)]" />
+                      <span className="text-[11px] font-black text-white/60 uppercase tracking-widest">1. Préparés</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions en cours de shooting ou shootées">
+                      <input 
+                        type="checkbox" 
+                        className="accent-[#00D1FF] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleMonthlyTimelineSeries.shooting} 
+                        onChange={(e) => setVisibleMonthlyTimelineSeries(prev => ({ ...prev, shooting: e.target.checked }))}
+                      />
+                      <div className="w-2 h-2 rounded-full bg-[#00D1FF] shadow-[0_0_8px_rgba(0,209,255,0.5)]" />
+                      <span className="text-[11px] font-black text-white/60 uppercase tracking-widest">2. Shooting</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions en post-production">
+                      <input 
+                        type="checkbox" 
+                        className="accent-[#FF9900] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleMonthlyTimelineSeries.postProd} 
+                        onChange={(e) => setVisibleMonthlyTimelineSeries(prev => ({ ...prev, postProd: e.target.checked }))}
+                      />
+                      <div className="w-2 h-2 rounded-full bg-[#FF9900] shadow-[0_0_8px_rgba(255,153,0,0.5)]" />
+                      <span className="text-[11px] font-black text-white/60 uppercase tracking-widest">3. Post-Prod</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Historique total des missions livrées">
+                      <input 
+                        type="checkbox" 
+                        className="accent-[#00FF94] rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleMonthlyTimelineSeries.livreesCumulees} 
+                        onChange={(e) => setVisibleMonthlyTimelineSeries(prev => ({ ...prev, livreesCumulees: e.target.checked }))}
+                      />
+                      <div className="w-2 h-2 rounded-full bg-[#00FF94] shadow-[0_0_8px_rgba(0,255,148,0.5)]" />
+                      <span className="text-[11px] font-black text-white/70 uppercase tracking-widest">4. Livrées</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Missions livrées spécifiquement ce mois-ci">
+                      <input 
+                        type="checkbox" 
+                        className="accent-accent-blue rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleMonthlyTimelineSeries.livreesJour} 
+                        onChange={(e) => setVisibleMonthlyTimelineSeries(prev => ({ ...prev, livreesJour: e.target.checked }))}
+                      />
+                      <div className="w-2.5 h-1 bg-accent-blue" />
+                      <span className="text-[11px] font-black text-white/40 uppercase tracking-widest">(Mois)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" title="Progression moyenne globale active (%)">
+                      <input 
+                        type="checkbox" 
+                        className="accent-white rounded bg-white/10 border-white/20 w-3.5 h-3.5 cursor-pointer" 
+                        checked={visibleMonthlyTimelineSeries.progression} 
+                        onChange={(e) => setVisibleMonthlyTimelineSeries(prev => ({ ...prev, progression: e.target.checked }))}
+                      />
+                      <div className="w-3 h-0.5 border-t border-dashed border-white/40" />
+                      <span className="text-[11px] font-black text-white/40 uppercase tracking-widest">Progression</span>
+                    </label>
+                  </div>
+                )}
+                
+                <div className="w-px h-6 bg-white/10 mx-1" />
+
+                <button 
+                  onClick={() => setIsMonthlyChartCollapsed(!isMonthlyChartCollapsed)}
+                  className="p-2 bg-white/5 border border-white/10 text-white/40 hover:text-white hover:bg-white/10 hover:border-white/30 rounded-lg transition-all"
+                  title={isMonthlyChartCollapsed ? "Déployer le graphique" : "Rétracter le graphique"}
+                >
+                  {isMonthlyChartCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                </button>
+             </div>
            </div>
+           
+           <AnimatePresence>
+             {!isMonthlyChartCollapsed && (
+               <motion.div
+                 initial={{ height: 0, opacity: 0 }}
+                 animate={{ height: "auto", opacity: 1 }}
+                 exit={{ height: 0, opacity: 0 }}
+                 transition={{ duration: 0.3 }}
+                 className="overflow-hidden"
+               >
+                 <div className={`h-80 w-full transition-opacity duration-300 ${isRefreshingScore ? 'opacity-40 grayscale-[0.5]' : 'opacity-100'}`}>
+                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'refreshing-monthly' : 'stable-monthly'}>
+                     <ComposedChart data={monthlyTimelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                       <CartesianGrid strokeDasharray="1 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                       <XAxis 
+                         dataKey="name" 
+                         tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 'bold' }} 
+                         axisLine={false} 
+                         tickLine={false} 
+                         dy={10}
+                       />
+                       <YAxis 
+                         yAxisId="left" 
+                         tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontFamily: 'monospace' }} 
+                         axisLine={false} 
+                         tickLine={false} 
+                       />
+                       <YAxis 
+                         yAxisId="right" 
+                         orientation="right" 
+                         tick={{ fill: 'rgba(0,255,148,0.3)', fontSize: 11, fontFamily: 'monospace' }} 
+                         axisLine={false} 
+                         tickLine={false} 
+                       />
+                       <RechartsTooltip 
+                         cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                         contentStyle={{ backgroundColor: '#0A0A0A', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontSize: '11px', textTransform: 'uppercase', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
+                         itemStyle={{ padding: '2px 0' }}
+                       />
+                       {visibleMonthlyTimelineSeries.livreesJour && <Bar yAxisId="left" dataKey="MissionsLivrees" fill="var(--color-accent-blue)" name="Livrées (Mois)" radius={[2, 2, 0, 0]} maxBarSize={30} opacity={0.6} />}
+                       {visibleMonthlyTimelineSeries.prepares && <Line yAxisId="left" type="monotone" dataKey="ProduitsPrepares" name="Préparés" stroke="#EBFF00" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#EBFF00', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                       {visibleMonthlyTimelineSeries.shooting && <Line yAxisId="left" type="monotone" dataKey="Shooting" name="En Shooting" stroke="#00D1FF" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#00D1FF', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                       {visibleMonthlyTimelineSeries.postProd && <Line yAxisId="left" type="monotone" dataKey="PostProduction" name="Post-Prod" stroke="#FF9900" strokeWidth={3} dot={{ fill: '#0A0A0A', stroke: '#FF9900', strokeWidth: 2, r: 3 }} activeDot={{ r: 5 }} />}
+                       {visibleMonthlyTimelineSeries.livreesCumulees && <Line yAxisId="left" type="monotone" dataKey="LivreesCumulees" name="Livrées (Total)" stroke="#00FF94" strokeWidth={4} dot={{ fill: '#0A0A0A', stroke: '#00FF94', strokeWidth: 2, r: 4 }} activeDot={{ r: 6 }} />}
+                       
+                       {visibleMonthlyTimelineSeries.progression && <Line yAxisId="right" type="monotone" dataKey="ProgressionMoyenne" name="Progression (%)" stroke="rgba(255,255,255,0.3)" strokeWidth={2} strokeDasharray="4 4" dot={false} activeDot={{ r: 4 }} />}
+                     </ComposedChart>
+                   </ResponsiveContainer>
+                 </div>
+               </motion.div>
+             )}
+           </AnimatePresence>
         </motion.div>
 
         {/* Dashboard Tools */}
@@ -6321,7 +7363,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   </thead>
                   <tbody>
                     {dashboardProductionMissions.map(m => (
-                      <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group">
+                      <tr 
+                        key={m.id} 
+                        onClick={() => setSelectedMissionId(m.id)}
+                        className="border-b border-white/[0.02] hover:bg-white/[0.04] transition-colors group cursor-pointer"
+                        title="Cliquez pour afficher les détails de la mission"
+                      >
                         <td className="py-3 px-4 text-[10px] font-mono font-bold text-accent-blue">{m.refId}</td>
                         <td className="py-3 px-4 text-[10px] font-bold text-white/80">{m.product}</td>
                         <td className="py-3 px-4 text-[10px] text-text-dim">{m.support}</td>
@@ -6389,7 +7436,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   </thead>
                   <tbody>
                     {dashboardSecondaryMissions.map(m => (
-                      <tr key={m.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors">
+                      <tr 
+                        key={m.id} 
+                        onClick={() => setSelectedSecondaryMissionForModal(m)}
+                        className="border-b border-white/[0.02] hover:bg-white/[0.04] transition-colors cursor-pointer"
+                        title="Cliquez pour afficher les détails de la mission secondaire"
+                      >
                         <td className="py-3 px-4 text-[10px] font-bold text-white/80">
                           {m.title} 
                           <span className={`ml-2 text-[8px] font-black px-1.5 py-0.5 rounded border uppercase tracking-wider ${
@@ -6452,7 +7504,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             { id: 'branding', label: 'Identité Visuelle', icon: Palette },
             { id: 'display', label: 'Configuration Affichage', icon: Layout },
             { id: 'data', label: 'Structure & Data', icon: Database },
-            { id: 'ai', label: 'Agent IA Gemini', icon: Cpu }
+            { id: 'ai', label: 'Agent IA Gemini', icon: Cpu },
+            { id: 'shortcuts', label: 'Raccourcis Clavier', icon: Keyboard }
           ].map(tab => {
             const Icon = tab.icon;
             return (
@@ -6753,12 +7806,17 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <input id="app-logo-upload" type="file" accept="image/*" onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                            setAppLogo(reader.result as string);
-                            setToast({ show: true, message: 'Logo mis à jour', type: 'task' });
-                          };
-                          reader.readAsDataURL(file);
+                          resizeImage(file, 400, 400)
+                            .then((compressedBase64) => {
+                              setAppLogo(compressedBase64);
+                              setToast({ show: true, message: 'Logo mis à jour et optimisé', type: 'task' });
+                              setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                            })
+                            .catch((err) => {
+                              console.error(err);
+                              setToast({ show: true, message: "Erreur d'optimisation du logo", type: 'system' });
+                              setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                            });
                         }
                       }} className="hidden" />
                       {appLogo && (
@@ -6785,9 +7843,17 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       <input id="header-bg-upload-main" type="file" accept="image/*" onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          const reader = new FileReader();
-                          reader.onloadend = () => setHeaderBgImage(reader.result as string);
-                          reader.readAsDataURL(file);
+                          resizeImage(file, 1200, 400)
+                            .then((compressedBase64) => {
+                              setHeaderBgImage(compressedBase64);
+                              setToast({ show: true, message: 'Background mis à jour et optimisé', type: 'task' });
+                              setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                            })
+                            .catch((err) => {
+                              console.error(err);
+                              setToast({ show: true, message: "Erreur d'optimisation du background", type: 'system' });
+                              setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                            });
                         }
                       }} className="hidden" />
                       {headerBgImage && (
@@ -7456,6 +8522,220 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           : [...prev, `editor-${cat.id}`]
                       )}
                     />
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {systemSubTab === 'shortcuts' && (
+            <motion.div
+              key="shortcuts"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-8"
+            >
+              {/* Header card with global reset & search */}
+              <div className="p-10 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl relative overflow-hidden group">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-accent/10 flex items-center justify-center text-accent border border-accent/20 rounded-2xl shadow-lg">
+                      <Keyboard size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black uppercase tracking-wider text-white leading-tight">Configuration des Raccourcis</h3>
+                      <p className="text-[11px] text-text-dim uppercase font-bold tracking-[3px] mt-1">Personnalisez vos commandes clavier</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-4">
+                    <button
+                      onClick={() => {
+                        if (window.confirm('Êtes-vous sûr de vouloir réinitialiser TOUS les raccourcis aux valeurs par défaut ?')) {
+                          setCustomShortcuts(defaultShortcuts);
+                          localStorage.setItem('customShortcuts', JSON.stringify(defaultShortcuts));
+                          setToast({ show: true, message: 'Tous les raccourcis ont été réinitialisés.', type: 'task' });
+                          setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
+                        }
+                      }}
+                      className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-[2px] transition-all flex items-center gap-2"
+                    >
+                      <RotateCcw size={14} /> Réinitialiser Tout
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-yellow-500/5 border border-yellow-500/10 rounded-2xl mb-6">
+                  <div className="flex items-start gap-4">
+                    <div className="p-2 bg-yellow-500/10 rounded text-accent-yellow flex-shrink-0">
+                      <AlertTriangle size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-white mb-2">Instructions d'enregistrement</h4>
+                      <p className="text-[11px] text-text-dim leading-relaxed">
+                        Pour attribuer une nouvelle touche, cliquez sur le bouton de raccourci d'un élément (il commencera à pulser en orange), puis <span className="text-accent font-bold">appuyez sur la touche souhaitée</span> de votre clavier. Appuyez sur <span className="text-red-400 font-bold">Échap</span> pour annuler. Les raccourcis de navigation des onglets utilisent automatiquement la touche de modification <kbd className="bg-white/10 px-1 py-0.5 rounded text-[10px] text-white">Ctrl</kbd>, les modes de vue et outils utilisent la touche <kbd className="bg-white/10 px-1 py-0.5 rounded text-[10px] text-white">Alt</kbd>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Conflict indicator / banner */}
+                {(() => {
+                  const conflictKeys = Object.entries(
+                    Object.entries(customShortcuts).reduce<Record<string, string[]>>((acc, [id, key]) => {
+                      const k = String(key).toLowerCase();
+                      if (!acc[k]) acc[k] = [];
+                      acc[k].push(id);
+                      return acc;
+                    }, {})
+                  ).filter(([_, ids]) => ids.length > 1);
+
+                  if (conflictKeys.length > 0) {
+                    return (
+                      <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400">
+                        <AlertTriangle size={16} />
+                        <span className="text-xs font-bold uppercase tracking-wider">
+                          ⚠️ Conflit détecté : {conflictKeys.map(([k, ids]) => `"${k.toUpperCase()}" (${ids.length} actions)`).join(', ')}
+                        </span>
+                      </div>
+                    )
+                  }
+                  return null;
+                })()}
+              </div>
+
+              {/* Grid of categories */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {[
+                  {
+                    category: 'Aide & Général',
+                    items: [
+                      { id: 'help', label: "Ouvrir / Fermer l'Aide", prefix: 'Ctrl / Shift + ', desc: "Affiche le Centre de productivité et d'aide" }
+                    ]
+                  },
+                  {
+                    category: 'Navigation des Onglets',
+                    items: [
+                      { id: 'tabTable', label: "Onglet Production", prefix: 'Ctrl + ', desc: "Bascule vers le tableau de production principal" },
+                      { id: 'tabDashboard', label: "Onglet Dashboard", prefix: 'Ctrl + ', desc: "Bascule vers le tableau de bord analytique" },
+                      { id: 'tabInventory', label: "Onglet Inventaire", prefix: 'Ctrl + ', desc: "Bascule vers l'inventaire des produits" },
+                      { id: 'tabJournal', label: "Onglet Journal de bord", prefix: 'Ctrl + ', desc: "Bascule vers le flux de télémétrie et logs" },
+                      { id: 'tabSystem', label: "Onglet Configuration", prefix: 'Ctrl + ', desc: "Bascule vers la configuration système" }
+                    ]
+                  },
+                  {
+                    category: 'Vues de Production',
+                    items: [
+                      { id: 'viewTable', label: "Vue Ligne Classique", prefix: 'Alt + ', desc: "Active la vue en liste classique" },
+                      { id: 'viewMosaic', label: "Vue Mosaïque", prefix: 'Alt + ', desc: "Active la vue grille d'images de production" },
+                      { id: 'viewTask', label: "Vue Task", prefix: 'Alt + ', desc: "Active la vue Kanban / Tâches" },
+                      { id: 'viewCalendar', label: "Vue Calendrier", prefix: 'Alt + ', desc: "Active le planning des échéances" },
+                      { id: 'viewFamily', label: "Vue Familles", prefix: 'Alt + ', desc: "Active l'organisation par familles de produits" }
+                    ]
+                  },
+                  {
+                    category: 'Outils & Filtres rapides',
+                    items: [
+                      { id: 'focusSearch', label: "Focus Barre de Recherche", prefix: 'Alt + ', desc: "Place immédiatement le curseur dans le champ de recherche" },
+                      { id: 'toggleFilters', label: "Afficher/Masquer les Filtres", prefix: 'Alt + ', desc: "Active ou désactive le volet latéral de filtrage" },
+                      { id: 'toggleMiddle', label: "Afficher/Masquer Graphiques", prefix: 'Alt + ', desc: "Bascule l'affichage des graphiques hebdomadaires/mensuels" },
+                      { id: 'exportJpeg', label: "Exporter en JPEG", prefix: 'Alt + ', desc: "Télécharge le rapport de production sous forme d'image" },
+                      { id: 'toggleWeekly', label: "Plier/Déplier Graphique Hebdo", prefix: 'Alt + ', desc: "Bascule le panneau d'analyse hebdomadaire dans le Dashboard" },
+                      { id: 'toggleMonthly', label: "Plier/Déplier Graphique Mensuel", prefix: 'Alt + ', desc: "Bascule le panneau d'analyse mensuelle dans le Dashboard" },
+                      { id: 'toggleSidebar', label: "Ancrer/Désancrer le Volet", prefix: 'Alt + ', desc: "Bascule l'ancrage permanent du volet de configuration de mission" },
+                      { id: 'exportJson', label: "Sauvegarder / Exporter JSON", prefix: 'Alt + ', desc: "Télécharge la sauvegarde intégrale de la base de données (.json)" },
+                      { id: 'importJson', label: "Charger / Importer JSON", prefix: 'Alt + ', desc: "Sélectionne un fichier de sauvegarde (.json) pour restaurer les données" }
+                    ]
+                  }
+                ].map((cat, catIdx) => (
+                  <div key={catIdx} className="p-8 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl space-y-6">
+                    <h3 className="text-base font-black uppercase tracking-wider text-white border-b border-white/5 pb-3">
+                      {cat.category}
+                    </h3>
+
+                    <div className="space-y-4">
+                      {cat.items.map((item) => {
+                        const isRecording = recordingShortcut === item.id;
+                        const currentKey = customShortcuts[item.id] || defaultShortcuts[item.id as keyof typeof defaultShortcuts];
+                        const isModified = currentKey !== defaultShortcuts[item.id as keyof typeof defaultShortcuts];
+
+                        // Conflict check
+                        const conflictIds = Object.entries(customShortcuts)
+                          .filter(([id, key]) => String(key).toLowerCase() === String(currentKey).toLowerCase() && id !== item.id)
+                          .map(([id]) => id);
+
+                        return (
+                          <div 
+                            key={item.id} 
+                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white/[0.02] border border-white/5 rounded-xl hover:bg-white/[0.04] transition-all"
+                          >
+                            <div className="space-y-1 max-w-[280px]">
+                              <span className="text-xs font-bold text-white uppercase tracking-wider block">
+                                {item.label}
+                              </span>
+                              <span className="text-[10px] text-text-dim block leading-normal">
+                                {item.desc}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-3 self-end sm:self-auto">
+                              {conflictIds.length > 0 && (
+                                <span className="text-[9px] font-bold bg-red-500/10 border border-red-500/20 text-red-400 px-2.5 py-1 rounded-md uppercase tracking-wider animate-pulse">
+                                  ⚠️ Conflit
+                                </span>
+                              )}
+
+                              <button
+                                onClick={() => {
+                                  if (isRecording) {
+                                    setRecordingShortcut(null);
+                                  } else {
+                                    setRecordingShortcut(item.id);
+                                  }
+                                }}
+                                className={`h-11 px-4 rounded-xl border flex items-center justify-center font-mono text-xs font-bold tracking-widest uppercase transition-all ${
+                                  isRecording
+                                    ? 'bg-accent-orange/20 border-accent-orange text-accent-orange animate-pulse scale-[1.05]'
+                                    : 'bg-black/60 border-white/10 hover:border-accent text-white hover:text-accent'
+                                }`}
+                                title="Cliquer pour réassigner la touche"
+                              >
+                                {isRecording ? (
+                                  'Appuyez...'
+                                ) : (
+                                  <span>
+                                    <span className="opacity-50">{item.prefix}</span>
+                                    <span className="text-accent">{String(currentKey).toUpperCase()}</span>
+                                  </span>
+                                )}
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setCustomShortcuts((prev: any) => {
+                                    const next = { ...prev, [item.id]: defaultShortcuts[item.id as keyof typeof defaultShortcuts] };
+                                    localStorage.setItem('customShortcuts', JSON.stringify(next));
+                                    return next;
+                                  });
+                                  setToast({ show: true, message: 'Raccourci réinitialisé', type: 'task' });
+                                  setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 2000);
+                                }}
+                                disabled={!isModified}
+                                className={`p-2.5 rounded-lg border flex items-center justify-center transition-all ${
+                                  isModified
+                                    ? 'bg-white/5 border-white/10 text-white hover:bg-white/10'
+                                    : 'bg-white/[0.01] border-white/5 text-white/10 cursor-not-allowed'
+                                }`}
+                                title="Réinitialiser à la valeur par défaut"
+                              >
+                                <RotateCcw size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -8612,24 +9892,46 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 } else {
                   progress = 100;
                 }
-                nextMission.deliveredAt = updates.deliveredAt || getNowLocalDatetimeString();
+                if (updates.updateDelivered && updates.deliveredAt) {
+                  nextMission.deliveredAt = updates.deliveredAt;
+                } else if (!m.deliveredAt) {
+                  nextMission.deliveredAt = getNowLocalDatetimeString();
+                }
                 break;
               case 'En post-production': 
                 progress = 85; 
-                nextMission.postProdAt = updates.postProdAt || getNowLocalDatetimeString();
+                if (updates.updatePostProd && updates.postProdAt) {
+                  nextMission.postProdAt = updates.postProdAt;
+                } else if (!m.postProdAt) {
+                  nextMission.postProdAt = getNowLocalDatetimeString();
+                }
                 break;
               case 'shooté': 
                 progress = 75; 
-                nextMission.shotAt = updates.shotAt || getNowLocalDatetimeString();
+                if (updates.updateShot && updates.shotAt) {
+                  nextMission.shotAt = updates.shotAt;
+                } else if (!m.shotAt) {
+                  nextMission.shotAt = getNowLocalDatetimeString();
+                }
                 break;
               case 'en cours de shoot': 
                 progress = 50; 
                 break;
               case 'produit préparé': 
                 progress = 25; 
-                nextMission.preparedAt = updates.preparedAt || getNowLocalDatetimeString();
+                if (updates.updatePrepared && updates.preparedAt) {
+                  nextMission.preparedAt = updates.preparedAt;
+                } else if (!m.preparedAt) {
+                  nextMission.preparedAt = getNowLocalDatetimeString();
+                }
                 break;
-              case 'en attente': progress = 0; break;
+              case 'en attente': 
+                progress = 0; 
+                break;
+              case 'annuler': 
+                progress = 0; 
+                nextMission.photoCountDelivered = 0;
+                break;
             }
             nextMission.progress = progress;
 
@@ -8675,6 +9977,52 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           nextMission.rating = updates.rating;
           history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Note changée à ${updates.rating}/5` });
           changed = true;
+        }
+
+        // Synchronize status and progress from dates if dates were updated directly but status wasn't changed explicitly
+        if (!updates.updateStatus && nextMission.status !== 'annuler' && (updates.updatePrepared || updates.updateShot || updates.updatePostProd || updates.updateDelivered)) {
+          if (nextMission.deliveredAt && nextMission.deliveredAt.trim() !== '') {
+            if (nextMission.status !== 'livré') {
+              nextMission.status = 'livré';
+              if ((nextMission.photoCountDelivered || 0) === 0) {
+                nextMission.photoCountDelivered = 1;
+              }
+              const del = nextMission.photoCountDelivered || 1;
+              const req = nextMission.photoCountRequested || 1;
+              nextMission.progress = Math.round((del / req) * 100);
+              history.push({ timestamp: Date.now(), message: `Progression synchronisée à ${nextMission.progress}% (Statut: livré)` });
+              changed = true;
+            }
+          } else if (nextMission.postProdAt && nextMission.postProdAt.trim() !== '') {
+            if (nextMission.status !== 'En post-production') {
+              nextMission.status = 'En post-production';
+              nextMission.progress = 85;
+              history.push({ timestamp: Date.now(), message: `Progression synchronisée à 85% (Statut: En post-production)` });
+              changed = true;
+            }
+          } else if (nextMission.shotAt && nextMission.shotAt.trim() !== '') {
+            if (nextMission.status !== 'shooté') {
+              nextMission.status = 'shooté';
+              nextMission.progress = 75;
+              history.push({ timestamp: Date.now(), message: `Progression synchronisée à 75% (Statut: shooté)` });
+              changed = true;
+            }
+          } else if (nextMission.preparedAt && nextMission.preparedAt.trim() !== '') {
+            if (nextMission.status !== 'produit préparé') {
+              nextMission.status = 'produit préparé';
+              nextMission.progress = 25;
+              history.push({ timestamp: Date.now(), message: `Progression synchronisée à 25% (Statut: produit préparé)` });
+              changed = true;
+            }
+          } else {
+            // If all step dates are cleared, reset to 'en attente'
+            if (nextMission.status !== 'en attente') {
+              nextMission.status = 'en attente';
+              nextMission.progress = 0;
+              history.push({ timestamp: Date.now(), message: `Progression réinitialisée à 0% (Statut: en attente)` });
+              changed = true;
+            }
+          }
         }
 
         if (changed) {
@@ -9183,11 +10531,22 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             </div>
             
             <button 
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="w-12 h-12 bg-white/5 border border-white/10 rounded-lg flex items-center justify-center hover:bg-accent/10 hover:border-accent hover:text-accent transition-all active:scale-95 group relative shadow-2xl"
-              title={isSidebarOpen ? "Fermer le volet" : "Ouvrir le volet"}
+              onClick={() => {
+                setIsSidebarOpen(prev => {
+                  const next = !prev;
+                  if (!next) {
+                    setIsSidebarHovered(false);
+                  }
+                  return next;
+                });
+              }}
+              className={`w-12 h-12 border rounded-lg flex items-center justify-center transition-all active:scale-95 group relative shadow-2xl ${isSidebarOpen ? 'bg-accent/15 border-accent/40 text-accent shadow-[0_0_15px_rgba(0,255,148,0.25)]' : 'bg-white/5 border-white/10 hover:bg-accent/10 hover:border-accent hover:text-accent'}`}
+              title={`${isSidebarOpen ? "Désancrer (Rendre flottant / auto-rétractable)" : "Ancrer (Garder toujours ouvert)"} le volet [Alt + ${customShortcuts.toggleSidebar.toUpperCase()}]`}
             >
-              {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+              <Pin size={18} className={`transition-all duration-300 ${isSidebarOpen ? 'rotate-45 text-accent scale-110' : 'text-white/60 group-hover:text-accent group-hover:scale-110'}`} />
+              {isSidebarOpen && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent animate-pulse" />
+              )}
             </button>
             
             <button 
@@ -9208,29 +10567,64 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             >
               <Settings size={20} className={activeTab === 'system' ? 'rotate-90' : 'group-hover:rotate-90 transition-transform duration-500'} />
             </button>
+
+            <button 
+              onClick={() => setShowShortcutsHelpModal(true)}
+              className={`w-12 h-12 border rounded-lg flex items-center justify-center transition-all active:scale-95 group relative shadow-2xl ${showShortcutsHelpModal ? 'bg-accent border-accent text-black shadow-[0_0_20px_rgba(0,255,148,0.3)]' : 'bg-white/5 border-white/10 hover:bg-accent/10 hover:border-accent hover:text-accent'}`}
+              title="Raccourcis Clavier & Productivité [Ctrl/Shift+Q]"
+            >
+              <Keyboard size={20} className={showShortcutsHelpModal ? 'scale-110' : 'group-hover:scale-110 transition-transform duration-300'} />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-accent animate-ping" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-accent" />
+            </button>
           </div>
         </header>
 
         <div className="flex-1 overflow-hidden relative">
           <AnimatePresence>
-            {isSidebarOpen && (
+            {isSidebarVisuallyOpen && (
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                onClick={() => setIsSidebarOpen(false)}
+                onClick={() => {
+                  setIsSidebarOpen(false);
+                  setIsSidebarHovered(false);
+                }}
                 className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] lg:hidden"
               />
             )}
           </AnimatePresence>
 
           <div className="flex h-full overflow-hidden">
+            {activeTab !== 'system' && !isSidebarVisuallyOpen && (
+              <div 
+                onMouseEnter={() => setIsSidebarHovered(true)}
+                className="fixed inset-y-0 left-0 w-3 z-[109] bg-gradient-to-r from-accent/5 to-transparent hover:from-accent/15 hover:w-5 transition-all duration-300 cursor-w-resize flex items-center justify-center group"
+                title={`Approcher le curseur pour déplier [Alt + ${customShortcuts.toggleSidebar.toUpperCase()}]`}
+              >
+                <div className="w-1.5 h-24 rounded-full bg-accent/25 group-hover:bg-accent/60 shadow-[0_0_10px_rgba(0,255,148,0.25)] group-hover:scale-y-125 transition-all duration-300" />
+              </div>
+            )}
+
             {/* Main Input Form - Responsive Volet */}
             {activeTab !== 'system' && (
-              <aside className={`
-                fixed lg:relative inset-y-0 left-0 bg-[#0A0A0A] border-r border-border space-y-8 overflow-y-auto overflow-x-hidden custom-scrollbar z-[110] transition-all duration-500 ease-in-out
-                ${isSidebarOpen ? 'w-full max-w-[450px] translate-x-0 p-10 opacity-100' : 'w-0 translate-x-[-100%] p-0 opacity-0 border-none'}
-              `}>
+              <aside 
+                onMouseEnter={() => {
+                  if (!isSidebarOpen) {
+                    setIsSidebarHovered(true);
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (!isSidebarOpen) {
+                    setIsSidebarHovered(false);
+                  }
+                }}
+                className={`
+                  fixed lg:relative inset-y-0 left-0 bg-[#0A0A0A] border-r border-border space-y-8 overflow-y-auto overflow-x-hidden custom-scrollbar z-[110] transition-all duration-500 ease-in-out
+                  ${isSidebarVisuallyOpen ? 'w-full max-w-[450px] translate-x-0 p-10 opacity-100' : 'w-0 translate-x-[-100%] p-0 opacity-0 border-none'}
+                `}
+              >
                 <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl mb-6">
                   <button 
                     onClick={() => setSidebarTab('production')}
@@ -9674,6 +11068,35 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       })}
                     </div>
                   )}
+                  {(cat.id === 'argument' || cat.id === 'univers') && (
+                    <div className="mt-3 flex items-center gap-2 pt-2 border-t border-white/5">
+                      <input 
+                        type="text"
+                        placeholder={`+ Ajouter ${cat.name.toLowerCase()}...`}
+                        value={quickAddInputs[cat.id] || ''}
+                        onChange={(e) => setQuickAddInputs(prev => ({ ...prev, [cat.id]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddCategoryItem(cat.id);
+                          }
+                        }}
+                        className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-1.5 text-[11px] text-white outline-none focus:border-accent transition-all h-[34px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAddCategoryItem(cat.id)}
+                        className={`px-3 py-1.5 rounded-md border text-[10px] font-black tracking-wider uppercase h-[34px] flex items-center gap-1.5 transition-all bg-white/5 active:scale-95 ${
+                          cat.colorRef === 'accent-blue' ? 'border-accent-blue/30 text-accent-blue hover:bg-accent-blue/10 hover:border-accent-blue' :
+                          cat.colorRef === 'accent-purple' ? 'border-accent-purple/30 text-accent-purple hover:bg-accent-purple/10 hover:border-accent-purple' :
+                          'border-white/20 text-white hover:bg-white/10'
+                        }`}
+                      >
+                        <Plus size={10} />
+                        <span>Ajouter</span>
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               )}
               </AnimatePresence>
@@ -10062,21 +11485,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <Save size={14} />
               </button>
               <button 
-                onClick={() => document.getElementById('json-sys-file-import')?.click()}
-                className="w-full flex items-center justify-between p-3 border border-border rounded-md text-text-dim hover:text-white hover:border-accent-blue transition-colors"
-              >
-                <span className="text-[11px] font-bold uppercase tracking-wider text-accent-blue">Import JSON</span>
-                <Upload size={14} className="text-accent-blue" />
-              </button>
-               <button 
-                onClick={copyToExcel}
-                disabled={missions.length === 0}
-                className="w-full flex items-center justify-between p-3 border border-border rounded-md text-text-dim hover:text-white transition-colors disabled:opacity-30"
-              >
-                <span className="text-[11px] font-bold uppercase tracking-wider">Copier pour Excel</span>
-                {copied ? <Check size={14} className="text-accent" /> : <Copy size={14} />}
-              </button>
-              <button 
                 onClick={() => { setMissions([]); setMissionCounter(1); }}
                 disabled={missions.length === 0}
                 className="w-full flex items-center justify-between p-3 border border-border rounded-md text-text-dim hover:text-red-400 transition-colors disabled:opacity-30"
@@ -10089,7 +11497,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         )}
 
           {/* Table Section */}
-          <main className="p-10 bg-[#0F0F0F] overflow-y-auto custom-scrollbar relative space-y-12">
+          <main className="flex-1 p-10 bg-[#0F0F0F] overflow-y-auto custom-scrollbar relative space-y-12">
             <div className="absolute top-0 right-0 w-64 h-64 bg-accent-purple/5 blur-[100px] rounded-full -z-10"></div>
             <div className="absolute bottom-0 left-0 w-64 h-64 bg-accent-blue/5 blur-[100px] rounded-full -z-10"></div>
 
@@ -10161,7 +11569,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
                           className="absolute top-full left-0 mt-2 w-48 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-2xl z-[101] overflow-hidden backdrop-blur-xl"
                         >
-                            {tabs.map((tab) => (
+                            {tabs.map((tab, idx) => (
                               <button
                                 key={tab.id}
                                 onClick={() => {
@@ -10172,7 +11580,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               >
                                 <tab.icon size={12} className={activeTab === tab.id ? 'text-accent' : ''} />
                                 <span style={activeTab === tab.id ? { color: navActiveColor } : {}}>{tab.label}</span>
-                                {activeTab === tab.id && <Check size={12} className="ml-auto text-accent" />}
+                                <span className="text-[8px] font-mono px-1 py-0.5 rounded bg-white/5 text-white/30 ml-auto">Ctrl+{idx + 1}</span>
+                                {activeTab === tab.id && <Check size={12} className="ml-1 text-accent" />}
                               </button>
                             ))}
                           </motion.div>
@@ -10182,7 +11591,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                   {/* Version Desktop : Rail Horizontal (Initial) */}
                   <div className="hidden md:flex items-center p-1 bg-white/5 border border-white/10 rounded-xl overflow-x-auto overflow-y-hidden custom-scrollbar max-w-full">
-                    {tabs.map((tab) => (
+                    {tabs.map((tab, idx) => (
                       <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as any)}
@@ -10194,7 +11603,14 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         style={activeTab === tab.id ? { backgroundColor: navActiveColor, color: 'black' } : {}}
                       >
                         <tab.icon size={12} />
-                        {tab.label}
+                        <span>{tab.label}</span>
+                        <kbd className={`text-[8px] font-mono px-1 py-0.5 rounded ${
+                          activeTab === tab.id 
+                            ? 'bg-black/15 text-black/60 border-black/10' 
+                            : 'bg-white/5 text-white/30 border-white/5'
+                        } border`}>
+                          Ctrl+{idx + 1}
+                        </kbd>
                       </button>
                     ))}
                   </div>
@@ -10279,10 +11695,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             onClick={captureAsJPEG}
                             disabled={isCapturing}
                             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[9px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed disabled:opacity-50"
-                            title="Sauvegarder toutes les données en JPEG"
+                            title="Sauvegarder toutes les données en JPEG [Alt+P]"
                           >
                             {isCapturing ? <Loader2 size={10} className="animate-spin" /> : <ImageIcon size={10} />}
-                            {isCapturing ? 'Capture...' : 'EXP. JPEG'}
+                            {isCapturing ? 'Capture...' : 'EXP. JPEG [Alt+P]'}
                           </button>
 
                           <button 
@@ -10389,9 +11805,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           ? 'bg-accent-blue text-black border-accent-blue' 
                           : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
                       }`}
+                      title="Afficher/Masquer Filtres [Alt+R]"
                     >
                       <Filter size={12} />
-                      {isFilterVisible ? 'Masquer Filtres' : 'Filtres'}
+                      {isFilterVisible ? 'Masquer Filtres' : 'Filtres [Alt+R]'}
                     </button>
 
                     <div className="relative">
@@ -10604,35 +12021,35 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                        <button 
                          onClick={() => setViewMode('table')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'table' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Ligne (Table)"
+                         title="Mode Ligne (Table) [Alt+L]"
                        >
                          <List size={14} />
                        </button>
                        <button 
                          onClick={() => setViewMode('mosaic')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'mosaic' || viewMode === 'grid' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Mosaïque (Grille)"
+                         title="Mode Mosaïque (Grille) [Alt+G]"
                        >
                          <LayoutGrid size={14} />
                        </button>
                        <button 
                          onClick={() => setViewMode('task')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'task' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Task"
+                         title="Mode Task [Alt+T]"
                        >
                          <CheckSquare size={14} />
                        </button>
                        <button 
                          onClick={() => setViewMode('calendar')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'calendar' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Calendrier"
+                         title="Mode Calendrier [Alt+C]"
                        >
                          <Calendar size={14} />
                        </button>
                        <button 
                          onClick={() => setViewMode('family')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'family' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Familles & Sous-Familles"
+                         title="Mode Familles & Sous-Familles [Alt+F]"
                        >
                          <Layers size={14} />
                        </button>
@@ -10670,6 +12087,16 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         }}
                       />
                     </div>
+
+                    <button 
+                      id="add-family-btn"
+                      onClick={() => setShowAddFamilyModal(true)}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-accent-purple/10 border border-accent-purple/30 hover:border-accent-purple/60 text-accent-purple rounded-md text-[10px] font-black uppercase tracking-widest transition-all hover:bg-accent-purple/20 cursor-pointer h-[38px] sm:h-[40px]"
+                      title="Ajouter une nouvelle famille"
+                    >
+                      <Plus size={12} />
+                      Ajouter Famille
+                    </button>
                   </div>
                 </div>
               )}
@@ -10754,10 +12181,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               <Search size={10} /> Recherche
                             </label>
                             <input 
+                              id="search-input"
                               type="text" 
                               value={filterQuery}
                               onChange={(e) => setFilterQuery(e.target.value)}
-                              placeholder="Rechercher produit, ref..."
+                              placeholder="Rechercher produit, ref... [Alt+S]"
                               className="w-full bg-black/40 border border-white/10 p-2.5 rounded text-sm text-white outline-none focus:border-accent-blue transition-all h-[42px]"
                             />
                           </div>
@@ -11599,12 +13027,16 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 refIdColor={refIdColor}
                 isDeadlineApproaching={isDeadlineApproaching}
                 onRenameFamily={renameFamily}
+                onDeleteFamily={deleteFamily}
                 onToggleMissionEnabled={toggleMissionEnabled}
                 onToggleAllMissionsInFamily={toggleAllMissionsInFamily}
                 onToggleAllMissionsInSubFamily={toggleAllMissionsInSubFamily}
                 onMoveSubFamilyToFamily={moveSubFamilyToFamily}
                 onMoveMultipleSubFamilies={moveMultipleSubFamiliesToFamily}
-                allFamilies={categories.find(c => c.id === 'family')?.items || ['AT', 'PUNT', 'HARD PRO', 'PWB', 'SBIN', 'Portraits', 'Autre']}
+                allFamilies={Array.from(new Set([
+                  ...manuallyCreatedFamilies,
+                  ...filteredMissions.map(m => m.family || deduceFamily(m.product) || 'Autre').filter(Boolean)
+                ]))}
                 selectedMissionIds={selectedMissionIds}
                 setSelectedMissionIds={setSelectedMissionIds}
                 onToggleSelectMission={toggleSelectMission}
@@ -11617,6 +13049,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 setToast={setToast}
                 retractedIndicators={retractedIndicators}
                 setRetractedIndicators={setRetractedIndicators}
+                googleToken={googleToken}
+                pushMissionsToCalendar={pushMissionsToCalendar}
+                pushMissionsToTasks={pushMissionsToTasks}
+                customFamilyOrder={customFamilyOrder}
+                setCustomFamilyOrder={setCustomFamilyOrder}
+                accentPurpleColor={accentPurpleColor}
+                accentPinkColor={accentPinkColor}
               />
             )}
             </>
@@ -12496,6 +13935,136 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           </div>
         )}
 
+        {/* Shortcuts Help Modal */}
+        {showShortcutsHelpModal && (
+          <div key="shortcuts-help-modal-container" className="fixed inset-0 z-[700] flex items-center justify-center p-4">
+            <motion.div 
+              key="shortcuts-help-backdrop"
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => setShowShortcutsHelpModal(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              key="shortcuts-help-content"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-card-bg border border-white/10 p-6 md:p-8 rounded-3xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-accent/20 flex items-center justify-center text-accent shadow-[0_0_15px_rgba(0,255,148,0.15)]">
+                    <Keyboard size={24} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold font-serif italic text-white">Centre de Productivité</h2>
+                    <p className="text-[10px] text-text-dim uppercase tracking-widest mt-0.5">
+                      Raccourcis clavier globaux & Navigation rapide
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowShortcutsHelpModal(false)}
+                  className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all active:scale-95"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                {/* Navigation Section */}
+                <div className="bg-black/20 rounded-2xl border border-white/5 p-4 flex flex-col">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-accent mb-4 flex items-center gap-2 pb-2 border-b border-white/5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+                    Navigation Principale
+                  </h3>
+                  <div className="space-y-3">
+                    {[
+                      { key: `Ctrl + ${customShortcuts.tabTable.toUpperCase()}`, desc: "Basculer vers l'onglet Production (Tableau)" },
+                      { key: `Ctrl + ${customShortcuts.tabDashboard.toUpperCase()}`, desc: "Basculer vers l'onglet Dashboard (Analytique)" },
+                      { key: `Ctrl + ${customShortcuts.tabInventory.toUpperCase()}`, desc: "Basculer vers l'onglet Inventaire" },
+                      { key: `Ctrl + ${customShortcuts.tabJournal.toUpperCase()}`, desc: "Basculer vers l'onglet Journal de bord (Logs)" },
+                      { key: `Ctrl + ${customShortcuts.tabSystem.toUpperCase()}`, desc: "Basculer vers l'onglet Configuration Système" }
+                    ].map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between py-1.5 border-b border-white/[0.02]">
+                        <span className="text-xs text-white/70">{item.desc}</span>
+                        <kbd className="text-[10px] font-mono px-2 py-1 rounded bg-white/5 text-accent border border-white/10 shadow-inner">
+                          {item.key}
+                        </kbd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* View Modes Section */}
+                <div className="bg-black/20 rounded-2xl border border-white/5 p-4 flex flex-col">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-accent-blue mb-4 flex items-center gap-2 pb-2 border-b border-white/5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent-blue" />
+                    Modes d'Affichage (Table)
+                  </h3>
+                  <div className="space-y-3">
+                    {[
+                      { key: `Alt + ${customShortcuts.viewTable.toUpperCase()}`, desc: "Mode Ligne classique (Tableau principal)" },
+                      { key: `Alt + ${customShortcuts.viewMosaic.toUpperCase()}`, desc: "Mode Mosaïque (Vue Grille d'images)" },
+                      { key: `Alt + ${customShortcuts.viewTask.toUpperCase()}`, desc: "Mode Task (Vue Tâches)" },
+                      { key: `Alt + ${customShortcuts.viewCalendar.toUpperCase()}`, desc: "Mode Calendrier (Planning & Échéances)" },
+                      { key: `Alt + ${customShortcuts.viewFamily.toUpperCase()}`, desc: "Mode Familles & Sous-Familles" }
+                    ].map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between py-1.5 border-b border-white/[0.02]">
+                        <span className="text-xs text-white/70">{item.desc}</span>
+                        <kbd className="text-[10px] font-mono px-2 py-1 rounded bg-white/5 text-accent-blue border border-white/10 shadow-inner">
+                          {item.key}
+                        </kbd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Actions & Toggles Section */}
+                <div className="bg-black/20 rounded-2xl border border-white/5 p-4 md:col-span-2 flex flex-col">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-accent-purple mb-4 flex items-center gap-2 pb-2 border-b border-white/5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent-purple" />
+                    Actions Rapides & Toggles
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+                    {[
+                      { key: `Alt + ${customShortcuts.focusSearch.toUpperCase()}`, desc: "Focus immédiat sur la barre de recherche" },
+                      { key: `Alt + ${customShortcuts.toggleFilters.toUpperCase()}`, desc: "Afficher ou Masquer le panneau de filtres" },
+                      { key: `Alt + ${customShortcuts.toggleMiddle.toUpperCase()}`, desc: "Afficher ou Masquer les graphiques hebdomadaires/mensuels" },
+                      { key: `Alt + ${customShortcuts.exportJpeg.toUpperCase()}`, desc: "Exporter l'ensemble du rapport de production en JPEG" },
+                      { key: `Alt + ${customShortcuts.toggleWeekly.toUpperCase()}`, desc: "Déplier/Replier l'évolution hebdomadaire (dans Dashboard)" },
+                      { key: `Alt + ${customShortcuts.toggleMonthly.toUpperCase()}`, desc: "Déplier/Replier l'évolution mensuelle (dans Dashboard)" },
+                      { key: `Alt + ${customShortcuts.toggleSidebar.toUpperCase()}`, desc: "Ancrer / Désancrer le volet de configuration de mission" },
+                      { key: `Alt + ${customShortcuts.exportJson.toUpperCase()}`, desc: "Sauvegarder / Exporter les données au format .json" },
+                      { key: `Alt + ${customShortcuts.importJson.toUpperCase()}`, desc: "Charger / Importer un fichier de sauvegarde .json" },
+                      { key: `Ctrl + ${customShortcuts.help.toUpperCase()} / Shift + ${customShortcuts.help.toUpperCase()}`, desc: "Afficher / Masquer ce Centre de productivité" }
+                    ].map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between py-1.5 border-b border-white/[0.02] last:border-0">
+                        <span className="text-xs text-white/70 mr-4">{item.desc}</span>
+                        <kbd className="text-[10px] font-mono px-2 py-1 rounded bg-white/5 text-accent-purple border border-white/10 shadow-inner whitespace-nowrap">
+                          {item.key}
+                        </kbd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between bg-accent/5 border border-accent/20 p-4 rounded-2xl">
+                <div className="flex items-center gap-3 flex-1">
+                  <HelpCircle size={18} className="text-accent shrink-0" />
+                  <p className="text-xs text-white/80 leading-relaxed">
+                    Utilisez ces raccourcis clavier à tout moment pour naviguer à vitesse grand V. 
+                    Appuyez sur <kbd className="text-[10px] font-mono px-1 py-0.5 rounded bg-white/10 border border-white/15 text-accent">Ctrl + {customShortcuts.help.toUpperCase()}</kbd> ou <kbd className="text-[10px] font-mono px-1 py-0.5 rounded bg-white/10 border border-white/15 text-accent">Shift + {customShortcuts.help.toUpperCase()}</kbd> pour fermer cette aide.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {/* Confirmation Modal for Cleaning Duplicates */}
         {showCleanDuplicatesModal && (
           <div key="clean-duplicates-modal-container" className="fixed inset-0 z-[700] flex items-center justify-center p-4">
@@ -12591,6 +14160,103 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               </motion.div>
             </div>
           )}
+
+        {/* Modal for adding a new family */}
+        {showAddFamilyModal && (
+          <div key="add-family-modal-container" className="fixed inset-0 z-[750] flex items-center justify-center p-4">
+            <motion.div 
+              key="add-family-backdrop"
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setShowAddFamilyModal(false);
+                setNewFamilyName('');
+              }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              key="add-family-content"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-card-bg border border-white/10 p-6 rounded-3xl shadow-2xl max-w-md w-full"
+            >
+              <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-accent-purple/20 flex items-center justify-center text-accent-purple">
+                    <Plus size={16} />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold font-serif italic text-white">Ajouter une Famille</h2>
+                    <p className="text-[10px] text-text-dim uppercase tracking-wider">
+                      Créer une nouvelle catégorie de produit
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setShowAddFamilyModal(false);
+                    setNewFamilyName('');
+                  }}
+                  className="p-1 hover:bg-white/5 rounded-lg text-text-dim hover:text-white transition-all animate-none"
+                  id="close-add-family-modal"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-4 pt-2">
+                <div className="space-y-2">
+                  <label htmlFor="newFamilyInput" className="text-[10px] text-text-dim uppercase tracking-wider block">Nom de la famille :</label>
+                  <input
+                    id="newFamilyInput"
+                    type="text"
+                    value={newFamilyName}
+                    onChange={(e) => setNewFamilyName(e.target.value)}
+                    placeholder="Ex: AT, PUNT, PORTRAITS, etc."
+                    className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs text-white outline-none focus:border-accent-purple transition-all"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (newFamilyName.trim()) {
+                          addFamily(newFamilyName);
+                          setShowAddFamilyModal(false);
+                          setNewFamilyName('');
+                        }
+                      }
+                    }}
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-3 border-t border-white/5">
+                  <button 
+                    onClick={() => {
+                      setShowAddFamilyModal(false);
+                      setNewFamilyName('');
+                    }}
+                    className="flex-1 py-2 bg-white/5 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all border border-white/10"
+                  >
+                    Annuler
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (!newFamilyName.trim()) return;
+                      addFamily(newFamilyName);
+                      setShowAddFamilyModal(false);
+                      setNewFamilyName('');
+                    }}
+                    disabled={!newFamilyName.trim()}
+                    className="flex-1 py-2 bg-accent-purple text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-purple-600 transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Ajouter
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
         {isBulkDeleteModalOpen && (
           <div key="bulk-delete-modal-container">
             <motion.div 
@@ -13779,12 +15445,26 @@ function MissionDetailModal({
         <div className="max-h-[85vh] overflow-y-auto p-10 custom-scrollbar" id="mission-detail-content">
           <div className="flex justify-between items-start mb-8 print:mb-12 border-b border-white/5 pb-8">
             <div className="flex items-center gap-6">
-              <div className="relative">
+              <div className="relative print:hidden">
+                <button
+                  type="button"
+                  onClick={() => onUpdate(mission.id, { enabled: !mission.enabled })}
+                  className="w-16 h-16 border-2 flex items-center justify-center bg-accent/5 transition-all cursor-pointer relative group"
+                  style={{ borderColor: mission.enabled ? 'var(--color-accent)' : 'rgba(255,255,255,0.1)' }}
+                  title={mission.enabled ? "Désactiver la mission" : "Activer la mission"}
+                >
+                  <Box size={32} className={mission.enabled ? 'text-accent' : 'text-white/30'} />
+                  <div className={`absolute -bottom-2 -right-2 text-[8px] font-black px-1.5 py-0.5 uppercase tracking-tighter transition-colors ${mission.enabled ? 'bg-accent text-black' : 'bg-white/10 text-white/50'}`}>
+                    {mission.enabled ? 'Active' : 'Inactive'}
+                  </div>
+                </button>
+              </div>
+              <div className="hidden print:block relative">
                 <div className="w-16 h-16 border-2 border-accent/30 flex items-center justify-center text-accent bg-accent/5">
                   <Box size={32} />
                 </div>
                 <div className="absolute -bottom-2 -right-2 bg-accent text-black text-[8px] font-black px-1.5 py-0.5 uppercase tracking-tighter">
-                  Active
+                  {mission.enabled ? 'Active' : 'Inactive'}
                 </div>
               </div>
               <div>
@@ -14162,6 +15842,15 @@ function MissionDetailModal({
                   État Temps Réel
                 </h3>
                 <div className="p-6 bg-app-bg border border-white/10 space-y-4">
+                  <div className="flex justify-between items-center pb-2 border-b border-white/5 mb-1">
+                    <span className="text-[10px] font-black uppercase text-text-dim tracking-widest">Activation de la Mission</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-mono font-bold uppercase ${mission.enabled ? 'text-accent' : 'text-white/30'}`}>
+                        {mission.enabled ? 'Actif' : 'Inactif'}
+                      </span>
+                      <Toggle enabled={mission.enabled} onToggle={(e) => { e.stopPropagation(); onUpdate(mission.id, { enabled: !mission.enabled }); }} />
+                    </div>
+                  </div>
                   <div className="flex justify-between items-end">
                     <span className="text-[10px] font-black uppercase text-text-dim tracking-widest">Progression</span>
                     <span className="text-2xl font-mono text-accent">{mission.progress}%</span>
@@ -14551,6 +16240,7 @@ interface FamilyGroupViewProps {
   refIdColor: any;
   isDeadlineApproaching: (deadlineStr?: string) => boolean;
   onRenameFamily: (oldName: string, newName: string) => void;
+  onDeleteFamily?: (famName: string, definitive?: boolean) => void;
   onToggleMissionEnabled: (id: string, e: React.MouseEvent) => void;
   onToggleAllMissionsInFamily: (famName: string, enabled: boolean) => void;
   onToggleAllMissionsInSubFamily: (famName: string, productName: string, colorName: string, enabled: boolean) => void;
@@ -14569,6 +16259,13 @@ interface FamilyGroupViewProps {
   setToast: React.Dispatch<React.SetStateAction<{ show: boolean, message: string, type: string }>>;
   retractedIndicators: boolean;
   setRetractedIndicators: (val: boolean) => void;
+  googleToken?: string;
+  pushMissionsToCalendar?: (ids: string[]) => Promise<void>;
+  pushMissionsToTasks?: (ids: string[]) => Promise<void>;
+  customFamilyOrder: string[];
+  setCustomFamilyOrder: React.Dispatch<React.SetStateAction<string[]>>;
+  accentPurpleColor: string;
+  accentPinkColor: string;
 }
 
 function FamilyGroupView({
@@ -14577,6 +16274,7 @@ function FamilyGroupView({
   refIdColor,
   isDeadlineApproaching,
   onRenameFamily,
+  onDeleteFamily,
   onToggleMissionEnabled,
   onToggleAllMissionsInFamily,
   onToggleAllMissionsInSubFamily,
@@ -14595,44 +16293,24 @@ function FamilyGroupView({
   setToast,
   retractedIndicators,
   setRetractedIndicators,
+  googleToken,
+  pushMissionsToCalendar,
+  pushMissionsToTasks,
+  customFamilyOrder,
+  setCustomFamilyOrder,
+  accentPurpleColor,
+  accentPinkColor,
 }: FamilyGroupViewProps) {
   // Only group main missions (filteredMissions). Let's make sure we filter out secondary tasks
   const missionsByFamily: Record<string, Record<string, Mission[]>> = {};
 
   const [selectedSubFams, setSelectedSubFams] = useState<string[]>([]);
 
-  // Effect to automatically retract/clear subfamily selections when clicking outside
-  useEffect(() => {
-    function handleGlobalClick(event: MouseEvent) {
-      if (selectedSubFams.length === 0) return;
-      
-      const target = event.target as HTMLElement;
-      
-      const isInsideKeepZone = 
-        target.closest('.family-view') || 
-        target.closest('.bulk-action-bar') ||
-        target.closest('.modal-content') ||
-        target.closest('.sidebar-container') ||
-        target.closest('.header-container') ||
-        target.closest('.floating-chat-container') ||
-        target.closest('button') || 
-        target.closest('a') ||
-        target.closest('input') ||
-        target.closest('select') ||
-        target.closest('[role="button"]') ||
-        target.closest('.custom-scrollbar') ||
-        target.closest('header');
-                                 
-      if (!isInsideKeepZone) {
-        setSelectedSubFams([]);
-      }
-    }
-    document.addEventListener('mousedown', handleGlobalClick);
-    return () => document.removeEventListener('mousedown', handleGlobalClick);
-  }, [selectedSubFams]);
+  // Selections are kept fully persistent. Deselection is manual via 'Tout désélectionner' to avoid accidental losses while scrolling or dragging.
 
   const [draggedOverFamName, setDraggedOverFamName] = useState<string | null>(null);
   const [draggedOverSubFam, setDraggedOverSubFam] = useState<string | null>(null);
+  const [familyToDelete, setFamilyToDelete] = useState<string | null>(null);
 
   // Inline editing state for subfamily product/color
   const [editingSubFam, setEditingSubFam] = useState<{ fam: string; product: string; color: string; field: 'product' | 'color' } | null>(null);
@@ -14641,6 +16319,19 @@ function FamilyGroupView({
   // Inline editing state for mission refId
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
   const [editRefIdValue, setEditRefIdValue] = useState<string>('');
+
+  // Focus mode state for a family
+  const [focusedFamily, setFocusedFamily] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && focusedFamily) {
+        setFocusedFamily(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [focusedFamily]);
 
   const handleSaveProduct = (fam: string, oldProduct: string, color: string, newProduct: string) => {
     const val = newProduct.trim();
@@ -14867,16 +16558,47 @@ function FamilyGroupView({
 
   const toggleSubFamilySelection = (fam: string, productName: string, colorName: string) => {
     const key = `${fam}|${productName}|${colorName}`;
+    const subFamMissions = filteredMissions.filter(m => {
+      const currentFam = m.family || deduceFamily(m.product) || 'Autre';
+      const mColor = m.color || 'Sans couleur';
+      return currentFam === fam && m.product === productName && mColor === colorName;
+    });
+    const activeSubFamMissionIds = subFamMissions.filter(m => m.enabled).map(m => m.id);
+
+    const willBeSelected = !selectedSubFams.includes(key);
+
     setSelectedSubFams(prev => 
-      prev.includes(key) 
-        ? prev.filter(k => k !== key) 
-        : [...prev, key]
+      willBeSelected 
+        ? [...prev, key]
+        : prev.filter(k => k !== key)
     );
+
+    if (willBeSelected) {
+      // Add all active (enabled) missions to selectedMissionIds
+      const uniqueIds = new Set([...selectedMissionIds, ...activeSubFamMissionIds]);
+      setSelectedMissionIds(Array.from(uniqueIds));
+    } else {
+      // Remove all missions of this subfamily from selectedMissionIds
+      const allSubFamMissionIds = subFamMissions.map(m => m.id);
+      setSelectedMissionIds(selectedMissionIds.filter(id => !allSubFamMissionIds.includes(id)));
+    }
   };
 
   const isSubFamilySelected = (fam: string, productName: string, colorName: string) => {
     return selectedSubFams.includes(`${fam}|${productName}|${colorName}`);
   };
+
+  // Initialize with all existing families from configuration/allFamilies to ensure empty families display as well
+  if (allFamilies && Array.isArray(allFamilies)) {
+    allFamilies.forEach((fam) => {
+      if (fam && fam.trim()) {
+        const trimmed = fam.trim();
+        if (!missionsByFamily[trimmed]) {
+          missionsByFamily[trimmed] = {};
+        }
+      }
+    });
+  }
 
   filteredMissions.forEach((m) => {
     // Find or deduce the family
@@ -14892,7 +16614,18 @@ function FamilyGroupView({
     missionsByFamily[famName][subFamKey].push(m);
   });
 
-  const familiesList = Object.keys(missionsByFamily).sort();
+  const familiesList = Object.keys(missionsByFamily).sort((a, b) => {
+    const indexA = customFamilyOrder.indexOf(a);
+    const indexB = customFamilyOrder.indexOf(b);
+    
+    if (indexA !== -1 && indexB !== -1) {
+      return indexA - indexB;
+    }
+    if (indexA !== -1) return -1;
+    if (indexB !== -1) return 1;
+    
+    return a.localeCompare(b);
+  });
 
   const [collapsedFams, setCollapsedFams] = useState<Record<string, boolean>>(() => {
     try {
@@ -15032,7 +16765,7 @@ function FamilyGroupView({
               </div>
 
               {/* Action grid / options */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Section 1: Déplacer */}
                 <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col gap-2">
                   <span className="text-[9px] font-black text-text-dim/80 uppercase tracking-widest block mb-1">
@@ -15172,6 +16905,56 @@ function FamilyGroupView({
                   >
                     Valider l'activation
                   </button>
+                </div>
+
+                {/* Section 4: Synchronisation Google */}
+                <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col justify-between gap-3">
+                  <div>
+                    <span className="text-[9px] font-black text-[#4285F4] uppercase tracking-widest block mb-1">
+                      🌐 Google Workspace :
+                    </span>
+                    <p className="text-[8px] text-text-dim/60 leading-normal uppercase">
+                      Synchronisez instantanément les missions sélectionnées avec Google Agenda ou Google Tasks.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={!googleToken}
+                      onClick={() => {
+                        if (pushMissionsToTasks) {
+                          pushMissionsToTasks(getTargetMissionIds());
+                        }
+                      }}
+                      className={`flex-1 py-1.5 border text-[8px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                        googleToken 
+                          ? 'border-[#4285F4]/30 bg-[#4285F4]/10 text-[#4285F4] hover:bg-[#4285F4]/20 cursor-pointer'
+                          : 'border-white/5 bg-white/5 text-white/20 cursor-not-allowed'
+                      }`}
+                      title={googleToken ? "Créer des tâches Google Tasks pour ces missions" : "Connectez-vous à Google pour synchroniser"}
+                    >
+                      + Tasks
+                    </button>
+                    <button
+                      disabled={!googleToken}
+                      onClick={() => {
+                        if (pushMissionsToCalendar) {
+                          pushMissionsToCalendar(getTargetMissionIds());
+                        }
+                      }}
+                      className={`flex-1 py-1.5 border text-[8px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                        googleToken 
+                          ? 'border-[#34A853]/30 bg-[#34A853]/10 text-[#34A853] hover:bg-[#34A853]/20 cursor-pointer'
+                          : 'border-white/5 bg-white/5 text-white/20 cursor-not-allowed'
+                      }`}
+                      title={googleToken ? "Créer des événements Agenda pour ces missions" : "Connectez-vous à Google pour synchroniser"}
+                    >
+                      + Agenda
+                    </button>
+                  </div>
+
+                  <div className="text-[7px] text-text-dim/40 text-center uppercase font-mono tracking-wider">
+                    {googleToken ? 'Compte Google Connecté' : 'Google non connecté'}
+                  </div>
                 </div>
               </div>
             </div>
@@ -15322,7 +17105,31 @@ function FamilyGroupView({
                   setDraggedOverFamName(null);
                   const dragData = e.dataTransfer.getData("text/plain");
                   if (dragData) {
-                    if (dragData.startsWith("MISSION|")) {
+                    if (dragData.startsWith("FAMILY|")) {
+                      const [, draggedFamName] = dragData.split('|');
+                      if (draggedFamName !== fam) {
+                        setCustomFamilyOrder(prev => {
+                          const currentFams = [...familiesList];
+                          const filtered = currentFams.filter(f => f !== draggedFamName);
+                          const targetIdx = filtered.indexOf(fam);
+                          filtered.splice(targetIdx, 0, draggedFamName);
+                          localStorage.setItem('customFamilyOrder', JSON.stringify(filtered));
+                          return filtered;
+                        });
+                        setToast({
+                          show: true,
+                          message: `Famille "${draggedFamName}" déplacée !`,
+                          type: 'task'
+                        });
+                        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                        setGlobalLogs(prev => [...prev, {
+                          id: Math.random().toString(36).substring(2, 9),
+                          timestamp: Date.now(),
+                          message: `FAMILLE : Réorganisation de la famille "${draggedFamName}" vers la position de "${fam}".`,
+                          type: 'manual'
+                        }]);
+                      }
+                    } else if (dragData.startsWith("MISSION|")) {
                       const [, srcFam, mId] = dragData.split('|');
                       if (srcFam !== fam) {
                         if (selectedMissionIds.includes(mId)) {
@@ -15368,9 +17175,34 @@ function FamilyGroupView({
                 {/* Family Accordion Header */}
                 <div 
                   onClick={() => toggleFam(fam)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setFocusedFamily(fam);
+                  }}
                   className="flex items-center justify-between p-4 bg-white/5 hover:bg-white/[0.08] transition-all cursor-pointer select-none border-b border-white/5"
+                  style={{
+                    backgroundColor: activeFamilyMissionsCount > 0
+                      ? hexToRgba(accentPurpleColor, 0.15)
+                      : undefined
+                  }}
+                  title="Double-cliquer pour ouvrir en Focus Mode (Plein écran)"
                 >
                   <div className="flex items-center gap-4 flex-wrap">
+                    {/* Drag Handle Button with 3 lines */}
+                    <div 
+                      draggable
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", `FAMILY|${fam}`);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-white/40 hover:text-accent-purple cursor-grab active:cursor-grabbing p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-accent-purple/30 transition-all shrink-0 flex items-center justify-center mr-1"
+                      title="Glisser-déposer pour réorganiser la famille (3 traits)"
+                    >
+                      <Menu size={14} className="stroke-[2.5]" />
+                    </div>
+
                     {editingFam === fam ? (
                       <div 
                         className="flex items-center gap-2"
@@ -15425,6 +17257,20 @@ function FamilyGroupView({
                         >
                           <Edit2 size={10} />
                         </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFocusedFamily(fam);
+                          }}
+                          className="p-1 text-accent-purple hover:text-white bg-white/0 hover:bg-white/10 rounded transition-all opacity-0 group-hover/fam-header:opacity-100 animate-fade-in flex items-center gap-1 text-[8px] font-black uppercase tracking-wider"
+                          title="Ouvrir en Focus Mode (Plein écran)"
+                        >
+                          <Zap size={10} className="text-accent-purple" />
+                          <span className="hidden sm:inline">Focus</span>
+                        </button>
+                        <span className="text-[8px] font-mono font-bold text-accent-purple/40 group-hover/fam-header:text-accent-purple/70 transition-all ml-1 uppercase tracking-wider hidden md:inline">
+                          (Double-clic pour Plein Écran)
+                        </span>
                       </div>
                     )}
 
@@ -15497,7 +17343,20 @@ function FamilyGroupView({
                       )}
                     </div>
                   </div>
-                  {isFamCollapsed ? <ChevronDown size={14} className="text-text-dim" /> : <ChevronUp size={14} className="text-text-dim" />}
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFamilyToDelete(fam);
+                      }}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-text-dim hover:text-red-500 hover:bg-red-500/10 transition-all cursor-pointer border border-white/5 hover:border-red-500/20 shadow-md shadow-black/20"
+                      title="Supprimer cette famille"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                    {isFamCollapsed ? <ChevronDown size={14} className="text-text-dim" /> : <ChevronUp size={14} className="text-text-dim" />}
+                  </div>
                 </div>
 
                 {/* Family Content (Subfamilies accordion) */}
@@ -15588,16 +17447,21 @@ function FamilyGroupView({
                                 : 'border-white/5'
                             }`}
                           >
-                            {/* Subfamily Header (Product Badge & Color Badge) & Draggable container */}
-                            <div 
-                              onClick={() => toggleSubFam(`${fam}|${subFamKey}`)}
-                              draggable
-                              onDragStart={(e) => {
-                                e.dataTransfer.effectAllowed = "move";
-                                e.dataTransfer.setData("text/plain", `${fam}|${productName}|${colorName}`);
-                              }}
-                              className="flex items-center justify-between p-3 bg-white/[0.03] hover:bg-white/[0.07] transition-all cursor-pointer select-none active:bg-white/[0.05]"
-                            >
+                             {/* Subfamily Header (Product Badge & Color Badge) & Draggable container */}
+                             <div 
+                               onClick={() => toggleSubFam(`${fam}|${subFamKey}`)}
+                               draggable
+                               onDragStart={(e) => {
+                                 e.dataTransfer.effectAllowed = "move";
+                                 e.dataTransfer.setData("text/plain", `${fam}|${productName}|${colorName}`);
+                               }}
+                               className="flex items-center justify-between p-3 bg-white/[0.03] hover:bg-white/[0.07] transition-all cursor-pointer select-none active:bg-white/[0.05]"
+                               style={{
+                                 backgroundColor: activeSubFamMissionsCount > 0
+                                   ? hexToRgba(accentPinkColor, 0.12)
+                                   : undefined
+                               }}
+                             >
                               <div className="flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
                                 {/* Drag Grip Handle */}
                                 <div 
@@ -15907,6 +17771,543 @@ function FamilyGroupView({
           })}
         </div>
       )}
+
+      {/* Modal confirmation de suppression de famille */}
+      <AnimatePresence>
+        {familyToDelete && (
+          <div key="delete-family-modal-container" className="fixed inset-0 z-[800] flex items-center justify-center p-4">
+            <motion.div 
+              key="delete-family-backdrop"
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => setFamilyToDelete(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              key="delete-family-content"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-[#121214] border border-red-500/20 p-6 rounded-3xl shadow-2xl max-w-md w-full z-10"
+            >
+              <div className="flex items-center gap-3 mb-4 text-red-500">
+                <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center border border-red-500/20 shrink-0">
+                  <AlertTriangle size={20} className="stroke-[2]" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold font-serif italic text-white">Supprimer la Famille ?</h2>
+                  <p className="text-[9px] text-text-dim uppercase tracking-wider">
+                    Cette action nécessite une validation de sécurité
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3 py-2 text-xs text-text-dim">
+                <p>
+                  Êtes-vous absolument sûr de vouloir supprimer la famille <span className="text-white font-bold font-mono px-1.5 py-0.5 rounded bg-white/5 border border-white/10">{familyToDelete}</span> ?
+                </p>
+                <div className="space-y-2 pt-1">
+                  <div className="bg-purple-500/5 border border-purple-500/10 rounded-xl p-3 text-[11px] text-purple-300">
+                    <span className="font-bold text-white uppercase tracking-wider block mb-1">Option 1 : Conserver & Reclasser</span>
+                    Les missions et sous-familles associées seront reclassées en toute sécurité dans la catégorie de repli <span className="text-white font-bold font-mono">Autre</span>.
+                  </div>
+                  <div className="bg-red-500/5 border border-red-500/10 rounded-xl p-3 text-[11px] text-red-400">
+                    <span className="font-bold text-white uppercase tracking-wider block mb-1">Option 2 : Suppression Définitive</span>
+                    La famille sera supprimée, et <span className="text-red-300 font-bold">toutes ses missions et sous-familles associées seront définitivement détruites</span>.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 pt-4 border-t border-white/5 mt-4">
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => {
+                      if (onDeleteFamily) {
+                        onDeleteFamily(familyToDelete, false);
+                      }
+                      setFamilyToDelete(null);
+                    }}
+                    className="flex-1 py-2.5 bg-accent-purple/20 text-accent-purple text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-accent-purple/35 transition-all border border-accent-purple/30 cursor-pointer text-center"
+                  >
+                    1. Reclasser dans "Autre"
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (onDeleteFamily) {
+                        onDeleteFamily(familyToDelete, true);
+                      }
+                      setFamilyToDelete(null);
+                    }}
+                    className="flex-1 py-2.5 bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 cursor-pointer border border-red-500/20 text-center"
+                  >
+                    2. Supprimer Définitivement
+                  </button>
+                </div>
+                <button 
+                  onClick={() => setFamilyToDelete(null)}
+                  className="py-2 bg-white/5 text-white/60 text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 hover:text-white transition-all border border-white/10 cursor-pointer mt-1"
+                >
+                  Annuler
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Focus Mode Overlay */}
+      <AnimatePresence>
+        {focusedFamily && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-[#070709] z-[150] flex flex-col overflow-hidden"
+          >
+            {/* Dynamic Glowing Background Accent */}
+            <div className="absolute top-0 right-0 w-96 h-96 bg-accent-purple/5 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-96 h-96 bg-accent/5 rounded-full blur-3xl pointer-events-none" />
+
+            {/* Focus Mode Header */}
+            <div className="flex justify-between items-center px-8 py-6 bg-black/40 border-b border-white/5 backdrop-blur-md relative z-10 animate-fade-in">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setFocusedFamily(null)}
+                  className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 text-text-dim hover:text-white rounded-lg transition-all"
+                  title="Retour"
+                >
+                  <ChevronsLeft size={16} />
+                </button>
+                <div className="p-3 bg-accent-purple/20 border border-accent-purple/30 text-accent-purple rounded-xl shrink-0 shadow-[0_0_15px_rgba(189,0,255,0.2)] animate-pulse">
+                  <Zap size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-black uppercase tracking-[3px] text-accent-purple">Focus Mode Actif</span>
+                    <span className="w-1.5 h-1.5 bg-accent-purple rounded-full animate-ping" />
+                  </div>
+                  <h1 className="text-3xl font-black text-white tracking-tighter uppercase font-mono mt-0.5">
+                    Famille : {focusedFamily}
+                  </h1>
+                </div>
+              </div>
+
+              {/* Focus Mode Stats */}
+              {(() => {
+                const subFamilies = missionsByFamily[focusedFamily] || {};
+                const subFamKeys = Object.keys(subFamilies);
+                const familyMissionsList = subFamKeys.flatMap(k => subFamilies[k]);
+                const totalFamilyMissions = familyMissionsList.length;
+                const activeFamilyMissions = familyMissionsList.filter(m => m.enabled);
+                const activeFamilyMissionsCount = activeFamilyMissions.length;
+                const completedFamilyMissionsCount = activeFamilyMissions.filter(m => m.status === 'livré').length;
+                const famCompletionRate = activeFamilyMissionsCount > 0 ? (completedFamilyMissionsCount / activeFamilyMissionsCount) * 100 : 0;
+                
+                const ratedFamilyMissions = activeFamilyMissions.filter(m => typeof m.rating === 'number' && m.rating > 0);
+                const familyAvgRating = ratedFamilyMissions.length > 0
+                  ? (ratedFamilyMissions.reduce((acc, m) => acc + (m.rating || 0), 0) / ratedFamilyMissions.length).toFixed(1)
+                  : '—';
+
+                return (
+                  <div className="flex items-center gap-6">
+                    <div className="hidden md:flex gap-4 animate-fade-in">
+                      <div className="px-4 py-2 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-center items-center">
+                        <span className="text-[8px] font-mono text-text-dim/60 uppercase tracking-wider">Sous-Familles</span>
+                        <span className="text-sm font-black text-white">{subFamKeys.length}</span>
+                      </div>
+                      <div className="px-4 py-2 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-center items-center">
+                        <span className="text-[8px] font-mono text-text-dim/60 uppercase tracking-wider">Missions Actives</span>
+                        <span className="text-sm font-black text-accent">{activeFamilyMissionsCount}<span className="text-[10px] text-white/30">/{totalFamilyMissions}</span></span>
+                      </div>
+                      <div className="px-4 py-2 bg-white/[0.02] border border-white/10 rounded-xl flex flex-col justify-center items-center">
+                        <span className="text-[8px] font-mono text-text-dim/60 uppercase tracking-wider">Complété</span>
+                        <span className="text-sm font-black text-accent-purple">{famCompletionRate.toFixed(0)}%</span>
+                      </div>
+                      {familyAvgRating !== '—' && (
+                        <div className="px-4 py-2 bg-accent-yellow/5 border border-accent-yellow/20 rounded-xl flex flex-col justify-center items-center shadow-[0_0_15px_rgba(235,255,0,0.05)]">
+                          <span className="text-[8px] font-mono text-accent-yellow/60 uppercase tracking-wider">Note Moy.</span>
+                          <span className="text-sm font-black text-accent-yellow">★ {familyAvgRating}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <button 
+                      onClick={() => setFocusedFamily(null)}
+                      className="px-5 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/25 hover:border-red-500/40 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 cursor-pointer shadow-lg active:scale-95"
+                    >
+                      <X size={14} /> Quitter Focus (Echap)
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Focus Mode Body */}
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative z-10">
+              <div className="max-w-7xl mx-auto space-y-6">
+                {(() => {
+                  const fam = focusedFamily;
+                  const subFamilies = missionsByFamily[fam] || {};
+                  const subFamKeys = Object.keys(subFamilies);
+
+                  if (subFamKeys.length === 0) {
+                    return (
+                      <div className="bg-black/40 border border-white/10 p-16 rounded-3xl text-center">
+                        <Box className="mx-auto text-white/10 mb-4 animate-pulse" size={48} />
+                        <h3 className="text-white text-base font-black uppercase tracking-widest mb-2">Aucune sous-famille</h3>
+                        <p className="text-xs text-text-dim font-mono">Cette famille ne contient pas de missions actives avec les filtres sélectionnés.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-6 animate-fade-in">
+                      {subFamKeys.map((subFamKey) => {
+                        const [productName, colorName] = subFamKey.split('|');
+                        const subFamMissions = subFamilies[subFamKey] || [];
+                        const isSubFamCollapsed = collapsedSubFams[`${fam}|${subFamKey}`];
+
+                        const totalSubFamMissions = subFamMissions.length;
+                        const activeSubFamMissions = subFamMissions.filter(m => m.enabled);
+                        const activeSubFamMissionsCount = activeSubFamMissions.length;
+                        const completedSubFamMissionsCount = activeSubFamMissions.filter(m => m.status === 'livré').length;
+                        const subFamCompletionRate = activeSubFamMissionsCount > 0 ? (completedSubFamMissionsCount / activeSubFamMissionsCount) * 100 : 0;
+                        
+                        const isAllSubFamMissionsEnabled = subFamMissions.every(m => m.enabled) && totalSubFamMissions > 0;
+
+                        const subFamId = `${fam}|${productName}|${colorName}`;
+                        const isDraggedOver = draggedOverSubFam === subFamId;
+
+                        return (
+                          <div 
+                            key={subFamKey} 
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (draggedOverSubFam !== subFamId) {
+                                setDraggedOverSubFam(subFamId);
+                              }
+                            }}
+                            onDragLeave={(e) => {
+                              e.stopPropagation();
+                              if (draggedOverSubFam === subFamId) {
+                                setDraggedOverSubFam(null);
+                              }
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDraggedOverSubFam(null);
+                              const dragData = e.dataTransfer.getData("text/plain");
+                              if (dragData) {
+                                if (dragData.startsWith("MISSION|")) {
+                                  const [, srcFam, mId] = dragData.split('|');
+                                  if (selectedMissionIds.includes(mId)) {
+                                    onMoveMultipleMissions(selectedMissionIds, fam, productName, colorName);
+                                    setSelectedMissionIds([]);
+                                  } else {
+                                    onMoveMissionToFamily(mId, fam, productName, colorName);
+                                  }
+                                }
+                              }
+                            }}
+                            className={`border rounded-2xl bg-black/40 overflow-hidden transition-all duration-300 ${
+                              isDraggedOver 
+                                ? 'border-accent bg-accent/5 shadow-[0_0_20px_rgba(0,255,148,0.25)]' 
+                                : 'border-white/10'
+                            }`}
+                          >
+                             {/* Subfamily Header */}
+                             <div 
+                               onClick={() => toggleSubFam(`${fam}|${subFamKey}`)}
+                               className="flex items-center justify-between p-4 bg-white/[0.03] hover:bg-white/[0.08] transition-all cursor-pointer select-none border-b border-white/5"
+                               style={{
+                                 backgroundColor: activeSubFamMissionsCount > 0
+                                   ? hexToRgba(accentPinkColor, 0.12)
+                                   : undefined
+                               }}
+                             >
+                              <div className="flex items-center gap-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                                {/* Selection Check Button */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSubFamilySelection(fam, productName, colorName);
+                                  }}
+                                  className={`w-5 h-5 rounded border flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                                    isSubFamilySelected(fam, productName, colorName)
+                                      ? 'bg-accent border-accent text-black shadow-[0_0_8px_rgba(0,255,148,0.4)]'
+                                      : 'border-white/20 hover:border-white/40 bg-white/5 text-text-dim'
+                                  }`}
+                                  title="Sélectionner pour déplacer"
+                                >
+                                  {isSubFamilySelected(fam, productName, colorName) && (
+                                    <Check size={10} strokeWidth={3} />
+                                  )}
+                                </button>
+
+                                {/* Product badge */}
+                                {editingSubFam?.fam === fam && editingSubFam?.product === productName && editingSubFam?.color === colorName && editingSubFam?.field === 'product' ? (
+                                  <input
+                                    type="text"
+                                    value={editValue}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={() => handleSaveProduct(fam, productName, colorName, editValue)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleSaveProduct(fam, productName, colorName, editValue);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingSubFam(null);
+                                      }
+                                    }}
+                                    className="px-3 py-1 rounded bg-black border border-accent text-xs font-black uppercase text-accent font-mono tracking-wider min-w-[100px] text-center shadow-md ml-1 outline-none"
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ) : (
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingSubFam({ fam, product: productName, color: colorName, field: 'product' });
+                                      setEditValue(productName);
+                                    }}
+                                    className="group/badge px-4 py-1.5 rounded bg-white/10 border border-white/20 hover:border-accent/40 text-xs font-black uppercase text-white font-mono tracking-wider min-w-[100px] text-center shadow-md ml-1 cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                                    title="Cliquez pour modifier le produit"
+                                  >
+                                    <span>{productName}</span>
+                                    <Edit2 size={10} className="opacity-0 group-hover/badge:opacity-100 text-accent transition-opacity shrink-0" />
+                                  </div>
+                                )}
+                                
+                                {/* Color badge */}
+                                {editingSubFam?.fam === fam && editingSubFam?.product === productName && editingSubFam?.color === colorName && editingSubFam?.field === 'color' ? (
+                                  <input
+                                    type="text"
+                                    value={editValue}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={() => handleSaveColor(fam, productName, colorName, editValue)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleSaveColor(fam, productName, colorName, editValue);
+                                      } else if (e.key === 'Escape') {
+                                        setEditingSubFam(null);
+                                      }
+                                    }}
+                                    className="px-3 py-1 rounded bg-black border border-accent text-[11px] font-semibold text-accent font-mono uppercase tracking-wide ml-1 outline-none max-w-[140px] text-center"
+                                    autoFocus
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ) : (
+                                  <div 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingSubFam({ fam, product: productName, color: colorName, field: 'color' });
+                                      setEditValue(colorName);
+                                    }}
+                                    className={`group/colorpx px-3 py-1.5 rounded text-[11px] font-semibold text-white font-mono uppercase tracking-wide border cursor-pointer transition-all flex items-center justify-center gap-1.5 ml-1 ${getColorAccentClass(colorName)}`}
+                                    title="Cliquez pour modifier la couleur"
+                                  >
+                                    <span>{colorName}</span>
+                                    <Edit2 size={10} className="opacity-0 group-hover/colorpx:opacity-100 text-accent transition-opacity shrink-0" />
+                                  </div>
+                                )}
+
+                                {/* Toggle */}
+                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <span className="text-[8px] font-mono font-black uppercase text-white/40 tracking-wider">Activer :</span>
+                                  <Toggle 
+                                    enabled={isAllSubFamMissionsEnabled} 
+                                    onToggle={() => onToggleAllMissionsInSubFamily(fam, productName, colorName, !isAllSubFamMissionsEnabled)} 
+                                  />
+                                </div>
+
+                                {/* Subfamily Stats */}
+                                {subFamCompletionRate > 0 && (
+                                  <span className="px-2 py-0.5 rounded bg-accent/10 border border-accent/20 text-[9px] font-mono font-black text-accent uppercase tracking-wider">
+                                    {subFamCompletionRate.toFixed(0)}% livré
+                                  </span>
+                                )}
+
+                                <div className="text-[10px] text-text-dim/60 font-mono font-bold uppercase tracking-widest ml-2">
+                                  {activeSubFamMissionsCount}/{totalSubFamMissions} active(s)
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {isSubFamCollapsed ? <ChevronDown size={16} className="text-text-dim/60" /> : <ChevronUp size={16} className="text-text-dim/60" />}
+                              </div>
+                            </div>
+
+                            {/* Subfamily Content (Missions List) */}
+                            <AnimatePresence initial={false}>
+                              {!isSubFamCollapsed && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="border-t border-white/5 divide-y divide-white/5 bg-black/[0.15]"
+                                >
+                                  {subFamMissions.map((m) => {
+                                    const isSelected = selectedMissionIds.includes(m.id);
+                                    const isDup = showDuplicateIndicators && isDuplicate(m);
+                                    
+                                    let itemBorderClass = 'border-l-transparent';
+                                    let itemBgClass = '';
+                                    
+                                    if (isSelected && isDup) {
+                                      itemBorderClass = 'border-l-red-500';
+                                      itemBgClass = 'bg-red-500/10 shadow-[inset_4px_0_0_rgba(0,255,148,0.3)] shadow-[0_0_10px_rgba(239,68,68,0.2)]';
+                                    } else if (isSelected) {
+                                      itemBorderClass = 'border-l-accent';
+                                      itemBgClass = 'bg-accent/10 shadow-[inset_4px_0_0_rgba(0,255,148,0.2)]';
+                                    } else if (isDup) {
+                                      itemBorderClass = 'border-l-red-500';
+                                      itemBgClass = 'bg-red-500/5';
+                                    } else {
+                                      itemBgClass = 'hover:bg-white/[0.04]';
+                                    }
+
+                                    return (
+                                      <div 
+                                        key={m.id} 
+                                        onDoubleClick={() => setSelectedMissionId(m.id)}
+                                        className={`p-4 relative flex flex-col md:flex-row md:items-center justify-between gap-4 group transition-colors border-l-4 ${itemBorderClass} ${itemBgClass} ${m.enabled ? '' : 'opacity-40 grayscale-[0.5]'}`}
+                                      >
+                                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                                          {/* Mission Selection Checkbox */}
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onToggleSelectMission(m.id, e);
+                                            }}
+                                            className={`w-4.5 h-4.5 rounded border flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                                              isSelected
+                                                ? 'bg-accent border-accent text-black shadow-[0_0_8px_rgba(0,255,148,0.4)]'
+                                                : 'border-white/20 hover:border-white/40 bg-white/5 text-text-dim'
+                                            }`}
+                                            title="Sélectionner la mission"
+                                          >
+                                            {isSelected && (
+                                              <Check size={9} strokeWidth={4} />
+                                            )}
+                                          </button>
+
+                                          {/* Status bulb */}
+                                          <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                                            m.status === 'livré' ? 'bg-accent shadow-[0_0_8px_var(--color-accent)]' : 
+                                            m.status === 'en cours de shoot' ? 'bg-accent-blue shadow-[0_0_8px_var(--color-accent-blue)]' : 
+                                            m.status === 'annuler' ? 'bg-red-500' :
+                                            'bg-white/20'
+                                          }`} />
+
+                                          <div className="flex flex-col">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              {editingMissionId === m.id ? (
+                                                <input
+                                                  type="text"
+                                                  value={editRefIdValue}
+                                                  onChange={(e) => setEditRefIdValue(e.target.value)}
+                                                  onBlur={() => handleSaveRefId(m.id, m.refId, editRefIdValue)}
+                                                  onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                      handleSaveRefId(m.id, m.refId, editRefIdValue);
+                                                    } else if (e.key === 'Escape') {
+                                                      setEditingMissionId(null);
+                                                    }
+                                                  }}
+                                                  className="bg-black border border-accent text-xs font-mono font-black text-accent px-1.5 py-0.5 rounded outline-none max-w-[140px]"
+                                                  autoFocus
+                                                  onClick={(e) => e.stopPropagation()}
+                                                />
+                                              ) : (
+                                                <span 
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditingMissionId(m.id);
+                                                    setEditRefIdValue(m.refId);
+                                                  }}
+                                                  className="group/ref text-xs font-mono font-black text-accent-blue hover:text-accent border-b border-dashed border-transparent hover:border-accent-blue/40 cursor-pointer transition-all flex items-center gap-1"
+                                                  style={{ color: refIdColor }}
+                                                  title="Cliquez pour modifier la référence"
+                                                >
+                                                  <span>{m.refId}</span>
+                                                  <Edit2 size={9} className="opacity-0 group-hover/ref:opacity-100 text-accent transition-opacity shrink-0" />
+                                                </span>
+                                              )}
+                                              <span className="text-[9px] font-mono text-text-dim/50 font-bold">
+                                                #{m.missionNo}
+                                              </span>
+                                              <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                                                m.priority === 'High priority' ? 'bg-red-500 text-white shadow-[0_0_8px_rgba(239,68,68,0.3)]' : 
+                                                m.priority === 'Medium priority' ? 'bg-accent-red text-black' : 
+                                                'bg-white/10 text-white/70'
+                                              }`}>
+                                                {m.priority.split(' ')[0]}
+                                              </div>
+                                              {!m.enabled && (
+                                                <span className="text-[8px] font-bold text-red-500 border border-red-500/20 px-1.5 py-0.5 rounded bg-red-500/5 uppercase tracking-wider">OFF</span>
+                                              )}
+                                            </div>
+                                            
+                                            <div className="text-xs font-medium text-white/90 uppercase tracking-wide mt-1">
+                                              {m.argumentType || 'Aucun argument'} <span className="text-white/20 font-light mx-1">|</span> {m.univers || 'Sans univers'} <span className="text-white/20 font-light mx-1">|</span> {m.format || 'Standard'}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end border-t md:border-t-0 border-white/5 pt-3 md:pt-0">
+                                          {/* Mission Toggle */}
+                                          <div className="flex items-center gap-1">
+                                            <Toggle 
+                                              enabled={m.enabled} 
+                                              onToggle={(e) => onToggleMissionEnabled(m.id, e)} 
+                                            />
+                                          </div>
+
+                                          {/* Deadline */}
+                                          {m.deadline && (
+                                            <div className="flex items-center gap-1.5 text-text-dim text-xs font-mono bg-white/5 border border-white/10 px-2.5 py-1 rounded-lg">
+                                              <Clock size={12} />
+                                              <span className={isDeadlineApproaching(m.deadline) && m.status !== 'livré' && m.enabled ? 'text-red-400 font-bold animate-pulse' : ''}>
+                                                {m.deadline}
+                                              </span>
+                                            </div>
+                                          )}
+
+                                          {/* Progress Badge */}
+                                          <div className="flex flex-col items-end pr-2 min-w-[70px]">
+                                            <span className="text-xs font-mono font-black text-white">{m.progress}%</span>
+                                            <span className="text-[8px] font-black uppercase text-accent tracking-widest">{m.status}</span>
+                                          </div>
+
+                                          {/* Details Button */}
+                                          <button 
+                                            onClick={() => setSelectedMissionId(m.id)}
+                                            className="p-1.5 px-2.5 bg-accent/15 border border-accent/30 text-accent rounded-xl hover:bg-accent/25 transition-all flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-black"
+                                          >
+                                            Détail <CheckSquare size={11} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

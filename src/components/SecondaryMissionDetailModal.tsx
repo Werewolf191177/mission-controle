@@ -48,6 +48,7 @@ export default function SecondaryMissionDetailModal({
   const [priority, setPriority] = useState<"low" | "medium" | "high">(mission.priority);
   const [progress, setProgress] = useState(mission.progress);
   const [rating, setRating] = useState(mission.rating);
+  const [enabled, setEnabled] = useState(mission.enabled);
 
   const handleSave = () => {
     onUpdate(mission.id, {
@@ -57,6 +58,7 @@ export default function SecondaryMissionDetailModal({
       priority,
       progress,
       rating,
+      enabled,
       status: progress >= 100 ? 'Mission Accomplie' : progress > 0 ? 'En cours' : 'A faire'
     });
     onClose();
@@ -119,6 +121,27 @@ export default function SecondaryMissionDetailModal({
                 className="w-full bg-black/40 border border-white/10 p-3.5 rounded-lg text-sm text-white outline-none focus:border-accent-blue transition-all"
                 placeholder="Entrez le titre..."
               />
+            </div>
+
+            {/* Activation status */}
+            <div className="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-xl">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim">Statut de la Mission</span>
+                <span className={`text-xs font-mono font-bold mt-1 ${enabled ? 'text-accent-blue' : 'text-white/30'}`}>
+                  {enabled ? 'Mission Active (Visible)' : 'Mission Inactive (Masquée)'}
+                </span>
+              </div>
+              <div 
+                onClick={() => setEnabled(!enabled)}
+                className={`w-10 h-5 rounded-full relative transition-colors duration-300 shrink-0 cursor-pointer ${enabled ? 'bg-[#00D1FF] shadow-[0_0_10px_-2px_rgba(0,209,255,0.8)]' : 'bg-white/10'}`}
+              >
+                <motion.div 
+                  initial={false}
+                  animate={{ x: enabled ? 20 : 0 }}
+                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full ${enabled ? 'bg-black' : 'bg-text-dim'}`}
+                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
