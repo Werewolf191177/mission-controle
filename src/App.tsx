@@ -87,7 +87,8 @@ import {
   Send,
   Edit2,
   Percent,
-  Pin
+  Pin,
+  StickyNote
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import html2canvas from 'html2canvas';
@@ -457,6 +458,7 @@ const InteractiveStarRating = ({ rating = 0, onRatingChange, size = 12, classNam
 
         return (
           <button
+            type="button"
             key={starValue}
             onMouseMove={(e) => handleMouseMove(e, starValue)}
             onClick={(e) => handleClick(e, starValue)}
@@ -1169,15 +1171,48 @@ export default function App() {
   // State for missions
   const [missions, setMissions] = useState<Mission[]>([]);
 
+  // Helper to retrieve the historical rating of a product and color combination
+  const getHistoricalRating = useCallback((productName: string, colorName?: string): number => {
+    if (!productName) return 0;
+    const cleanProd = productName.toLowerCase().trim();
+    const cleanColor = colorName?.toLowerCase().trim();
+    
+    // First, try to find a mission with exact product name AND color name with a valid rating (> 0)
+    if (cleanColor) {
+      const matchWithColor = missions.find(m => 
+        m.product?.toLowerCase().trim() === cleanProd && 
+        (m.color || '').toLowerCase().trim() === cleanColor && 
+        m.rating && m.rating > 0
+      );
+      if (matchWithColor && matchWithColor.rating) {
+        return matchWithColor.rating;
+      }
+    }
+    
+    // Fallback: search for any mission with the same product name and a valid rating (> 0)
+    const matchProductOnly = missions.find(m => 
+      m.product?.toLowerCase().trim() === cleanProd && 
+      m.rating && m.rating > 0
+    );
+    if (matchProductOnly && matchProductOnly.rating) {
+      return matchProductOnly.rating;
+    }
+    
+    return 0;
+  }, [missions]);
+
   // Computed categories with historical items dynamically populated from existing missions list
   const computedCategories = useMemo(() => {
     return rawCategories.map(cat => {
       if (cat.id === 'family' || cat.id === 'product' || cat.id === 'color') {
         const uniqueVals = Array.from(new Set(
           missions
-            .map(m => {
+            .map((m, idx) => {
               if (cat.id === 'family') return m.family;
-              if (cat.id === 'product') return m.product;
+              if (cat.id === 'product') {
+                // Only keep the last product to maintain the addition history without bloating the dropdown selection
+                return idx === 0 ? m.product : '';
+              }
               return m.color || '';
             })
             .filter((val): val is string => typeof val === 'string' && val.trim() !== '')
@@ -1189,8 +1224,10 @@ export default function App() {
 
         const combined = [
           ...(cat.items || []),
-          ...extraVals.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+          ...extraVals
         ].filter(Boolean);
+
+        combined.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
         return { ...cat, items: combined };
       }
@@ -1268,6 +1305,16 @@ export default function App() {
   // Pending Imports State for Modal
   const [pendingImports, setPendingImports] = useState<any[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
+
+  // Prefill manual form rating with historical rating if available
+  useEffect(() => {
+    if (selectedProduct) {
+      const histRating = getHistoricalRating(selectedProduct, selectedColor);
+      if (histRating > 0) {
+        setSelectedRating(histRating);
+      }
+    }
+  }, [selectedProduct, selectedColor, getHistoricalRating]);
 
   // Duplicate detection
   const isDuplicate = useCallback((m: Mission) => {
@@ -1367,7 +1414,7 @@ export default function App() {
   const [inventorySearch, setInventorySearch] = useState('');
   const [showPreparedHistory, setShowPreparedHistory] = useState(false);
   const [showInventoryImport, setShowInventoryImport] = useState(false);
-  const [inventoryPreviewData, setInventoryPreviewData] = useState<{ product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string }[]>([]);
+  const [inventoryPreviewData, setInventoryPreviewData] = useState<{ product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string; rating?: number }[]>([]);
   const [inventoryFileName, setInventoryFileName] = useState('');
   const [importDuplicateMode, setImportDuplicateMode] = useState<'skip' | 'adjust' | 'append'>('skip');
   const [viewMode, setViewMode] = useState<'table' | 'mosaic' | 'grid' | 'task' | 'calendar' | 'family'>('table');
@@ -1405,6 +1452,9 @@ export default function App() {
   const [bulkEditRating, setBulkEditRating] = useState(0);
   const [bulkEditUpdateRating, setBulkEditUpdateRating] = useState(false);
 
+  const [bulkEditPriority, setBulkEditPriority] = useState('Medium priority');
+  const [bulkEditUpdatePriority, setBulkEditUpdatePriority] = useState(false);
+
   const openBulkEditModal = () => {
     setBulkEditEnabled(true);
     setBulkEditUpdateEnabled(false);
@@ -1429,6 +1479,9 @@ export default function App() {
     
     setBulkEditRating(0);
     setBulkEditUpdateRating(false);
+
+    setBulkEditPriority('Medium priority');
+    setBulkEditUpdatePriority(false);
 
     setBulkStatusModalOpen(true);
   };
@@ -1542,6 +1595,47 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const isSidebarVisuallyOpen = isSidebarOpen || isSidebarHovered;
+  
+  const sidebarTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSidebarEnter = useCallback(() => {
+    if (sidebarTimeoutRef.current) {
+      clearTimeout(sidebarTimeoutRef.current);
+      sidebarTimeoutRef.current = null;
+    }
+    if (!isSidebarOpen) {
+      setIsSidebarHovered(true);
+    }
+  }, [isSidebarOpen]);
+
+  const handleSidebarLeave = useCallback((delay = 400) => {
+    if (sidebarTimeoutRef.current) {
+      clearTimeout(sidebarTimeoutRef.current);
+    }
+    sidebarTimeoutRef.current = setTimeout(() => {
+      if (!isSidebarOpen) {
+        setIsSidebarHovered(false);
+      }
+    }, delay);
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
+    if (isSidebarOpen) {
+      if (sidebarTimeoutRef.current) {
+        clearTimeout(sidebarTimeoutRef.current);
+        sidebarTimeoutRef.current = null;
+      }
+      setIsSidebarHovered(false);
+    }
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (sidebarTimeoutRef.current) {
+        clearTimeout(sidebarTimeoutRef.current);
+      }
+    };
+  }, []);
   
   const [collapsedCategories, setCollapsedCategories] = useState<string[]>(() => {
     try {
@@ -4221,12 +4315,14 @@ Formatté via Mission Contrôle V3`;
       reader.onload = (event) => {
         const base64 = event.target?.result as string;
         const getDef = (id: string) => categories.find(c => c.id === id)?.items[0] || '';
+        const prodName = file.name.split('.')[0];
+        const defaultColor = getDef('color');
         newPending.push({
           tempId: Date.now() + index + Math.random(),
           file,
           imageUrl: base64,
-          product: file.name.split('.')[0],
-          color: getDef('color'),
+          product: prodName,
+          color: defaultColor,
           univers: getDef('univers'),
           support: getDef('support'),
           format: getDef('format'),
@@ -4235,7 +4331,8 @@ Formatté via Mission Contrôle V3`;
           photoCountRequested: 1,
           priority: getDef('priority'),
           status: getDef('status'),
-          info: ''
+          info: '',
+          rating: getHistoricalRating(prodName, defaultColor)
         });
         processedCount++;
         if (processedCount === files.length) {
@@ -4267,6 +4364,7 @@ Formatté via Mission Contrôle V3`;
       progress: getInitialProgress(item.status),
       photoCountRequested: item.photoCountRequested,
       photoCountDelivered: 0,
+      rating: item.rating || 0,
       info: item.info,
       imageUrl: item.imageUrl,
       imagePosition: '50% 50%',
@@ -4295,7 +4393,22 @@ Formatté via Mission Contrôle V3`;
   };
 
   const updatePendingItem = (tempId: number, updates: any) => {
-    setPendingImports(prev => prev.map(item => item.tempId === tempId ? { ...item, ...updates } : item));
+    setPendingImports(prev => prev.map(item => {
+      if (item.tempId === tempId) {
+        const nextItem = { ...item, ...updates };
+        // If product or color was updated, and rating was not explicitly specified in the update, prefill rating from history if found
+        if (updates.product !== undefined || updates.color !== undefined) {
+          if (updates.rating === undefined) {
+            const histRating = getHistoricalRating(nextItem.product, nextItem.color);
+            if (histRating > 0) {
+              nextItem.rating = histRating;
+            }
+          }
+        }
+        return nextItem;
+      }
+      return item;
+    }));
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -4886,7 +4999,127 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
 
   const updateCategory = (catId: string, updates: Partial<CategoryConfig>) => {
-    setCategories(prev => prev.map(c => c.id === catId ? { ...c, ...updates } : c));
+    setCategories(prev => {
+      let itemsDeleted: string[] = [];
+      const oldCat = prev.find(c => c.id === catId);
+      if (oldCat && updates.items && updates.items.length < (oldCat.items || []).length) {
+        itemsDeleted = (oldCat.items || []).filter(item => !updates.items!.includes(item));
+      }
+
+      const updated = prev.map(c => c.id === catId ? { ...c, ...updates } : c);
+      
+      const categoriesToSave = updated.map(({ icon, ...rest }) => rest);
+      localStorage.setItem('categories', JSON.stringify(categoriesToSave));
+
+      if (itemsDeleted.length > 0) {
+        // Empty corresponding select/form fields if they matched the deleted item(s)
+        itemsDeleted.forEach(deletedItem => {
+          const deletedLower = deletedItem.toLowerCase().trim();
+          if (catId === 'family' && selectedFamily.toLowerCase().trim() === deletedLower) {
+            setSelectedFamily('');
+          }
+          if (catId === 'product' && selectedProduct.toLowerCase().trim() === deletedLower) {
+            setSelectedProduct('');
+          }
+          if (catId === 'color' && selectedColor.toLowerCase().trim() === deletedLower) {
+            setSelectedColor('');
+          }
+          if (catId === 'argument' && selectedArgument.toLowerCase().trim() === deletedLower) {
+            setSelectedArgument('');
+          }
+          if (catId === 'univers' && selectedUnivers.toLowerCase().trim() === deletedLower) {
+            setSelectedUnivers('');
+          }
+          if (catId === 'format' && selectedFormat.toLowerCase().trim() === deletedLower) {
+            setSelectedFormat('');
+          }
+          if (catId === 'position' && selectedPosition.toLowerCase().trim() === deletedLower) {
+            setSelectedPosition('');
+          }
+          if (catId === 'support') {
+            setSelectedSupport(prev => prev.filter(item => item.toLowerCase().trim() !== deletedLower));
+          }
+          if (catId === 'priority' && selectedPriority.toLowerCase().trim() === deletedLower) {
+            setSelectedPriority('');
+          }
+          if (catId === 'status' && selectedStatus.toLowerCase().trim() === deletedLower) {
+            setSelectedStatus('');
+          }
+        });
+
+        setMissions(prevMissions => {
+          const updatedMissions = prevMissions.map(m => {
+            const updatedM = { ...m };
+            let modified = false;
+
+            itemsDeleted.forEach(deletedItem => {
+              const deletedLower = deletedItem.toLowerCase().trim();
+              if (catId === 'family' && m.family && m.family.toLowerCase().trim() === deletedLower) {
+                updatedM.family = 'Autre';
+                modified = true;
+              }
+              if (catId === 'product' && m.product && m.product.toLowerCase().trim() === deletedLower) {
+                updatedM.product = '';
+                modified = true;
+              }
+              if (catId === 'color' && m.color && m.color.toLowerCase().trim() === deletedLower) {
+                updatedM.color = '';
+                modified = true;
+              }
+              if (catId === 'argument' && m.argumentType && m.argumentType.toLowerCase().trim() === deletedLower) {
+                updatedM.argumentType = '';
+                modified = true;
+              }
+              if (catId === 'univers' && m.univers && m.univers.toLowerCase().trim() === deletedLower) {
+                updatedM.univers = '';
+                modified = true;
+              }
+              if (catId === 'format' && m.format && m.format.toLowerCase().trim() === deletedLower) {
+                updatedM.format = '';
+                modified = true;
+              }
+              if (catId === 'position' && m.position && m.position.toLowerCase().trim() === deletedLower) {
+                updatedM.position = '';
+                modified = true;
+              }
+              if (catId === 'support' && m.support && m.support.toLowerCase().trim() === deletedLower) {
+                updatedM.support = '';
+                modified = true;
+              }
+              if (catId === 'priority' && m.priority && m.priority.toLowerCase().trim() === deletedLower) {
+                updatedM.priority = '';
+                modified = true;
+              }
+              if (catId === 'status' && m.status && m.status.toLowerCase().trim() === deletedLower) {
+                updatedM.status = '';
+                modified = true;
+              }
+            });
+
+            return modified ? updatedM : m;
+          });
+
+          localStorage.setItem('missions', JSON.stringify(updatedMissions));
+          return updatedMissions;
+        });
+
+        setGlobalLogs(prevLogs => [...prevLogs, {
+          id: `del-cat-item-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          timestamp: Date.now(),
+          message: `RÉGLAGES : Suppression définitive de l'élément "${itemsDeleted.join(', ')}" dans la catégorie "${oldCat?.name}"`,
+          type: 'system'
+        }]);
+
+        setToast({
+          show: true,
+          message: `Élément "${itemsDeleted.join(', ')}" supprimé avec succès !`,
+          type: 'task'
+        });
+        setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+      }
+
+      return updated;
+    });
   };
 
   const addFamily = (familyName: string) => {
@@ -9191,7 +9424,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
       const combinedNames = fileNames.join(', ');
       setInventoryFileName(prev => prev ? `${prev}, ${combinedNames}` : combinedNames);
 
-      const parsedProducts: { product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string }[] = [];
+      const parsedProducts: { product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string; rating?: number }[] = [];
 
       const readAndParseFile = (file: File): Promise<void> => {
         return new Promise((resolve) => {
@@ -9204,13 +9437,17 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               items.forEach((item: any) => {
                 const productVal = item.product || item.nom || item.name || '';
                 if (productVal) {
+                  const parsedRating = typeof item.rating === 'number' ? item.rating : (parseFloat(item.rating || item.stars || item.note || '0') || 0);
+                  const cleanProd = String(productVal).trim();
+                  const cleanColor = String(item.color || item.couleur || 'Neutre').trim();
                   parsedProducts.push({
-                    product: String(productVal).trim(),
-                    color: String(item.color || item.couleur || 'Neutre').trim(),
+                    product: cleanProd,
+                    color: cleanColor,
                     quantity: typeof item.quantity === 'number' ? item.quantity : (parseInt(item.quantity || item.qty || item.qte || '1', 10) || 1),
                     priority: item.priority || item.priorité || 'Medium priority',
                     info: item.info || item.note || item.commentaire || 'Importé via JSON',
-                    deadline: item.deadline || item.echeance || ''
+                    deadline: item.deadline || item.echeance || '',
+                    rating: parsedRating > 0 ? parsedRating : (getHistoricalRating(cleanProd, cleanColor) || 0)
                   });
                 }
               });
@@ -9235,7 +9472,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           setToast({ show: true, message: 'Aucun produit valide reconnu dans le(s) fichier(s) JSON.', type: 'alert' });
         } else {
           setInventoryPreviewData(prev => {
-            const mergedMap: { [key: string]: { product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string } } = {};
+            const mergedMap: { [key: string]: { product: string; color: string; quantity: number; priority?: string; info?: string; deadline?: string; rating?: number } } = {};
             [...prev, ...parsedProducts].forEach(item => {
               const k = `${item.product.toLowerCase().trim()}|||${item.color.toLowerCase().trim()}`;
               if (!mergedMap[k]) {
@@ -9244,6 +9481,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 mergedMap[k].quantity += item.quantity;
                 if (item.info && !mergedMap[k].info?.includes(item.info)) {
                   mergedMap[k].info = `${mergedMap[k].info}, ${item.info}`;
+                }
+                if (item.rating && item.rating > (mergedMap[k].rating || 0)) {
+                  mergedMap[k].rating = item.rating;
                 }
               }
             });
@@ -9324,6 +9564,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             progress: 0,
             photoCountRequested: 1,
             photoCountDelivered: 0,
+            rating: item.rating || getHistoricalRating(item.product, item.color) || 0,
             info: item.info || "Importation d'inventaire",
             deadline: item.deadline || '',
             createdAt: Date.now(),
@@ -9567,6 +9808,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           <th className="py-2 px-3 text-center">Quantité</th>
                           <th className="py-2 px-3">Commentaire / Réf</th>
                           <th className="py-2 px-3">Date Prévue</th>
+                          <th className="py-2 px-3 text-center">Notation</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5 text-[9px] font-mono text-text-dim/80">
@@ -9581,6 +9823,17 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             <td className="py-1.5 px-3 text-center text-accent font-black">{item.quantity}</td>
                             <td className="py-1.5 px-3 truncate max-w-[120px]" title={item.info}>{item.info || '-'}</td>
                             <td className="py-1.5 px-3 text-accent-yellow">{item.deadline || '-'}</td>
+                            <td className="py-1.5 px-3">
+                              <div className="flex items-center justify-center">
+                                <InteractiveStarRating 
+                                  rating={item.rating || 0}
+                                  onRatingChange={(val) => {
+                                    setInventoryPreviewData(prev => prev.map((p, i) => i === idx ? { ...p, rating: val } : p));
+                                  }}
+                                  size={10}
+                                />
+                              </div>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -9879,6 +10132,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     postProdAt?: string;
     deliveredAt?: string;
     rating?: number;
+    priority?: string;
     updateEnabled: boolean;
     updateStatus: boolean;
     updateDeadline: boolean;
@@ -9887,6 +10141,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     updatePostProd: boolean;
     updateDelivered: boolean;
     updateRating: boolean;
+    updatePriority: boolean;
   }) => {
     const updatedCount = selectedMissionIds.length;
     if (updatedCount === 0) return;
@@ -10006,6 +10261,12 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
         if (updates.updateRating && updates.rating !== undefined && updates.rating !== m.rating) {
           nextMission.rating = updates.rating;
           history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Note changée à ${updates.rating}/5` });
+          changed = true;
+        }
+
+        if (updates.updatePriority && updates.priority !== undefined && updates.priority !== m.priority) {
+          nextMission.priority = updates.priority;
+          history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Priorité changée à "${updates.priority}"` });
           changed = true;
         }
 
@@ -10627,7 +10888,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           <div className="flex h-full overflow-hidden">
             {activeTab !== 'system' && !isSidebarVisuallyOpen && (
               <div 
-                onMouseEnter={() => setIsSidebarHovered(true)}
+                onMouseEnter={handleSidebarEnter}
                 className="fixed inset-y-0 left-0 w-3 z-[109] bg-gradient-to-r from-accent/5 to-transparent hover:from-accent/15 hover:w-5 transition-all duration-300 cursor-w-resize flex items-center justify-center group"
                 title={`Approcher le curseur pour déplier [Alt + ${customShortcuts.toggleSidebar.toUpperCase()}]`}
               >
@@ -10635,19 +10896,27 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               </div>
             )}
 
+            {activeTab !== 'system' && isSidebarVisuallyOpen && !isSidebarOpen && (
+              <div 
+                onMouseEnter={() => {
+                  if (sidebarTimeoutRef.current) {
+                    clearTimeout(sidebarTimeoutRef.current);
+                    sidebarTimeoutRef.current = null;
+                  }
+                  setIsSidebarHovered(false);
+                }}
+                className="fixed inset-y-0 right-0 w-3 z-[120] bg-gradient-to-l from-white/[0.02] to-transparent hover:from-white/10 hover:w-5 transition-all duration-300 cursor-e-resize flex items-center justify-center group"
+                title="Passer la souris ici pour refermer le volet"
+              >
+                <div className="w-1 h-24 rounded-full bg-white/10 group-hover:bg-white/40 shadow-[0_0_10px_rgba(255,255,255,0.1)] group-hover:scale-y-125 transition-all duration-300" />
+              </div>
+            )}
+
             {/* Main Input Form - Responsive Volet */}
             {activeTab !== 'system' && (
               <aside 
-                onMouseEnter={() => {
-                  if (!isSidebarOpen) {
-                    setIsSidebarHovered(true);
-                  }
-                }}
-                onMouseLeave={() => {
-                  if (!isSidebarOpen) {
-                    setIsSidebarHovered(false);
-                  }
-                }}
+                onMouseEnter={handleSidebarEnter}
+                onMouseLeave={() => handleSidebarLeave(400)}
                 className={`
                   fixed lg:relative inset-y-0 left-0 bg-[#0A0A0A] border-r border-border space-y-8 overflow-y-auto overflow-x-hidden custom-scrollbar z-[110] transition-all duration-500 ease-in-out
                   ${isSidebarVisuallyOpen ? 'w-full max-w-[450px] translate-x-0 p-10 opacity-100' : 'w-0 translate-x-[-100%] p-0 opacity-0 border-none'}
@@ -13663,6 +13932,35 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   </div>
                 </div>
 
+                {/* Priorité */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all ${bulkEditUpdatePriority ? 'border-orange-500/30 bg-orange-500/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdatePriority} 
+                        onChange={(e) => setBulkEditUpdatePriority(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
+                      />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Priorité</span>
+                    </label>
+                    {bulkEditUpdatePriority && <span className="text-[8px] font-bold text-orange-500 uppercase tracking-widest bg-orange-500/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={bulkEditUpdatePriority ? "opacity-100" : "opacity-45 pointer-events-none"}>
+                    <select
+                      value={bulkEditPriority}
+                      onChange={(e) => setBulkEditPriority(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded p-1.5 text-[10px] text-white font-bold outline-none focus:border-orange-500/50"
+                    >
+                      {categories.find(c => c.id === 'priority')?.items.map(p => (
+                        <option key={p} value={p} className="bg-zinc-900">
+                          {p === 'High priority' ? 'HAUTE' : p === 'Medium priority' ? 'MOYENNE' : 'BASSE'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 {/* 3. Note / Qualification */}
                 <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all md:col-span-2 ${bulkEditUpdateRating ? 'border-accent-yellow/30 bg-accent-yellow/5' : 'border-white/5'}`}>
                   <div className="flex items-center justify-between mb-2">
@@ -13837,6 +14135,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     postProdAt: bulkEditPostProdAt,
                     deliveredAt: bulkEditDeliveredAt,
                     rating: bulkEditRating,
+                    priority: bulkEditPriority,
                     updateEnabled: bulkEditUpdateEnabled,
                     updateStatus: bulkEditUpdateStatus,
                     updateDeadline: bulkEditUpdateDeadline,
@@ -13844,7 +14143,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     updateShot: bulkEditUpdateShotAt,
                     updatePostProd: bulkEditUpdatePostProdAt,
                     updateDelivered: bulkEditUpdateDeliveredAt,
-                    updateRating: bulkEditUpdateRating
+                    updateRating: bulkEditUpdateRating,
+                    updatePriority: bulkEditUpdatePriority
                   })}
                   className="px-6 py-2.5 bg-accent hover:bg-accent/95 text-black rounded-lg text-[9px] font-black uppercase tracking-widest shadow-[0_0_15px_rgba(0,255,148,0.2)] transition-all"
                 >
@@ -14709,6 +15009,23 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                            onChange={(e) => updatePendingItem(item.tempId, { photoCountRequested: parseInt(e.target.value) || 1 })}
                            className="w-full bg-black/60 border border-white/10 rounded-lg px-4 py-2.5 text-xs text-white focus:border-accent-pink outline-none transition-all font-bold"
                          />
+                       </div>
+
+                       {/* Rating (Stars) */}
+                       <div className="space-y-1.5">
+                         <div className="flex items-center justify-between">
+                           <label className="text-[9px] font-black uppercase tracking-widest text-text-dim flex items-center gap-2">
+                             <Sparkles size={10} className="text-accent-yellow" /> Notation / Rating
+                           </label>
+                           <span className="text-[10px] font-mono font-bold text-accent-yellow pr-1">{(item.rating || 0)}/5</span>
+                         </div>
+                         <div className="w-full bg-black/60 border border-white/10 rounded-lg px-4 py-2 flex items-center justify-center h-[38px]">
+                           <InteractiveStarRating 
+                             rating={item.rating || 0}
+                             onRatingChange={(val) => updatePendingItem(item.tempId, { rating: val })}
+                             size={16}
+                           />
+                         </div>
                        </div>
                     </div>
                   </div>
@@ -15697,6 +16014,33 @@ function MissionDetailModal({
                       </div>
                     </div>
                   </div>
+
+                  {/* Editable Priorité */}
+                  <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0 group/item">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-text-dim group-hover/item:text-white transition-colors">Priorité</span>
+                    <div className="relative">
+                      <select 
+                        value={mission.priority || 'Medium priority'}
+                        onChange={(e) => onUpdate(mission.id, { priority: e.target.value })}
+                        className={`bg-transparent border-none p-0 pr-4 pl-4 text-center text-[11px] font-mono font-black tracking-widest uppercase focus:ring-0 outline-none hover:text-white transition-colors appearance-none cursor-pointer ${
+                          (mission.priority || 'Medium priority') === 'High priority' ? 'text-red-500' :
+                          (mission.priority || 'Medium priority') === 'Medium priority' ? 'text-orange-500' : 'text-accent-blue'
+                        }`}
+                      >
+                        {['Low priority', 'Medium priority', 'High priority'].map(p => (
+                          <option key={p} value={p} className="bg-[#1A1A1A] text-white uppercase text-center">
+                            {p === 'High priority' ? 'HAUTE' : p === 'Medium priority' ? 'MOYENNE' : 'BASSE'}
+                          </option>
+                        ))}
+                      </select>
+                      <div className={`absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none opacity-40 ${
+                        (mission.priority || 'Medium priority') === 'High priority' ? 'text-red-500' :
+                        (mission.priority || 'Medium priority') === 'Medium priority' ? 'text-orange-500' : 'text-accent-blue'
+                      }`}>
+                        <ChevronRight size={8} className="rotate-90" style={{ transform: 'rotate(90deg)' }} />
+                      </div>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="p-3 bg-white/5 border border-white/10 rounded-lg">
                       <label className="text-[9px] font-black uppercase tracking-widest text-text-dim block mb-1">
@@ -16197,8 +16541,8 @@ function CategoryEditor({ category, onUpdate, isCollapsed, onToggle }: CategoryE
             className={`flex items-center gap-3 px-4 py-3 bg-app-bg border border-border group ${borderColorClass} cursor-grab active:cursor-grabbing hover:bg-white/[0.02] relative z-10 rounded-md transition-colors`}
             style={getCategoryStyle('border')}
           >
-            <div className="text-text-dim opacity-30 group-hover:opacity-100 transition-opacity shrink-0">
-              <GripVertical size={16} />
+            <div className="text-text-dim opacity-30 group-hover:opacity-100 transition-opacity shrink-0 pointer-events-none">
+              <GripVertical size={16} className="pointer-events-none" />
             </div>
             <div className="flex-1 min-w-0">
               <input 
@@ -16438,6 +16782,7 @@ function FamilyGroupView({
 
   const [bulkSelectedStatus, setBulkSelectedStatus] = useState<string | null>(null);
   const [bulkSelectedEnable, setBulkSelectedEnable] = useState<boolean | null>(null);
+  const [bulkSelectedPriority, setBulkSelectedPriority] = useState<string | null>(null);
 
   const getTargetMissionIds = () => {
     const ids = new Set<string>();
@@ -16566,6 +16911,43 @@ function FamilyGroupView({
     setSelectedSubFams([]);
     setSelectedMissionIds([]);
     setBulkSelectedEnable(null);
+  };
+
+  const handleBulkPriorityUpdate = (newPriority: string) => {
+    const targetIds = getTargetMissionIds();
+    if (targetIds.length === 0) return;
+
+    setMissions(prevMissions => prevMissions.map(m => {
+      if (targetIds.includes(m.id)) {
+        const history = m.history ? [...m.history] : [];
+        history.push({ 
+          timestamp: Date.now(), 
+          message: `MISE À JOUR GROUPÉE : Priorité modifiée à "${newPriority}"` 
+        });
+        return { ...m, priority: newPriority, history, updatedAt: Date.now() };
+      }
+      return m;
+    }));
+
+    // Log globally
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `MISE À JOUR GROUPÉE : ${targetIds.length} produits mis à jour vers la priorité "${newPriority}".`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `${targetIds.length} produits mis à jour vers "${newPriority}" !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+    // Clear selections
+    setSelectedSubFams([]);
+    setSelectedMissionIds([]);
+    setBulkSelectedPriority(null);
   };
 
   const toggleSubFamilySelection = (fam: string, productName: string, colorName: string) => {
@@ -16777,7 +17159,7 @@ function FamilyGroupView({
               </div>
 
               {/* Action grid / options */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                 {/* Section 1: Déplacer */}
                 <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col gap-2">
                   <span className="text-[9px] font-black text-text-dim/80 uppercase tracking-widest block mb-1">
@@ -16917,7 +17299,58 @@ function FamilyGroupView({
                   </button>
                 </div>
 
-                {/* Section 4: Synchronisation Google */}
+                {/* Section 4: Modifier la priorité */}
+                <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col justify-between gap-3">
+                  <div>
+                    <span className="text-[9px] font-black text-orange-500 uppercase tracking-widest block mb-1">
+                      ⚠️ Modifier la priorité :
+                    </span>
+                    <p className="text-[8px] text-text-dim/60 leading-normal uppercase">
+                      Modifiez la priorité pour l'ensemble des missions associées aux éléments sélectionnés.
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    {[
+                      { id: 'Low priority', label: 'Basse' },
+                      { id: 'Medium priority', label: 'Moyenne' },
+                      { id: 'High priority', label: 'Haute' },
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setBulkSelectedPriority(bulkSelectedPriority === p.id ? null : p.id)}
+                        className={`flex-1 py-1.5 text-[8px] font-black uppercase tracking-widest border rounded transition-all cursor-pointer text-center ${
+                          bulkSelectedPriority === p.id
+                            ? p.id === 'High priority'
+                              ? 'bg-red-500/20 border-red-500 text-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)]'
+                              : p.id === 'Medium priority'
+                              ? 'bg-orange-500/20 border-orange-500 text-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.2)]'
+                              : 'bg-accent-blue/20 border-accent-blue text-accent-blue shadow-[0_0_10px_rgba(59,130,246,0.2)]'
+                            : 'border-white/10 hover:border-orange-500/40 bg-white/5 hover:bg-orange-500/10 hover:text-orange-500'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    disabled={!bulkSelectedPriority}
+                    onClick={() => {
+                      if (bulkSelectedPriority) {
+                        handleBulkPriorityUpdate(bulkSelectedPriority);
+                      }
+                    }}
+                    className={`w-full py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                      bulkSelectedPriority
+                        ? 'bg-accent text-black hover:bg-accent/90 shadow-[0_0_12px_rgba(0,255,148,0.25)] cursor-pointer'
+                        : 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed'
+                    }`}
+                  >
+                    Valider la priorité
+                  </button>
+                </div>
+
+                {/* Section 5: Synchronisation Google */}
                 <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col justify-between gap-3">
                   <div>
                     <span className="text-[9px] font-black text-[#4285F4] uppercase tracking-widest block mb-1">
@@ -17210,7 +17643,7 @@ function FamilyGroupView({
                       className="text-white/40 hover:text-accent-purple cursor-grab active:cursor-grabbing p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 hover:border-accent-purple/30 transition-all shrink-0 flex items-center justify-center mr-1"
                       title="Glisser-déposer pour réorganiser la famille (3 traits)"
                     >
-                      <Menu size={14} className="stroke-[2.5]" />
+                      <Menu size={14} className="stroke-[2.5] pointer-events-none" />
                     </div>
 
                     {editingFam === fam ? (
@@ -17475,7 +17908,7 @@ function FamilyGroupView({
                                   className="text-white/20 hover:text-accent cursor-grab active:cursor-grabbing p-1 shrink-0 flex items-center justify-center -ml-1"
                                   title="Glisser-déposer pour déplacer vers une autre famille"
                                 >
-                                  <GripVertical size={13} />
+                                  <GripVertical size={13} className="pointer-events-none" />
                                 </div>
 
                                 {/* Selection Check Button */}
@@ -17642,7 +18075,7 @@ function FamilyGroupView({
                                             title="Glisser-déposer pour déplacer vers une autre famille"
                                             onClick={(e) => e.stopPropagation()}
                                           >
-                                            <GripVertical size={12} />
+                                            <GripVertical size={12} className="pointer-events-none" />
                                           </div>
 
                                           {/* Mission Selection Checkbox */}
@@ -17752,6 +18185,20 @@ function FamilyGroupView({
                                             <span className="text-[10px] font-mono font-black text-white">{m.progress}%</span>
                                             <span className="text-[7px] font-black uppercase text-accent tracking-widest">{m.status}</span>
                                           </div>
+
+                                          {/* Post-it Note Hover Icon */}
+                                          {m.info && m.info.trim() && (
+                                            <div className="relative group/tooltip shrink-0 flex items-center cursor-help" onClick={(e) => e.stopPropagation()}>
+                                              <StickyNote 
+                                                size={14} 
+                                                className="text-accent-yellow hover:text-yellow-300 drop-shadow-[0_0_8px_rgba(235,255,0,0.4)] transition-all pointer-events-none hover:scale-110" 
+                                              />
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-50 whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                                <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest mb-1 font-mono">Note / Instruction :</div>
+                                                <div className="font-medium text-white">{m.info}</div>
+                                              </div>
+                                            </div>
+                                          )}
 
                                           {/* Action trigger button */}
                                           <button 
@@ -18289,6 +18736,20 @@ function FamilyGroupView({
                                             <span className="text-xs font-mono font-black text-white">{m.progress}%</span>
                                             <span className="text-[8px] font-black uppercase text-accent tracking-widest">{m.status}</span>
                                           </div>
+
+                                          {/* Post-it Note Hover Icon */}
+                                          {m.info && m.info.trim() && (
+                                            <div className="relative group/tooltip shrink-0 flex items-center cursor-help" onClick={(e) => e.stopPropagation()}>
+                                              <StickyNote 
+                                                size={15} 
+                                                className="text-accent-yellow hover:text-yellow-300 drop-shadow-[0_0_8px_rgba(235,255,0,0.4)] transition-all pointer-events-none hover:scale-110" 
+                                              />
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-50 whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                                <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest mb-1 font-mono">Note / Instruction :</div>
+                                                <div className="font-medium text-white">{m.info}</div>
+                                              </div>
+                                            </div>
+                                          )}
 
                                           {/* Details Button */}
                                           <button 
