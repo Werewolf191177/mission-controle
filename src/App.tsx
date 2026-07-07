@@ -2472,23 +2472,52 @@ LISTE DES COMMANDES :
         return;
       }
 
-      // 0. Shortcuts Help Modal trigger (Ctrl+Q or Shift+Q or Ctrl+Shift+Q)
-      if (e.key.toLowerCase() === customShortcuts.help && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey)) {
+      // Ignore shortcuts if typing inside an editable field, EXCEPT for Ctrl/Cmd+Number tab navigation
+      const target = e.target as HTMLElement;
+      const isEditable = target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable ||
+        target.closest('[contenteditable]')
+      );
+
+      // Check if we pressed Ctrl/Cmd + number key
+      const isControlOrMeta = e.ctrlKey || e.metaKey;
+      const isTabKeyNum = ['1', '2', '3', '4', '5'].includes(e.key) || 
+                          (e.code && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].includes(e.code));
+      const isTabShortcut = isControlOrMeta && isTabKeyNum;
+
+      if (isEditable && !isTabShortcut) {
+        return;
+      }
+
+      // 0. Shortcuts Help Modal trigger (Ctrl+Q) - ignore if focused on editable fields
+      if (!isEditable && e.key.toLowerCase() === customShortcuts.help && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         setShowShortcutsHelpModal(prev => !prev);
         return;
       }
 
       // 1. Tab navigation shortcuts (Ctrl+1 to Ctrl+5, or Alt+1 to Alt+5, or Cmd+1 to Cmd+5)
-      const isModifier = e.ctrlKey || e.metaKey || e.altKey;
-      if (isModifier && !e.shiftKey) {
-        // Tab switching
+      // Allow Alt navigation only when NOT editing, and Ctrl/Cmd navigation even when editing.
+      // Also supports layout-independent check (using e.code for AZERTY keyboards)
+      if (isControlOrMeta || (e.altKey && !isEditable)) {
         let targetTab: 'table' | 'dashboard' | 'inventory' | 'journal' | 'system' | null = null;
-        if (e.key === customShortcuts.tabTable) targetTab = 'table';
-        else if (e.key === customShortcuts.tabDashboard) targetTab = 'dashboard';
-        else if (e.key === customShortcuts.tabInventory) targetTab = 'inventory';
-        else if (e.key === customShortcuts.tabJournal) targetTab = 'journal';
-        else if (e.key === customShortcuts.tabSystem) targetTab = 'system';
+        
+        const key = e.key;
+        const code = e.code;
+        
+        const isTab1 = key === customShortcuts.tabTable || code === 'Digit1';
+        const isTab2 = key === customShortcuts.tabDashboard || code === 'Digit2';
+        const isTab3 = key === customShortcuts.tabInventory || code === 'Digit3';
+        const isTab4 = key === customShortcuts.tabJournal || code === 'Digit4';
+        const isTab5 = key === customShortcuts.tabSystem || code === 'Digit5';
+
+        if (isTab1) targetTab = 'table';
+        else if (isTab2) targetTab = 'dashboard';
+        else if (isTab3) targetTab = 'inventory';
+        else if (isTab4) targetTab = 'journal';
+        else if (isTab5) targetTab = 'system';
 
         if (targetTab) {
           e.preventDefault();
@@ -2498,7 +2527,7 @@ LISTE DES COMMANDES :
       }
 
       // 2. Alt/Option + key shortcuts for specific view modes & actions
-      if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !isEditable) {
         const keyLower = e.key.toLowerCase();
         
         // Mode views (Table tab must be active or will be set active)
@@ -10572,11 +10601,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             <button 
               onClick={() => setShowShortcutsHelpModal(true)}
               className={`w-12 h-12 border rounded-lg flex items-center justify-center transition-all active:scale-95 group relative shadow-2xl ${showShortcutsHelpModal ? 'bg-accent border-accent text-black shadow-[0_0_20px_rgba(0,255,148,0.3)]' : 'bg-white/5 border-white/10 hover:bg-accent/10 hover:border-accent hover:text-accent'}`}
-              title="Raccourcis Clavier & Productivité [Ctrl/Shift+Q]"
+              title={`Raccourcis Clavier & Productivité [Ctrl + ${customShortcuts.help.toUpperCase()}]`}
             >
               <Keyboard size={20} className={showShortcutsHelpModal ? 'scale-110' : 'group-hover:scale-110 transition-transform duration-300'} />
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-accent animate-ping" />
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-accent" />
             </button>
           </div>
         </header>
@@ -14036,7 +14063,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       { key: `Alt + ${customShortcuts.toggleSidebar.toUpperCase()}`, desc: "Ancrer / Désancrer le volet de configuration de mission" },
                       { key: `Alt + ${customShortcuts.exportJson.toUpperCase()}`, desc: "Sauvegarder / Exporter les données au format .json" },
                       { key: `Alt + ${customShortcuts.importJson.toUpperCase()}`, desc: "Charger / Importer un fichier de sauvegarde .json" },
-                      { key: `Ctrl + ${customShortcuts.help.toUpperCase()} / Shift + ${customShortcuts.help.toUpperCase()}`, desc: "Afficher / Masquer ce Centre de productivité" }
+                      { key: `Ctrl + ${customShortcuts.help.toUpperCase()}`, desc: "Afficher / Masquer ce Centre de productivité" }
                     ].map((item, idx) => (
                       <div key={idx} className="flex items-center justify-between py-1.5 border-b border-white/[0.02] last:border-0">
                         <span className="text-xs text-white/70 mr-4">{item.desc}</span>
@@ -14054,7 +14081,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   <HelpCircle size={18} className="text-accent shrink-0" />
                   <p className="text-xs text-white/80 leading-relaxed">
                     Utilisez ces raccourcis clavier à tout moment pour naviguer à vitesse grand V. 
-                    Appuyez sur <kbd className="text-[10px] font-mono px-1 py-0.5 rounded bg-white/10 border border-white/15 text-accent">Ctrl + {customShortcuts.help.toUpperCase()}</kbd> ou <kbd className="text-[10px] font-mono px-1 py-0.5 rounded bg-white/10 border border-white/15 text-accent">Shift + {customShortcuts.help.toUpperCase()}</kbd> pour fermer cette aide.
+                    Appuyez sur <kbd className="text-[10px] font-mono px-1 py-0.5 rounded bg-white/10 border border-white/15 text-accent">Ctrl + {customShortcuts.help.toUpperCase()}</kbd> pour fermer cette aide.
                   </p>
                 </div>
               </div>
@@ -17251,9 +17278,6 @@ function FamilyGroupView({
                           <Zap size={10} className="text-accent-purple" />
                           <span className="hidden sm:inline">Focus</span>
                         </button>
-                        <span className="text-[8px] font-mono font-bold text-accent-purple/40 group-hover/fam-header:text-accent-purple/70 transition-all ml-1 uppercase tracking-wider hidden md:inline">
-                          (Double-clic pour Plein Écran)
-                        </span>
                       </div>
                     )}
 
