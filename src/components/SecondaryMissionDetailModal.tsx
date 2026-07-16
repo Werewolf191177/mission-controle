@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { 
   X, Calendar, CheckSquare, Trash2, Loader2, Sparkles, Clock, 
-  MessageSquare, Star, CheckCircle, AlertTriangle 
+  MessageSquare, Star, CheckCircle, AlertTriangle, ExternalLink
 } from 'lucide-react';
 
 interface SecondaryMission {
@@ -28,6 +28,47 @@ interface SecondaryMissionDetailModalProps {
   isExporting: Record<string, boolean>;
   googleToken: any;
 }
+
+const extractUrls = (text: string): string[] => {
+  if (!text) return [];
+  const urlRegex = /(https?:\/\/[^\s]+)/gi;
+  const matches = text.match(urlRegex);
+  return matches ? Array.from(new Set(matches)) : [];
+};
+
+const renderUrlButtons = (text: string) => {
+  const urls = extractUrls(text);
+  if (urls.length === 0) return null;
+
+  const getUrlLabel = (urlStr: string, index: number, total: number) => {
+    try {
+      const urlObj = new URL(urlStr);
+      let host = urlObj.hostname;
+      if (host.startsWith('www.')) host = host.substring(4);
+      return host;
+    } catch (e) {
+      return `Lien ${total > 1 ? index + 1 : ''}`;
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
+      {urls.map((url, i) => (
+        <a
+          key={i}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider bg-accent-blue/15 hover:bg-accent-blue/30 text-accent-blue hover:text-white border border-accent-blue/30 px-2.5 py-1.5 rounded-lg transition-all shadow-[0_0_12px_rgba(0,180,255,0.15)] hover:shadow-[0_0_16px_rgba(0,180,255,0.3)] hover:scale-[1.02] cursor-pointer"
+          title={url}
+        >
+          <ExternalLink size={10} className="shrink-0 text-accent-blue animate-pulse" />
+          <span>Ouvrir {getUrlLabel(url, i, urls.length)}</span>
+        </a>
+      ))}
+    </div>
+  );
+};
 
 export default function SecondaryMissionDetailModal({
   mission,
@@ -198,6 +239,7 @@ export default function SecondaryMissionDetailModal({
                 rows={4}
                 className="w-full bg-black/40 border border-white/10 p-4 rounded-lg text-sm text-white outline-none focus:border-accent-blue transition-all resize-none"
               />
+              {renderUrlButtons(note)}
             </div>
 
             {/* Slider Progress */}

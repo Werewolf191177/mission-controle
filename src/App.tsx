@@ -88,7 +88,8 @@ import {
   Edit2,
   Percent,
   Pin,
-  StickyNote
+  StickyNote,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import html2canvas from 'html2canvas';
@@ -134,6 +135,71 @@ const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<s
     reader.onerror = () => reject(new Error("Erreur de lecture du fichier"));
     reader.readAsDataURL(file);
   });
+};
+
+// --- WEB LINK PARSER UTILITY ---
+const renderTextWithLinks = (text: string) => {
+  if (!text) return null;
+  const urlRegex = /(https?:\/\/[^\s]+)/gi;
+  const parts = text.split(urlRegex);
+  return parts.map((part, index) => {
+    if (part.match(urlRegex)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-accent-blue hover:underline break-all relative z-50 font-bold"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+};
+
+const extractUrls = (text: string): string[] => {
+  if (!text) return [];
+  const urlRegex = /(https?:\/\/[^\s]+)/gi;
+  const matches = text.match(urlRegex);
+  return matches ? Array.from(new Set(matches)) : [];
+};
+
+const renderUrlButtons = (text: string) => {
+  const urls = extractUrls(text);
+  if (urls.length === 0) return null;
+
+  const getUrlLabel = (urlStr: string, index: number, total: number) => {
+    try {
+      const urlObj = new URL(urlStr);
+      let host = urlObj.hostname;
+      if (host.startsWith('www.')) host = host.substring(4);
+      return host;
+    } catch (e) {
+      return `Lien ${total > 1 ? index + 1 : ''}`;
+    }
+  };
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
+      {urls.map((url, i) => (
+        <a
+          key={i}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider bg-accent-blue/15 hover:bg-accent-blue/30 text-accent-blue hover:text-white border border-accent-blue/30 px-2.5 py-1.5 rounded-lg transition-all shadow-[0_0_12px_rgba(0,180,255,0.15)] hover:shadow-[0_0_16px_rgba(0,180,255,0.3)] hover:scale-[1.02] cursor-pointer"
+          title={url}
+        >
+          <ExternalLink size={10} className="shrink-0 text-accent-blue animate-pulse" />
+          <span>Ouvrir {getUrlLabel(url, i, urls.length)}</span>
+        </a>
+      ))}
+    </div>
+  );
 };
 
 // --- STABLE SUB-COMPONENTS ---
@@ -5897,6 +5963,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                     <Check size={10} />
                                   </button>
                                 </div>
+                                {renderUrlButtons(m.info)}
                               </div>
 
                               {/* Progress */}
@@ -6015,10 +6082,50 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 <div className="text-[10px] text-text-dim flex items-center gap-3">
                   <span className="font-mono text-accent-blue bg-accent-blue/10 px-1.5 py-0.5 rounded">{m.refId}</span>
                   {m.support && <span className="uppercase tracking-widest text-[9px] opacity-80">&bull; {m.support}</span>}
-                  {m.info && <span>&bull; <span className="opacity-60 italic">{m.info}</span></span>}
+                  {m.info && <span>&bull; <span className="opacity-60 italic">{renderTextWithLinks(m.info)}</span></span>}
                 </div>
               </div>
-              <div className="flex items-center gap-3 border-l border-white/5 pl-4 ml-2">
+              <div className="flex items-center gap-3 border-l border-white/5 pl-4 ml-2" onClick={(e) => e.stopPropagation()}>
+                {m.info && extractUrls(m.info).length > 0 && (
+                  <div className="relative group/globe-primary-tooltip shrink-0">
+                    {extractUrls(m.info).length === 1 ? (
+                      <a
+                        href={extractUrls(m.info)[0]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded bg-white/5 text-text-dim hover:bg-accent-blue/20 hover:text-accent-blue transition-colors flex items-center justify-center cursor-pointer"
+                        title={`Ouvrir le lien : ${extractUrls(m.info)[0]}`}
+                      >
+                        <Globe size={14} className="hover:rotate-12 transition-transform duration-200" />
+                      </a>
+                    ) : (
+                      <div className="flex items-center">
+                        <button
+                          className="p-1.5 rounded bg-white/5 text-text-dim hover:bg-accent-blue/20 hover:text-accent-blue transition-colors flex items-center justify-center cursor-pointer"
+                          title="Ouvrir les liens détectés"
+                        >
+                          <Globe size={14} className="hover:rotate-12 transition-transform duration-200" />
+                        </button>
+                        <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/globe-primary-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/globe-primary-tooltip:opacity-100 group-hover/globe-primary-tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-2.5 rounded-xl shadow-2xl z-50 min-w-[200px] backdrop-blur-md flex flex-col gap-1.5">
+                          <div className="text-[8px] font-black uppercase text-accent-blue tracking-widest mb-1 font-mono">Liens détectés ({extractUrls(m.info).length}) :</div>
+                          {extractUrls(m.info).map((url, i) => (
+                            <a
+                              key={i}
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 text-[9px] font-bold text-white/80 hover:text-accent-blue hover:bg-white/5 p-1 rounded transition-colors truncate max-w-[220px]"
+                              title={url}
+                            >
+                              <ExternalLink size={10} className="shrink-0" />
+                              <span className="truncate">{url}</span>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <a 
                   href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('Mission: ' + m.product)}&details=${encodeURIComponent('Ref: ' + m.refId + '\n' + (m.info || ''))}&dates=${m.deadline ? new Date(m.deadline).toISOString().replace(/-|:|\.\d\d\d/g, "") + '/' + new Date(new Date(m.deadline).getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "") : ''}`}
                   target="_blank"
@@ -13137,6 +13244,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                   <Check size={14} />
                                 </button>
                               </div>
+                              {renderUrlButtons(m.info)}
                             </td>
                           )}
                           {!hiddenColumns.includes('rating') && (
@@ -13581,6 +13689,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         placeholder="Consignes..."
                         className="w-full bg-white/[0.03] border border-white/5 p-3 rounded-xl text-[10px] text-white/80 outline-none focus:border-accent-blue/40 resize-none transition-all placeholder:opacity-20"
                       />
+                      {renderUrlButtons(sm.note)}
                     </div>
 
                     {/* Exports Google Calendar / Tasks */}
@@ -16187,6 +16296,7 @@ function MissionDetailModal({
                     Valider
                   </button>
                 </div>
+                {renderUrlButtons(mission.info)}
               </div>
             </div>
 
@@ -18162,6 +18272,48 @@ function FamilyGroupView({
                                         </div>
 
                                         <div className="flex items-center gap-4 shrink-0">
+                                          {/* Explorer Globe Link button if URLs exist */}
+                                          {m.info && extractUrls(m.info).length > 0 && (
+                                            <div className="relative group/globe-tooltip shrink-0" onClick={(e) => e.stopPropagation()}>
+                                              {extractUrls(m.info).length === 1 ? (
+                                                <a
+                                                  href={extractUrls(m.info)[0]}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="w-7 h-7 rounded-lg bg-accent-blue/10 border border-accent-blue/30 hover:bg-accent-blue/20 flex items-center justify-center text-accent-blue hover:text-white transition-all shadow-[0_0_10px_rgba(0,180,255,0.1)] hover:shadow-[0_0_15px_rgba(0,180,255,0.3)] hover:scale-110 cursor-pointer"
+                                                  title={`Ouvrir le lien : ${extractUrls(m.info)[0]}`}
+                                                >
+                                                  <Globe size={13} className="hover:rotate-12 transition-transform duration-200 text-accent-blue" />
+                                                </a>
+                                              ) : (
+                                                <div>
+                                                  <button
+                                                    className="w-7 h-7 rounded-lg bg-accent-blue/10 border border-accent-blue/30 hover:bg-accent-blue/20 flex items-center justify-center text-accent-blue hover:text-white transition-all shadow-[0_0_10px_rgba(0,180,255,0.1)] hover:shadow-[0_0_15px_rgba(0,180,255,0.3)] hover:scale-110 cursor-pointer"
+                                                    title="Ouvrir les liens détectés"
+                                                  >
+                                                    <Globe size={13} className="hover:rotate-12 transition-transform duration-200 text-accent-blue" />
+                                                  </button>
+                                                  <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/globe-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/globe-tooltip:opacity-100 group-hover/globe-tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-2.5 rounded-xl shadow-2xl z-50 min-w-[200px] backdrop-blur-md flex flex-col gap-1.5">
+                                                    <div className="text-[8px] font-black uppercase text-accent-blue tracking-widest mb-1 font-mono">Liens détectés ({extractUrls(m.info).length}) :</div>
+                                                    {extractUrls(m.info).map((url, i) => (
+                                                      <a
+                                                        key={i}
+                                                        href={url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="flex items-center gap-1.5 text-[9px] font-bold text-white/80 hover:text-accent-blue hover:bg-white/5 p-1 rounded transition-colors truncate max-w-[220px]"
+                                                        title={url}
+                                                      >
+                                                        <ExternalLink size={10} className="shrink-0" />
+                                                        <span className="truncate">{url}</span>
+                                                      </a>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+
                                           {/* Individual Mission Toggle Switch */}
                                           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                                             <Toggle 
@@ -18193,9 +18345,9 @@ function FamilyGroupView({
                                                 size={14} 
                                                 className="text-accent-yellow hover:text-yellow-300 drop-shadow-[0_0_8px_rgba(235,255,0,0.4)] transition-all pointer-events-none hover:scale-110" 
                                               />
-                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-50 whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/tooltip:pointer-events-auto opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-50 whitespace-pre-wrap leading-relaxed backdrop-blur-md">
                                                 <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest mb-1 font-mono">Note / Instruction :</div>
-                                                <div className="font-medium text-white">{m.info}</div>
+                                                <div className="font-medium text-white">{renderTextWithLinks(m.info)}</div>
                                               </div>
                                             </div>
                                           )}
@@ -18744,9 +18896,9 @@ function FamilyGroupView({
                                                 size={15} 
                                                 className="text-accent-yellow hover:text-yellow-300 drop-shadow-[0_0_8px_rgba(235,255,0,0.4)] transition-all pointer-events-none hover:scale-110" 
                                               />
-                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-50 whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/tooltip:pointer-events-auto opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-50 whitespace-pre-wrap leading-relaxed backdrop-blur-md">
                                                 <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest mb-1 font-mono">Note / Instruction :</div>
-                                                <div className="font-medium text-white">{m.info}</div>
+                                                <div className="font-medium text-white">{renderTextWithLinks(m.info)}</div>
                                               </div>
                                             </div>
                                           )}
