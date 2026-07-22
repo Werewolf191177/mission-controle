@@ -391,6 +391,12 @@ interface SecondaryMission {
   enabled: boolean;
 }
 
+interface MissionProblem {
+  id: string;
+  text: string;
+  createdAt: number;
+}
+
 interface Mission {
   id: string;
   missionNo: number;
@@ -421,6 +427,7 @@ interface Mission {
   shotAt?: string;
   postProdAt?: string;
   deliveredAt?: string;
+  problems?: MissionProblem[];
 }
 
 const Toggle = ({ enabled, onToggle }: { enabled: boolean, onToggle: (e: React.MouseEvent) => void }) => (
@@ -448,6 +455,49 @@ const deduceFamily = (productName: string): string => {
   if (name.includes('SBIN')) return 'SBIN';
   if (name.includes('PORTRAIT')) return 'Portraits';
   return 'Autre';
+};
+
+const isSameDay = (deadlineStr: string | undefined | null, dateStr: string | undefined | null): boolean => {
+  if (!deadlineStr || !dateStr) return false;
+  
+  const normalize = (str: string) => {
+    const clean = str.trim();
+    if (clean.includes('/')) {
+      const parts = clean.split('/');
+      if (parts.length === 3) {
+        const [d, m, y] = parts;
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+    } else if (clean.includes('-')) {
+      const parts = clean.split('-');
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          const [y, m, d] = parts;
+          return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        } else {
+          const [d, m, y] = parts;
+          return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        }
+      }
+    }
+    return clean;
+  };
+
+  return normalize(deadlineStr) === normalize(dateStr);
+};
+
+const getSafeDateObject = (dateStr: string | undefined | null): Date | null => {
+  if (!dateStr) return null;
+  const clean = dateStr.trim();
+  if (clean.includes('/')) {
+    const parts = clean.split('/');
+    if (parts.length === 3) {
+      const [d, m, y] = parts.map(Number);
+      return new Date(y, m - 1, d);
+    }
+  }
+  const d = new Date(clean);
+  return isNaN(d.getTime()) ? null : d;
 };
 
 const getColorAccentClass = (color: string): string => {
@@ -1521,6 +1571,9 @@ export default function App() {
   const [bulkEditPriority, setBulkEditPriority] = useState('Medium priority');
   const [bulkEditUpdatePriority, setBulkEditUpdatePriority] = useState(false);
 
+  const [bulkEditProblemsText, setBulkEditProblemsText] = useState('');
+  const [bulkEditUpdateProblems, setBulkEditUpdateProblems] = useState(false);
+
   const openBulkEditModal = () => {
     setBulkEditEnabled(true);
     setBulkEditUpdateEnabled(false);
@@ -1548,6 +1601,9 @@ export default function App() {
 
     setBulkEditPriority('Medium priority');
     setBulkEditUpdatePriority(false);
+
+    setBulkEditProblemsText('');
+    setBulkEditUpdateProblems(false);
 
     setBulkStatusModalOpen(true);
   };
@@ -1835,6 +1891,7 @@ LISTE DES COMMANDES :
   const [scheduledExportTime, setScheduledExportTime] = useState('18:00');
   const lastExportTimeRef = useRef<number>(Date.now());
   const lastScheduledExportDateRef = useRef<string>('');
+  const lastActualExportTimeRef = useRef<number>(0);
   const downloadFullExportRef = useRef<() => void>(() => {});
 
   // Background interval for auto-export
@@ -1842,6 +1899,7 @@ LISTE DES COMMANDES :
     const handleSilenceExport = () => {
        const now = new Date();
        let shouldExport = false;
+       const nowMs = now.getTime();
 
        // 1. Scheduled Export
        if (scheduledExportEnabled) {
@@ -1854,13 +1912,14 @@ LISTE DES COMMANDES :
           if (scheduledExportDays.includes(currentDayStr) && currentTimeStr === scheduledExportTime && lastScheduledExportDateRef.current !== todayDateStr) {
              lastScheduledExportDateRef.current = todayDateStr;
              shouldExport = true;
+             // Also reset the periodic export timestamp so they don't both fire
+             lastExportTimeRef.current = nowMs;
           }
        }
 
        // 2. Periodic Export (only if not already exporting from scheduled)
        if (autoExportEnabled && !shouldExport) {
            const intervalMs = autoExportInterval * 60 * 1000;
-           const nowMs = now.getTime();
            if (nowMs - lastExportTimeRef.current >= intervalMs) {
                lastExportTimeRef.current = nowMs;
                shouldExport = true;
@@ -1868,8 +1927,12 @@ LISTE DES COMMANDES :
        }
 
        if (shouldExport) {
-           if (typeof downloadFullExportRef.current === 'function') {
-               downloadFullExportRef.current();
+           // Prevent double triggers within 50 seconds (consecutive 30-second ticks)
+           if (nowMs - lastActualExportTimeRef.current > 50000) {
+               lastActualExportTimeRef.current = nowMs;
+               if (typeof downloadFullExportRef.current === 'function') {
+                   downloadFullExportRef.current();
+               }
            }
        }
     };
@@ -6177,43 +6240,55 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           ))}
           {Array.from({ length: new Date(primaryCalendarDate.getFullYear(), primaryCalendarDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
             const dateStr = `${primaryCalendarDate.getFullYear()}-${(primaryCalendarDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-            const dayMissions = filteredMissions.filter(m => m.enabled && m.deadline === dateStr);
-            const daySecondaryMissions = secondaryMissions.filter(m => m.enabled && m.deadline === dateStr);
-            const isToday = new Date().toISOString().split('T')[0] === dateStr;
+            const dayMissions = filteredMissions.filter(m => m.enabled && isSameDay(m.deadline, dateStr));
+            const daySecondaryMissions = secondaryMissions.filter(m => m.enabled && isSameDay(m.deadline, dateStr));
+            const d = new Date();
+            const pad = (n: number) => String(n).padStart(2, '0');
+            const localTodayStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            const isToday = localTodayStr === dateStr;
             return (
               <div key={day} className={`min-h-[120px] rounded-xl p-2.5 flex flex-col transition-colors ${isToday ? 'bg-accent/5 border border-accent/30 shadow-[0_0_15px_rgba(0,255,148,0.1)]' : 'bg-black/20 border border-white/5 hover:border-white/20 hover:bg-white/[0.02]'}`}>
                  <div className={`text-[11px] font-black mb-3 ${isToday ? 'text-accent' : 'text-text-dim/80'}`}>{day}</div>
                  <div className="flex flex-col gap-1.5 overflow-y-auto custom-scrollbar flex-1 pr-1">
                    {dayMissions.map(m => (
-                      <a 
-                        href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('Mission: ' + m.product)}&details=${encodeURIComponent('Ref: ' + m.refId + '\n' + (m.info || ''))}&dates=${m.deadline ? new Date(m.deadline).toISOString().replace(/-|:|\.\d\d\d/g, "") + '/' + new Date(new Date(m.deadline).getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "") : ''}`} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
+                      <div 
                         key={m.id} 
-                        title="Double-cliquez pour ouvrir la fiche de cette mission, simple clic pour l’ajouter sur Google Calendar" 
-                        onDoubleClick={(e) => {
+                        title="Cliquez pour ouvrir la fiche de cette mission" 
+                        onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
                           setSelectedMissionId(m.id);
                         }}
                         className={`group cursor-pointer hover:scale-[1.02] transition-all text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border ${m.progress >= 100 || m.status === 'livré' ? 'bg-white/5 border-white/5 text-white/40 line-through' : m.priority === 'High priority' ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' : m.priority === 'Medium priority' ? 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20 hover:bg-accent-yellow/20' : 'bg-accent-blue/10 text-accent-blue border-accent-blue/20 hover:bg-accent-blue/20'}`}
                       >
-                        <span className="font-bold truncate leading-tight group-hover:text-white transition-colors">{m.product}</span>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-bold truncate leading-tight group-hover:text-white transition-colors flex-1">{m.product}</span>
+                          <a
+                            href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('Mission: ' + m.product)}&details=${encodeURIComponent('Ref: ' + m.refId + '\n' + (m.info || ''))}&dates=${(() => {
+                              const dObj = getSafeDateObject(m.deadline);
+                              if (!dObj) return '';
+                              const startStr = dObj.toISOString().replace(/-|:|\.\d\d\d/g, "");
+                              const endStr = new Date(dObj.getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "");
+                              return `${startStr}/${endStr}`;
+                            })()}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-white/10 rounded transition-all text-text-dim hover:text-white shrink-0"
+                            title="Exporter vers Google Calendar"
+                          >
+                            <Calendar size={10} />
+                          </a>
+                        </div>
                         <span className="text-[8px] opacity-60 font-mono truncate">{m.refId}</span>
-                      </a>
+                      </div>
                    ))}
                    
                    {daySecondaryMissions.map(sm => (
                       <div 
                         key={sm.id}
-                        title="Double-cliquez pour éditer la mission secondaire, simple clic pour l’ajouter sur Google Calendar" 
+                        title="Cliquez pour éditer la mission secondaire" 
                         onClick={(e) => {
-                          e.preventDefault();
-                          const datesParam = sm.deadline ? new Date(sm.deadline).toISOString().replace(/-|:|\.\d\d\d/g, "") + '/' + new Date(new Date(sm.deadline).getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "") : '';
-                          const href = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('[Mission Sec] ' + sm.title)}&details=${encodeURIComponent(sm.note || '')}&dates=${datesParam}`;
-                          window.open(href, '_blank', 'noopener,noreferrer');
-                        }}
-                        onDoubleClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
                           setSelectedSecondaryMissionForModal(sm);
@@ -6221,16 +6296,32 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                         className={`group cursor-pointer hover:scale-[1.02] transition-all text-[10px] px-2 py-1.5 rounded-lg flex flex-col gap-0.5 border border-dashed ${
                           sm.progress >= 100 
                             ? 'bg-white/5 border-white/5 text-white/40 line-through' 
-                            : sm.priority === 'high' 
-                            ? 'bg-red-500/5 text-red-400 border-red-500/20 hover:bg-red-500/15' 
-                            : sm.priority === 'medium' 
-                            ? 'bg-accent-yellow/5 text-accent-yellow border-accent-yellow/20 hover:bg-accent-yellow/15' 
-                            : 'bg-accent-blue/5 text-accent-blue border-accent-blue/20 hover:bg-accent-blue/15'
+                             : sm.priority === 'high' 
+                             ? 'bg-red-500/5 text-red-400 border-red-500/20 hover:bg-red-500/15' 
+                             : sm.priority === 'medium' 
+                             ? 'bg-accent-yellow/5 text-accent-yellow border-accent-yellow/20 hover:bg-accent-yellow/15' 
+                             : 'bg-accent-blue/5 text-accent-blue border-accent-blue/20 hover:bg-accent-blue/15'
                         }`}
                       >
                         <div className="flex items-center gap-1">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sm.progress >= 100 ? 'bg-white/20' : sm.priority === 'high' ? 'bg-red-500' : sm.priority === 'medium' ? 'bg-accent-yellow' : 'bg-accent-blue'}`} />
                           <span className="font-bold truncate leading-tight group-hover:text-white transition-colors flex-1">{sm.title}</span>
+                          <a
+                            href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('[Mission Sec] ' + sm.title)}&details=${encodeURIComponent(sm.note || '')}&dates=${(() => {
+                              const dObj = getSafeDateObject(sm.deadline);
+                              if (!dObj) return '';
+                              const startStr = dObj.toISOString().replace(/-|:|\.\d\d\d/g, "");
+                              const endStr = new Date(dObj.getTime() + 60*60*1000).toISOString().replace(/-|:|\.\d\d\d/g, "");
+                              return `${startStr}/${endStr}`;
+                            })()}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-white/10 rounded transition-all text-text-dim hover:text-white shrink-0"
+                            title="Exporter vers Google Calendar"
+                          >
+                            <Calendar size={10} />
+                          </a>
                         </div>
                         <span className="text-[8.5px] opacity-60 font-mono">Sec.</span>
                       </div>
@@ -6291,6 +6382,32 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     return acc;
   }, {});
   const argumentData = Object.entries(argumentCounts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a: any, b: any) => b.value - a.value);
+
+  // Problématiques par Produit
+  const problemsByProductCounts = activeMissions.reduce((acc: any, m) => {
+    if (m.problems && m.problems.length > 0) {
+      acc[m.product] = (acc[m.product] || 0) + m.problems.length;
+    }
+    return acc;
+  }, {});
+  const problemsByProductData = Object.entries(problemsByProductCounts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a: any, b: any) => b.value - a.value);
+
+  // Problématiques par Support
+  const problemsBySupportCounts = activeMissions.reduce((acc: any, m) => {
+    if (m.problems && m.problems.length > 0 && m.support) {
+      const supports = m.support.split(', ');
+      supports.forEach(s => {
+        const key = s === 'video' ? 'vidéo' : s;
+        acc[key] = (acc[key] || 0) + m.problems.length;
+      });
+    }
+    return acc;
+  }, {});
+  const problemsBySupportData = Object.entries(problemsBySupportCounts)
     .map(([name, value]) => ({ name, value }))
     .sort((a: any, b: any) => b.value - a.value);
 
@@ -7690,6 +7807,150 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                                <span className="text-white">{secondaryMissions.filter(sm => sm.enabled).length} units</span>
                             </div>
                          </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Section Problématiques */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-8 border-t border-white/5 mt-8 w-full">
+                  <div className="lg:col-span-2 flex items-center gap-2 mb-2">
+                    <AlertTriangle size={14} className="text-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)] animate-pulse shrink-0" />
+                    <h3 className="text-[10px] font-black uppercase tracking-[3px] text-red-500">Moniteur Spécialisé des Problématiques</h3>
+                  </div>
+
+                  {ChartCard({ 
+                    id: "chart-problems-product",
+                    title: "Problématiques par Produit", 
+                    subtitle: "Volume d'incidents par gamme", 
+                    onExport: exportChartAsJPEG,
+                    delay: 0.7,
+                    rightElement: (
+                      <button 
+                        onClick={handleRefreshScore} 
+                        className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-red-500 hover:bg-white/10 hover:border-red-500/30 rounded transition-all"
+                        title="Mettre à jour les graphiques"
+                      >
+                        <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                      </button>
+                    ),
+                    children: (
+                      <div style={{ width: '100%', height: 260 }}>
+                        {problemsByProductData.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center h-full text-center text-white/30 text-[10px] uppercase tracking-wider font-mono">
+                            <AlertTriangle size={24} className="text-white/10 mb-2" />
+                            Aucune problématique signalée
+                          </div>
+                        ) : (
+                          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'problems-prod-refresh' : 'problems-prod-stable'}>
+                            <BarChart data={problemsByProductData} margin={{ top: 25, right: 10, left: 10, bottom: 0 }}>
+                              <XAxis 
+                                dataKey="name" 
+                                stroke="#444" 
+                                fontSize={8} 
+                                tickLine={false} 
+                                axisLine={false}
+                                tick={{ fill: '#888', fontWeight: 'bold' }}
+                                dy={10}
+                              />
+                              <YAxis hide domain={[0, 'dataMax + 1']} />
+                              <RechartsTooltip 
+                                contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                                itemStyle={{ color: '#EF4444' }}
+                                cursor={{ fill: 'rgba(255,255,255,0.02)' }}
+                              />
+                              <Bar 
+                                dataKey="value" 
+                                fill="#EF4444" 
+                                radius={[4, 4, 0, 0]} 
+                                barSize={40}
+                                animationDuration={1200}
+                                isAnimationActive={true}
+                              >
+                                <LabelList 
+                                  dataKey="value" 
+                                  position="top" 
+                                  fill="#EF4444" 
+                                  fontSize={11} 
+                                  fontWeight="black"
+                                  offset={8}
+                                  formatter={(val: number) => val > 0 ? val : ''}
+                                />
+                                {problemsByProductData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill="#EF4444" fillOpacity={0.8 - (index * 0.1)} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {ChartCard({ 
+                    id: "chart-problems-support",
+                    title: "Problématiques par Support", 
+                    subtitle: "Incidents par type de média", 
+                    onExport: exportChartAsJPEG,
+                    delay: 0.8,
+                    rightElement: (
+                      <button 
+                        onClick={handleRefreshScore} 
+                        className="p-1.5 bg-white/5 border border-white/10 text-white hover:text-red-500 hover:bg-white/10 hover:border-red-500/30 rounded transition-all"
+                        title="Mettre à jour les graphiques"
+                      >
+                        <RefreshCw size={14} className={isRefreshingScore ? 'animate-spin' : ''} />
+                      </button>
+                    ),
+                    children: (
+                      <div style={{ width: '100%', height: 260 }}>
+                        {problemsBySupportData.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center h-full text-center text-white/30 text-[10px] uppercase tracking-wider font-mono">
+                            <AlertTriangle size={24} className="text-white/10 mb-2" />
+                            Aucune problématique signalée
+                          </div>
+                        ) : (
+                          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} key={isRefreshingScore ? 'problems-supp-refresh' : 'problems-supp-stable'}>
+                            <BarChart data={problemsBySupportData} margin={{ top: 25, right: 10, left: 10, bottom: 0 }}>
+                              <XAxis 
+                                dataKey="name" 
+                                stroke="#444" 
+                                fontSize={8} 
+                                tickLine={false} 
+                                axisLine={false}
+                                tick={{ fill: '#888', fontWeight: 'bold' }}
+                                dy={10}
+                              />
+                              <YAxis hide domain={[0, 'dataMax + 1']} />
+                              <RechartsTooltip 
+                                contentStyle={{ backgroundColor: '#1A1A1A', border: '1px solid #333', borderRadius: '8px', fontSize: '10px' }}
+                                itemStyle={{ color: '#F97316' }}
+                                cursor={{ fill: 'rgba(255,255,255,0.02)' }}
+                              />
+                              <Bar 
+                                dataKey="value" 
+                                fill="#F97316" 
+                                radius={[4, 4, 0, 0]} 
+                                barSize={40}
+                                animationDuration={1200}
+                                isAnimationActive={true}
+                              >
+                                <LabelList 
+                                  dataKey="value" 
+                                  position="top" 
+                                  fill="#F97316" 
+                                  fontSize={11} 
+                                  fontWeight="black"
+                                  offset={8}
+                                  formatter={(val: number) => val > 0 ? val : ''}
+                                />
+                                {problemsBySupportData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill="#F97316" fillOpacity={0.8 - (index * 0.1)} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        )}
                       </div>
                     )
                   })}
@@ -10240,6 +10501,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     deliveredAt?: string;
     rating?: number;
     priority?: string;
+    problemsText?: string;
     updateEnabled: boolean;
     updateStatus: boolean;
     updateDeadline: boolean;
@@ -10249,6 +10511,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     updateDelivered: boolean;
     updateRating: boolean;
     updatePriority: boolean;
+    updateProblems: boolean;
   }) => {
     const updatedCount = selectedMissionIds.length;
     if (updatedCount === 0) return;
@@ -10375,6 +10638,19 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           nextMission.priority = updates.priority;
           history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Priorité changée à "${updates.priority}"` });
           changed = true;
+        }
+
+        if (updates.updateProblems && updates.problemsText !== undefined) {
+          if (updates.problemsText.trim()) {
+            const newProblem: MissionProblem = {
+              id: Math.random().toString(36).substring(2, 9),
+              text: updates.problemsText.trim(),
+              createdAt: Date.now()
+            };
+            nextMission.problems = [...(m.problems || []), newProblem];
+            history.push({ timestamp: Date.now(), message: `MISE À JOUR GROUPÉE : Problématique ajoutée : "${updates.problemsText.trim()}"` });
+            changed = true;
+          }
         }
 
         // Synchronize status and progress from dates if dates were updated directly but status wasn't changed explicitly
@@ -13853,8 +14129,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               ))}
               {Array.from({ length: new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 0).getDate() }, (_, i) => i + 1).map(day => {
                 const dateStr = `${calendarDate.getFullYear()}-${(calendarDate.getMonth() + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-                const dayMissions = filteredSecondaryMissions.filter(m => m.deadline === dateStr);
-                const isToday = new Date().toISOString().split('T')[0] === dateStr;
+                const dayMissions = filteredSecondaryMissions.filter(m => isSameDay(m.deadline, dateStr));
+                const d = new Date();
+                const pad = (n: number) => String(n).padStart(2, '0');
+                const localTodayStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                const isToday = localTodayStr === dateStr;
                 return (
                   <div key={day} className={`min-h-[120px] rounded-xl p-2.5 flex flex-col transition-colors ${isToday ? 'bg-accent/5 border border-accent/30 shadow-[0_0_15px_rgba(0,255,148,0.1)]' : 'bg-black/20 border border-white/5 hover:border-white/20 hover:bg-white/[0.02]'}`}>
                      <div className={`text-[11px] font-black mb-3 ${isToday ? 'text-accent' : 'text-text-dim/80'}`}>{day}</div>
@@ -14125,6 +14404,35 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   </div>
                 </div>
 
+                {/* 4b. Problématiques en masse */}
+                <div className={`p-3 bg-white/5 border rounded-xl duration-200 transition-all md:col-span-2 ${bulkEditUpdateProblems ? 'border-red-500/30 bg-red-500/5' : 'border-white/5'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={bulkEditUpdateProblems} 
+                        onChange={(e) => setBulkEditUpdateProblems(e.target.checked)} 
+                        className="rounded border-white/20 bg-black/40 text-red-500 focus:ring-red-500"
+                      />
+                      <AlertTriangle size={12} className="text-red-500 animate-pulse shrink-0" />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-white">Signaler des problématiques</span>
+                    </label>
+                    {bulkEditUpdateProblems && <span className="text-[8px] font-bold text-red-500 uppercase tracking-widest bg-red-500/10 px-1.5 py-0.5 rounded">Modifier</span>}
+                  </div>
+                  <div className={bulkEditUpdateProblems ? "opacity-100" : "opacity-45 pointer-events-none"}>
+                    <textarea
+                      value={bulkEditProblemsText}
+                      onChange={(e) => {
+                        setBulkEditProblemsText(e.target.value);
+                        setBulkEditUpdateProblems(true);
+                      }}
+                      placeholder="Saisir la problématique rencontrée..."
+                      rows={2}
+                      className="w-full p-2.5 bg-black/60 border border-white/10 text-[10px] text-white placeholder:text-white/30 outline-none focus:border-red-500/50 transition-all font-mono resize-none rounded-lg"
+                    />
+                  </div>
+                </div>
+
                 {/* Follow-up / Step dates Title */}
                 <div className="md:col-span-2 border-t border-white/5 pt-4 mt-2 mb-1">
                   <h4 className="text-[10px] font-black uppercase tracking-widest text-text-dim flex items-center gap-2">
@@ -14245,6 +14553,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     deliveredAt: bulkEditDeliveredAt,
                     rating: bulkEditRating,
                     priority: bulkEditPriority,
+                    problemsText: bulkEditProblemsText,
                     updateEnabled: bulkEditUpdateEnabled,
                     updateStatus: bulkEditUpdateStatus,
                     updateDeadline: bulkEditUpdateDeadline,
@@ -14253,7 +14562,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     updatePostProd: bulkEditUpdatePostProdAt,
                     updateDelivered: bulkEditUpdateDeliveredAt,
                     updateRating: bulkEditUpdateRating,
-                    updatePriority: bulkEditUpdatePriority
+                    updatePriority: bulkEditUpdatePriority,
+                    updateProblems: bulkEditUpdateProblems
                   })}
                   className="px-6 py-2.5 bg-accent hover:bg-accent/95 text-black rounded-lg text-[9px] font-black uppercase tracking-widest shadow-[0_0_15px_rgba(0,255,148,0.2)] transition-all"
                 >
@@ -15842,6 +16152,42 @@ function MissionDetailModal({
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const [newProblemText, setNewProblemText] = useState('');
+  const [editingProblemId, setEditingProblemId] = useState<string | null>(null);
+  const [editingProblemText, setEditingProblemText] = useState('');
+
+  const handleAddProblem = () => {
+    if (!newProblemText.trim()) return;
+    const newProblem: MissionProblem = {
+      id: Math.random().toString(36).substring(2, 9),
+      text: newProblemText.trim(),
+      createdAt: Date.now()
+    };
+    const updatedProblems = [...(mission.problems || []), newProblem];
+    onUpdate(mission.id, { problems: updatedProblems });
+    setNewProblemText('');
+  };
+
+  const handleStartEditProblem = (id: string, currentText: string) => {
+    setEditingProblemId(id);
+    setEditingProblemText(currentText);
+  };
+
+  const handleSaveEditProblem = () => {
+    if (!editingProblemText.trim() || !editingProblemId) return;
+    const updatedProblems = (mission.problems || []).map(p => 
+      p.id === editingProblemId ? { ...p, text: editingProblemText.trim() } : p
+    );
+    onUpdate(mission.id, { problems: updatedProblems });
+    setEditingProblemId(null);
+    setEditingProblemText('');
+  };
+
+  const handleDeleteProblem = (id: string) => {
+    const updatedProblems = (mission.problems || []).filter(p => p.id !== id);
+    onUpdate(mission.id, { problems: updatedProblems });
+  };
+
   const handleDelete = () => {
     onRemove(mission.id);
     onClose();
@@ -16297,6 +16643,106 @@ function MissionDetailModal({
                   </button>
                 </div>
                 {renderUrlButtons(mission.info)}
+              </div>
+
+              <div className="mt-8 border-t border-white/5 pt-6">
+                <h3 className="text-[11px] font-black uppercase tracking-widest text-red-500 mb-4 flex items-center gap-2">
+                  <AlertTriangle size={12} className="text-red-500 animate-pulse" />
+                  Problématiques rencontrées ({mission.problems?.length || 0})
+                </h3>
+                
+                <div className="space-y-4">
+                  {/* Ajouter un problème */}
+                  <div className="flex gap-2">
+                    <input 
+                      type="text"
+                      value={newProblemText}
+                      onChange={(e) => setNewProblemText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleAddProblem();
+                        }
+                      }}
+                      placeholder="Signaler un problème rencontré lors de la production..."
+                      className="flex-1 p-3.5 bg-white/5 border border-white/10 text-xs text-white placeholder:text-white/30 outline-none focus:border-red-500/50 transition-all font-mono"
+                    />
+                    <button 
+                      onClick={handleAddProblem}
+                      className="px-4 bg-red-500/10 border border-red-500/30 hover:bg-red-500 hover:text-black transition-all text-red-400 hover:text-black font-black text-[10px] uppercase tracking-wider shrink-0 cursor-pointer"
+                    >
+                      Ajouter
+                    </button>
+                  </div>
+
+                  {/* Liste des problèmes */}
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                    {mission.problems && mission.problems.length > 0 ? (
+                      mission.problems.map((prob) => (
+                        <div 
+                          key={prob.id} 
+                          className="flex items-center justify-between p-3.5 bg-red-500/5 border border-red-500/10 rounded-none gap-3 hover:border-red-500/20 transition-all"
+                        >
+                          {editingProblemId === prob.id ? (
+                            <div className="flex-1 flex gap-2">
+                              <input 
+                                type="text"
+                                value={editingProblemText}
+                                onChange={(e) => setEditingProblemText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveEditProblem();
+                                  else if (e.key === 'Escape') setEditingProblemId(null);
+                                }}
+                                className="flex-1 bg-black border border-red-500 text-xs text-white px-2 py-1 outline-none font-mono"
+                                autoFocus
+                              />
+                              <button 
+                                onClick={handleSaveEditProblem}
+                                className="px-2.5 py-1 bg-red-500 text-black text-[9px] font-black uppercase tracking-wider hover:bg-white transition-all cursor-pointer"
+                              >
+                                Sauver
+                              </button>
+                              <button 
+                                onClick={() => setEditingProblemId(null)}
+                                className="px-2.5 py-1 bg-white/5 border border-white/10 text-white/50 text-[9px] font-black uppercase tracking-wider hover:bg-white/10 transition-all cursor-pointer"
+                              >
+                                Annuler
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex-1 flex items-start gap-2">
+                                <AlertTriangle size={12} className="text-red-500 shrink-0 mt-0.5" />
+                                <span className="text-xs text-white/90 leading-normal font-mono break-all">
+                                  {prob.text}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button 
+                                  onClick={() => handleStartEditProblem(prob.id, prob.text)}
+                                  className="p-1 hover:bg-white/5 text-text-dim hover:text-white rounded transition-colors cursor-pointer"
+                                  title="Modifier"
+                                >
+                                  <Edit2 size={11} />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteProblem(prob.id)}
+                                  className="p-1 hover:bg-red-500/10 text-text-dim hover:text-red-400 rounded transition-colors cursor-pointer"
+                                  title="Supprimer"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-6 text-[10px] text-text-dim/50 italic border border-dashed border-white/5 bg-white/[0.01]">
+                        Aucun problème signalé sur cette mission.
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -16893,6 +17339,7 @@ function FamilyGroupView({
   const [bulkSelectedStatus, setBulkSelectedStatus] = useState<string | null>(null);
   const [bulkSelectedEnable, setBulkSelectedEnable] = useState<boolean | null>(null);
   const [bulkSelectedPriority, setBulkSelectedPriority] = useState<string | null>(null);
+  const [bulkProblemText, setBulkProblemText] = useState('');
 
   const getTargetMissionIds = () => {
     const ids = new Set<string>();
@@ -17058,6 +17505,51 @@ function FamilyGroupView({
     setSelectedSubFams([]);
     setSelectedMissionIds([]);
     setBulkSelectedPriority(null);
+  };
+
+  const handleBulkProblemsAdd = () => {
+    const targetIds = getTargetMissionIds();
+    if (targetIds.length === 0 || !bulkProblemText.trim()) return;
+
+    setMissions(prevMissions => prevMissions.map(m => {
+      if (targetIds.includes(m.id)) {
+        const newProblem: MissionProblem = {
+          id: Math.random().toString(36).substring(2, 9),
+          text: bulkProblemText.trim(),
+          createdAt: Date.now()
+        };
+        const updatedProblems = [...(m.problems || []), newProblem];
+        
+        // Push into history
+        const history = m.history ? [...m.history] : [];
+        history.push({
+          timestamp: Date.now(),
+          message: `PROBLÉMATIQUE SÉLECTIONNÉE EN MASSE : "${bulkProblemText.trim()}"`
+        });
+
+        return { ...m, problems: updatedProblems, history, updatedAt: Date.now() };
+      }
+      return m;
+    }));
+
+    // Log globally
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `PROBLÉMATIQUE SÉLECTIONNÉE EN MASSE : "${bulkProblemText.trim()}" ajoutée à ${targetIds.length} produit(s).`,
+      type: 'system'
+    }]);
+
+    setToast({
+      show: true,
+      message: `Problématique ajoutée à ${targetIds.length} produit(s) !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+    setBulkProblemText('');
+    setSelectedSubFams([]);
+    setSelectedMissionIds([]);
   };
 
   const toggleSubFamilySelection = (fam: string, productName: string, colorName: string) => {
@@ -17269,7 +17761,7 @@ function FamilyGroupView({
               </div>
 
               {/* Action grid / options */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                 {/* Section 1: Déplacer */}
                 <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col gap-2">
                   <span className="text-[9px] font-black text-text-dim/80 uppercase tracking-widest block mb-1">
@@ -17508,6 +18000,39 @@ function FamilyGroupView({
                   <div className="text-[7px] text-text-dim/40 text-center uppercase font-mono tracking-wider">
                     {googleToken ? 'Compte Google Connecté' : 'Google non connecté'}
                   </div>
+                </div>
+
+                {/* Section 6: Problématiques en masse */}
+                <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col justify-between gap-3">
+                  <div>
+                    <span className="text-[9px] font-black text-red-500 uppercase tracking-widest block mb-1">
+                      🚨 Problématiques en masse :
+                    </span>
+                    <p className="text-[8px] text-text-dim/60 leading-normal uppercase">
+                      Signalez un problème pour toutes les missions sélectionnées simultanément.
+                    </p>
+                  </div>
+                  <div>
+                    <textarea
+                      value={bulkProblemText}
+                      onChange={(e) => setBulkProblemText(e.target.value)}
+                      placeholder="Saisir la problématique..."
+                      rows={2}
+                      className="w-full p-2.5 bg-white/5 border border-white/10 text-[10px] text-white placeholder:text-white/30 outline-none focus:border-red-500/50 transition-all font-mono resize-none rounded-lg"
+                    />
+                  </div>
+
+                  <button
+                    disabled={!bulkProblemText.trim()}
+                    onClick={handleBulkProblemsAdd}
+                    className={`w-full py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                      bulkProblemText.trim()
+                        ? 'bg-red-500 text-black hover:bg-red-500/90 shadow-[0_0_12px_rgba(239,68,68,0.25)] cursor-pointer font-bold'
+                        : 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed font-medium'
+                    }`}
+                  >
+                    Ajouter aux missions
+                  </button>
                 </div>
               </div>
             </div>
@@ -18338,6 +18863,28 @@ function FamilyGroupView({
                                             <span className="text-[7px] font-black uppercase text-accent tracking-widest">{m.status}</span>
                                           </div>
 
+                                          {/* Problem Alert Icon */}
+                                          {m.problems && m.problems.length > 0 && (
+                                            <div className="relative group/prob-tooltip shrink-0 flex items-center cursor-help" onClick={(e) => e.stopPropagation()}>
+                                              <AlertTriangle 
+                                                size={14} 
+                                                className="text-red-500 hover:text-red-400 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all pointer-events-none hover:scale-110 animate-pulse" 
+                                              />
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/prob-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/prob-tooltip:opacity-100 group-hover/prob-tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-[80] whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                                <div className="text-[9px] font-black uppercase text-red-500 tracking-widest mb-1.5 font-mono flex items-center gap-1">
+                                                  <AlertTriangle size={10} /> Problématiques ({m.problems.length}) :
+                                                </div>
+                                                <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                                                  {m.problems.map((prob) => (
+                                                    <div key={prob.id} className="text-[10px] text-white/80 font-mono leading-tight pl-2 border-l border-red-500/50">
+                                                      {prob.text}
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          )}
+
                                           {/* Post-it Note Hover Icon */}
                                           {m.info && m.info.trim() && (
                                             <div className="relative group/tooltip shrink-0 flex items-center cursor-help" onClick={(e) => e.stopPropagation()}>
@@ -18888,6 +19435,28 @@ function FamilyGroupView({
                                             <span className="text-xs font-mono font-black text-white">{m.progress}%</span>
                                             <span className="text-[8px] font-black uppercase text-accent tracking-widest">{m.status}</span>
                                           </div>
+
+                                          {/* Problem Alert Icon */}
+                                          {m.problems && m.problems.length > 0 && (
+                                            <div className="relative group/prob-tooltip shrink-0 flex items-center cursor-help" onClick={(e) => e.stopPropagation()}>
+                                              <AlertTriangle 
+                                                size={15} 
+                                                className="text-red-500 hover:text-red-400 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all pointer-events-none hover:scale-110 animate-pulse" 
+                                              />
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/prob-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/prob-tooltip:opacity-100 group-hover/prob-tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-[80] whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                                <div className="text-[9px] font-black uppercase text-red-500 tracking-widest mb-1.5 font-mono flex items-center gap-1">
+                                                  <AlertTriangle size={10} /> Problématiques ({m.problems.length}) :
+                                                </div>
+                                                <div className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                                                  {m.problems.map((prob) => (
+                                                    <div key={prob.id} className="text-[10px] text-white/80 font-mono leading-tight pl-2 border-l border-red-500/50">
+                                                      {prob.text}
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          )}
 
                                           {/* Post-it Note Hover Icon */}
                                           {m.info && m.info.trim() && (
