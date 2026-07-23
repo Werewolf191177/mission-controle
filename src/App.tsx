@@ -1386,6 +1386,10 @@ export default function App() {
   const [showDuplicateIndicators, setShowDuplicateIndicators] = useState(true);
   const [showCleanDuplicatesModal, setShowCleanDuplicatesModal] = useState(false);
   const [showAddFamilyModal, setShowAddFamilyModal] = useState(false);
+  const [addFamilyMode, setAddFamilyMode] = useState<'family' | 'subfamily'>('family');
+  const [selectedFamilyCheckboxes, setSelectedFamilyCheckboxes] = useState<string[]>([]);
+  const [newSubFamilyName, setNewSubFamilyName] = useState('');
+  const [newSubFamilyColor, setNewSubFamilyColor] = useState('STANDARD');
   const [showShortcutsHelpModal, setShowShortcutsHelpModal] = useState(false);
   const [newFamilyName, setNewFamilyName] = useState('');
   const [missionCounter, setMissionCounter] = useState(1);
@@ -1883,12 +1887,152 @@ LISTE DES COMMANDES :
     return stored !== 'false';
   });
 
+  // Exportable targets definition for JPEGs & Tables window
+  const EXPORTABLE_TARGETS = useMemo(() => [
+    {
+      id: 'global-report-container',
+      name: 'Rapport Global Synthétique',
+      category: 'Moniteur & Synthèse' as const,
+      description: 'Vue panoramique complète avec tous les métriques, graphiques et tableaux'
+    },
+    {
+      id: 'report-dashboard-strategic',
+      name: 'Carte Performance Stratégique',
+      category: 'Moniteur & Synthèse' as const,
+      description: 'Bilan de performance globale, taux de livraison et efficience'
+    },
+    {
+      id: 'report-chart-timeline',
+      name: 'Évolution Hebdomadaire des Livraisons',
+      category: 'Graphiques & Analytique' as const,
+      description: 'Graphique d’avancement de la production sur 7 jours'
+    },
+    {
+      id: 'report-chart-status',
+      name: 'Distribution par État & Statuts',
+      category: 'Graphiques & Analytique' as const,
+      description: 'Diagramme de répartition des états de production'
+    },
+    {
+      id: 'report-chart-support',
+      name: 'Répartition par Supports',
+      category: 'Graphiques & Analytique' as const,
+      description: 'Répartition entre photo, vidéo, graphisme et autres'
+    },
+    {
+      id: 'report-chart-product',
+      name: 'Répartition par Gammes & Produits',
+      category: 'Graphiques & Analytique' as const,
+      description: 'Volume de production ventilé par référence produit'
+    },
+    {
+      id: 'report-chart-univers',
+      name: 'Répartition par Univers',
+      category: 'Graphiques & Analytique' as const,
+      description: 'Histogramme de ventilation par univers'
+    },
+    {
+      id: 'report-chart-argument',
+      name: 'Type d’Argumentaire',
+      category: 'Graphiques & Analytique' as const,
+      description: 'Répartition selon les types d’argumentaires'
+    },
+    {
+      id: 'report-chart-poids',
+      name: 'Poids Stratégique',
+      category: 'Graphiques & Analytique' as const,
+      description: 'Ventilation relative des catégories de production'
+    },
+    {
+      id: 'main-missions-table',
+      name: 'Tableau Général des Missions',
+      category: 'Tableaux de Données' as const,
+      description: 'Tableau de bord principal de toutes les missions'
+    },
+    {
+      id: 'family-mosaics-grid',
+      name: 'Mosaïque des Familles & Visuels (Moniteur)',
+      category: 'Tableaux de Données' as const,
+      description: 'Toutes les images et aperçus des visuels du moniteur'
+    },
+    {
+      id: 'secondary-missions-container',
+      name: 'Tableau des Missions Secondaires',
+      category: 'Tableaux de Données' as const,
+      description: 'Suivi et liste des missions secondaires'
+    }
+  ], []);
+
   // Auto Export state
   const [autoExportEnabled, setAutoExportEnabled] = useState(false);
   const [autoExportInterval, setAutoExportInterval] = useState(60); // minutes
   const [scheduledExportEnabled, setScheduledExportEnabled] = useState(false);
   const [scheduledExportDays, setScheduledExportDays] = useState<string[]>(['1', '2', '3', '4', '5']);
   const [scheduledExportTime, setScheduledExportTime] = useState('18:00');
+
+  // Per-day schedule configuration state
+  const [scheduledExportDayConfigs, setScheduledExportDayConfigs] = useState<Record<string, { enabled: boolean; time: string }>>(() => {
+    const saved = localStorage.getItem('scheduledExportDayConfigs');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    const savedDays = localStorage.getItem('scheduledExportDays');
+    const savedTime = localStorage.getItem('scheduledExportTime') || '18:00';
+    const initial: Record<string, { enabled: boolean; time: string }> = {
+      '1': { enabled: true, time: '16:00' },
+      '2': { enabled: true, time: '17:00' },
+      '3': { enabled: true, time: '18:00' },
+      '4': { enabled: true, time: '18:00' },
+      '5': { enabled: true, time: '18:00' },
+      '6': { enabled: false, time: '12:00' },
+      '0': { enabled: false, time: '12:00' }
+    };
+    if (savedDays) {
+      try {
+        const daysArr: string[] = JSON.parse(savedDays);
+        Object.keys(initial).forEach(d => {
+          initial[d] = {
+            enabled: daysArr.includes(d),
+            time: savedTime
+          };
+        });
+      } catch (e) {}
+    }
+    return initial;
+  });
+
+  // Selected export targets (which tables / charts / images to export)
+  const [selectedExportTargets, setSelectedExportTargets] = useState<string[]>(() => {
+    const saved = localStorage.getItem('selectedExportTargets');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return [
+      'global-report-container',
+      'report-dashboard-strategic',
+      'report-chart-timeline',
+      'report-chart-status',
+      'report-chart-support',
+      'main-missions-table',
+      'family-mosaics-grid'
+    ];
+  });
+
+  const [isExportTargetsModalOpen, setIsExportTargetsModalOpen] = useState(false);
+
+  // Sync back to local storage
+  useEffect(() => {
+    localStorage.setItem('scheduledExportDayConfigs', JSON.stringify(scheduledExportDayConfigs));
+    const activeDays = Object.keys(scheduledExportDayConfigs).filter(d => scheduledExportDayConfigs[d].enabled);
+    localStorage.setItem('scheduledExportDays', JSON.stringify(activeDays));
+    const firstActiveTime = Object.values(scheduledExportDayConfigs).find(c => c.enabled)?.time || '18:00';
+    localStorage.setItem('scheduledExportTime', firstActiveTime);
+  }, [scheduledExportDayConfigs]);
+
+  useEffect(() => {
+    localStorage.setItem('selectedExportTargets', JSON.stringify(selectedExportTargets));
+  }, [selectedExportTargets]);
+
   const lastExportTimeRef = useRef<number>(Date.now());
   const lastScheduledExportDateRef = useRef<string>('');
   const lastActualExportTimeRef = useRef<number>(0);
@@ -1901,15 +2045,16 @@ LISTE DES COMMANDES :
        let shouldExport = false;
        const nowMs = now.getTime();
 
-       // 1. Scheduled Export
+       // 1. Scheduled Export with per-day configuration
        if (scheduledExportEnabled) {
           const currentDayStr = now.getDay().toString();
           const currentHour = now.getHours().toString().padStart(2, '0');
           const currentMinute = now.getMinutes().toString().padStart(2, '0');
           const currentTimeStr = `${currentHour}:${currentMinute}`;
           const todayDateStr = now.toLocaleDateString();
-          
-          if (scheduledExportDays.includes(currentDayStr) && currentTimeStr === scheduledExportTime && lastScheduledExportDateRef.current !== todayDateStr) {
+
+          const dayConfig = scheduledExportDayConfigs[currentDayStr];
+          if (dayConfig && dayConfig.enabled && dayConfig.time === currentTimeStr && lastScheduledExportDateRef.current !== todayDateStr) {
              lastScheduledExportDateRef.current = todayDateStr;
              shouldExport = true;
              // Also reset the periodic export timestamp so they don't both fire
@@ -1939,10 +2084,122 @@ LISTE DES COMMANDES :
     // Check every 30 seconds
     const timer = setInterval(handleSilenceExport, 30000);
     return () => clearInterval(timer);
-  }, [autoExportEnabled, autoExportInterval, scheduledExportEnabled, scheduledExportDays, scheduledExportTime]);
+  }, [autoExportEnabled, autoExportInterval, scheduledExportEnabled, scheduledExportDayConfigs]);
 
   const generateFullDataJson = useCallback(() => {
+    // Strategic Performance Analysis Calculations
+    const activeM = missions.filter(m => m.enabled !== false);
+    const totalMissionsCount = missions.length;
+    const activeMissionsCount = activeM.length;
+    
+    const productionStatuses = ['produit préparé', 'en cours de shoot', 'shooté', 'En post-production'];
+    const missionsInProduction = missions.filter(m => productionStatuses.includes(m.status));
+    const missionsInProductionCount = missionsInProduction.length;
+    
+    const deliveredMissionsCount = missions.filter(m => m.status === 'livré').length;
+    const totalPhotosRequested = missions.reduce((acc, m) => acc + (Number(m.photoCountRequested) || 0), 0);
+    const totalPhotosDelivered = missions.reduce((acc, m) => acc + (Number(m.photoCountDelivered) || 0), 0);
+    
+    const deliveryRateVal = totalPhotosRequested > 0 ? (totalPhotosDelivered / totalPhotosRequested) * 100 : 0;
+    const deliveryRateStr = `${deliveryRateVal.toFixed(1)}%`;
+    const missionDeliveryRateVal = totalMissionsCount > 0 ? (deliveredMissionsCount / totalMissionsCount) * 100 : 0;
+    const missionDeliveryRateStr = `${missionDeliveryRateVal.toFixed(1)}%`;
+    
+    const photoVideoPercentageStr = deliveryRateStr;
+    
+    const ratedMissions = missions.filter(m => m.rating && m.rating > 0);
+    const avgRatingVal = ratedMissions.length > 0 ? ratedMissions.reduce((acc, m) => acc + m.rating, 0) / ratedMissions.length : 5.0;
+    const qualityIndexStr = `${avgRatingVal.toFixed(2)} / 5 (${((avgRatingVal / 5) * 100).toFixed(1)}%)`;
+    
+    const avgProgVal = activeM.length > 0 ? activeM.reduce((acc, m) => acc + (m.progress || 0), 0) / activeM.length : 0;
+    const urgentMissionsCount = activeM.filter(m => m.priority === 'High priority' && m.status !== 'livré').length;
+    const realEfficiencyVal = Math.max(0, avgProgVal - (urgentMissionsCount * 1.5));
+    const realEfficiencyStr = `${realEfficiencyVal.toFixed(1)}%`;
+    
+    const problemMissionsCount = missions.filter(m => (m.priority === 'High priority' && m.status !== 'livré') || m.status === 'annuler').length;
+    const problemPercentageVal = totalMissionsCount > 0 ? (problemMissionsCount / totalMissionsCount) * 100 : 0;
+    const problemPercentageStr = `${problemPercentageVal.toFixed(1)}%`;
+    
+    const activeFamiliesSet = new Set(activeM.map(m => m.family || 'Autre'));
+    const activeFamiliesCount = activeFamiliesSet.size;
+
+    const strategicPerformanceAnalysis = {
+      // 1. Delivery rate / Taux de livraison
+      deliveryRate: deliveryRateStr,
+      tauxDeLivraison: deliveryRateStr,
+      
+      // 2. Active production / Production active
+      activeProduction: {
+        count: missionsInProductionCount,
+        missions: missionsInProduction.map(m => ({ id: m.id, refId: m.refId, product: m.product, status: m.status, progress: m.progress }))
+      },
+      productionActiveCount: missionsInProductionCount,
+
+      // 3. Quality index / Indice qualité
+      qualityIndex: qualityIndexStr,
+      indiceQualite: qualityIndexStr,
+
+      // 4. Real efficiency / Efficience réelle
+      realEfficiency: realEfficiencyStr,
+      efficienceReelle: realEfficiencyStr,
+
+      // 5. Total number of missions / Nombre total de missions
+      totalNumberOfMissions: totalMissionsCount,
+      totalMissions: totalMissionsCount,
+      nombreTotalDeMissions: totalMissionsCount,
+
+      // 6. Percentage of photos or videos produced / Pourcentage de photos ou vidéos produites
+      percentageOfPhotosOrVideosProduced: photoVideoPercentageStr,
+      pourcentageDePhotosOuVideosProduites: photoVideoPercentageStr,
+
+      // 7. Secondary missions / Missions secondaires
+      secondaryMissionsCount: secondaryMissions.length,
+      secondaryMissionsSummary: {
+        total: secondaryMissions.length,
+        active: secondaryMissions.filter(sm => sm.enabled !== false).length,
+        items: secondaryMissions
+      },
+
+      // 8. Number of active families / Nombre de familles actives
+      numberOfActiveFamilies: activeFamiliesCount,
+      nombreDeFamillesActives: activeFamiliesCount,
+
+      // 9. Active mission / Missions actives
+      activeMissionsCount: activeMissionsCount,
+      missionsActives: activeMissionsCount,
+
+      // 10. Delivery rate percentage / Pourcentage taux de livraison
+      deliveryRatePercentage: deliveryRateStr,
+      missionDeliveryRatePercentage: missionDeliveryRateStr,
+
+      // 11. Percentage of problems / Pourcentage de problèmes
+      percentageOfProblems: problemPercentageStr,
+      pourcentageDeProblemes: problemPercentageStr,
+
+      // 12. Number of missions in production / Nombre de missions en production
+      numberOfMissionsInProduction: missionsInProductionCount,
+      nombreDeMissionsEnProduction: missionsInProductionCount
+    };
+
     const data = {
+      // Strategic Performance Analysis / Performance Metrics (Top-level metrics)
+      strategicPerformanceAnalysis,
+      performanceMetrics: strategicPerformanceAnalysis,
+
+      // Direct Top-Level Metric Keys
+      deliveryRate: deliveryRateStr,
+      activeProduction: missionsInProductionCount,
+      qualityIndex: qualityIndexStr,
+      realEfficiency: realEfficiencyStr,
+      totalNumberOfMissions: totalMissionsCount,
+      percentageOfPhotosOrVideosProduced: photoVideoPercentageStr,
+      secondaryMissionsCount: secondaryMissions.length,
+      numberOfActiveFamilies: activeFamiliesCount,
+      activeMissionsCount: activeMissionsCount,
+      deliveryRatePercentage: deliveryRateStr,
+      percentageOfProblems: problemPercentageStr,
+      numberOfMissionsInProduction: missionsInProductionCount,
+
       // Core Databases
       missions,
       secondaryMissions,
@@ -2008,6 +2265,8 @@ LISTE DES COMMANDES :
       scheduledExportEnabled,
       scheduledExportDays,
       scheduledExportTime,
+      scheduledExportDayConfigs,
+      selectedExportTargets,
       
       // Custom family sorting order
       customFamilyOrder,
@@ -3185,6 +3444,8 @@ LISTE DES COMMANDES :
       if (data.scheduledExportEnabled !== undefined) setScheduledExportEnabled(data.scheduledExportEnabled);
       if (data.scheduledExportDays) setScheduledExportDays(data.scheduledExportDays);
       if (data.scheduledExportTime) setScheduledExportTime(data.scheduledExportTime);
+      if (data.scheduledExportDayConfigs) setScheduledExportDayConfigs(data.scheduledExportDayConfigs);
+      if (data.selectedExportTargets) setSelectedExportTargets(data.selectedExportTargets);
 
       if (data.globalLogs) setGlobalLogs(data.globalLogs);
       if (data.customFamilyOrder) setCustomFamilyOrder(data.customFamilyOrder);
@@ -3557,8 +3818,91 @@ LISTE DES COMMANDES :
       setTimeout(() => setToast(prev => ({ ...prev, show: false })), 4000);
     }
   };
-  
-  downloadFullExportRef.current = downloadFullExport;
+
+  const exportSelectedJpegsAndData = useCallback(async () => {
+    const targets = selectedExportTargets.length > 0 ? selectedExportTargets : [
+      'global-report-container',
+      'report-dashboard-strategic',
+      'report-chart-timeline',
+      'main-missions-table',
+      'family-mosaics-grid'
+    ];
+
+    setToast({ show: true, message: `Lancement de l'exportation des JPEGs du moniteur (${targets.length} éléments)...`, type: 'task' });
+    setIsCapturing(true);
+
+    const reportElement = document.getElementById('global-report-container');
+    const originalStyle = reportElement ? {
+      display: reportElement.style.display,
+      position: reportElement.style.position,
+      top: reportElement.style.top,
+      left: reportElement.style.left,
+      width: reportElement.style.width
+    } : null;
+
+    try {
+      if (reportElement) {
+        reportElement.style.display = 'block';
+        reportElement.style.position = 'relative';
+        reportElement.style.top = '0';
+        reportElement.style.left = '0';
+        reportElement.style.width = '1200px';
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      const zip = new JSZip();
+      let capturedCount = 0;
+
+      for (const targetId of targets) {
+        const targetMeta = EXPORTABLE_TARGETS.find(t => t.id === targetId);
+        const name = targetMeta ? targetMeta.name : targetId;
+
+        const dataUrl = await captureElementToJpeg(targetId, name, { skipDownload: true });
+        if (dataUrl && typeof dataUrl === 'string') {
+          const imgData = dataUrl.split(',')[1];
+          const safeFileName = `${name.replace(/[^a-zA-Z0-9_\-]/g, '_')}.jpg`;
+          zip.file(safeFileName, imgData, { base64: true });
+          capturedCount++;
+        }
+      }
+
+      if (reportElement && originalStyle) {
+        reportElement.style.display = originalStyle.display;
+        reportElement.style.position = originalStyle.position;
+        reportElement.style.top = originalStyle.top;
+        reportElement.style.left = originalStyle.left;
+        reportElement.style.width = originalStyle.width;
+      }
+
+      if (capturedCount > 0) {
+        const zipContent = await zip.generateAsync({ type: 'blob' });
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0];
+        const timeStr = `${now.getHours()}h${now.getMinutes().toString().padStart(2, '0')}`;
+        const zipName = `Export_JPEGs_Moniteur_${dateStr}_${timeStr}.zip`;
+
+        const link = document.createElement('a');
+        link.download = zipName;
+        link.href = URL.createObjectURL(zipContent);
+        link.click();
+
+        setToast({ show: true, message: `Export JPEG terminé ! (${capturedCount} éléments dans ${zipName})`, type: 'task' });
+      } else {
+        setToast({ show: true, message: "Aucun élément n'a pu être capturé.", type: 'alert' });
+      }
+
+      // Perform full Excel export as well
+      downloadFullExport();
+    } catch (err: any) {
+      console.error('Export Error:', err);
+      setToast({ show: true, message: `Erreur lors de l'exportation : ${err.message}`, type: 'alert' });
+    } finally {
+      setIsCapturing(false);
+      setTimeout(() => setToast(p => ({ ...p, show: false })), 4000);
+    }
+  }, [selectedExportTargets, EXPORTABLE_TARGETS, captureElementToJpeg]);
+
+  downloadFullExportRef.current = exportSelectedJpegsAndData;
 
   // Les importations Excel ont été supprimées au profit des importations JSON.
 
@@ -5313,6 +5657,83 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
       return updatedCategories;
     });
+  };
+
+  const availableFamiliesForModal = useMemo(() => {
+    return Array.from(new Set([
+      ...manuallyCreatedFamilies,
+      ...(categories.find(c => c.id === 'family')?.items || []),
+      ...missions.map(m => m.family || deduceFamily(m.product) || 'Autre').filter(Boolean)
+    ])).sort();
+  }, [manuallyCreatedFamilies, categories, missions]);
+
+  const addSubFamily = (targetFamilies: string[], subFamilyName: string, colorName: string = 'STANDARD') => {
+    if (!subFamilyName || !subFamilyName.trim() || targetFamilies.length === 0) return;
+    const trimmedSubFam = subFamilyName.trim();
+    const trimmedColor = colorName.trim() || 'STANDARD';
+
+    setCategories(prevCategories => {
+      const updatedCategories = prevCategories.map(cat => {
+        if (cat.id === 'product') {
+          const items = cat.items ? [...cat.items] : [];
+          if (!items.some(item => item.toLowerCase() === trimmedSubFam.toLowerCase())) {
+            items.push(trimmedSubFam);
+          }
+          return { ...cat, items };
+        }
+        return cat;
+      });
+      const categoriesToSave = updatedCategories.map(({ icon, ...rest }) => rest);
+      localStorage.setItem('categories', JSON.stringify(categoriesToSave));
+      return updatedCategories;
+    });
+
+    setMissions(prevMissions => {
+      const newMissions: Mission[] = targetFamilies.map((fam, idx) => {
+        const nextId = (Math.max(0, ...prevMissions.map(m => parseInt(m.id) || 0)) + idx + 1).toString();
+        const nextNo = Math.max(0, ...prevMissions.map(m => m.missionNo || 0)) + idx + 1;
+        return {
+          id: nextId,
+          missionNo: nextNo,
+          refId: `NK-${nextNo}`,
+          family: fam,
+          product: trimmedSubFam,
+          color: trimmedColor,
+          argumentType: 'STANDARD',
+          univers: 'LIFESTYLE',
+          format: 'STANDARD',
+          position: 'STUDIO',
+          support: 'WEB',
+          priority: 'Normal',
+          status: 'en attente',
+          progress: 0,
+          photoCountRequested: 1,
+          photoCountDelivered: 0,
+          info: `Sous-famille "${trimmedSubFam}" créée pour la famille ${fam}`,
+          createdAt: Date.now(),
+          history: [{ timestamp: Date.now(), message: `Création de la sous-famille "${trimmedSubFam}"` }],
+          enabled: true
+        };
+      });
+
+      const updated = [...prevMissions, ...newMissions];
+      localStorage.setItem('missions', JSON.stringify(updated));
+      return updated;
+    });
+
+    setGlobalLogs(prev => [...prev, {
+      id: `add-subfam-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      timestamp: Date.now(),
+      message: `SOUS-FAMILLE: Ajout de la sous-famille "${trimmedSubFam}" (${trimmedColor}) rattachée à : ${targetFamilies.join(', ')}`,
+      type: 'manual'
+    }]);
+
+    setToast({
+      show: true,
+      message: `Sous-famille "${trimmedSubFam}" ajoutée avec succès à [${targetFamilies.join(', ')}] !`,
+      type: 'task'
+    });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
   };
 
   const deleteFamily = (familyName: string, definitive: boolean = false) => {
@@ -9056,66 +9477,150 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                   {/* Scheduled Export */}
                   <div className="p-6 bg-black/20 border border-white/5 rounded-2xl space-y-6">
-                    <div className="flex flex-col md:flex-row items-center gap-8">
-                      <div className="flex-1 w-full space-y-4">
-                        <div className="flex items-center justify-between p-4 bg-black/40 border border-white/10 rounded-xl">
-                          <div>
-                            <h4 className="text-sm font-bold text-white mb-1">Export Planifié</h4>
-                            <p className="text-[10px] text-text-dim max-w-[250px]">Téléchargement programmé un jour précis de la semaine à une heure donnée.</p>
-                          </div>
-                          <Toggle enabled={scheduledExportEnabled} onToggle={() => setScheduledExportEnabled(!scheduledExportEnabled)} />
+                    <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 pb-4 border-b border-white/10">
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-xl bg-accent-purple/10 border border-accent-purple/20 text-accent-purple">
+                          <Calendar size={20} />
                         </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-white">Export Planifié par Jour</h4>
+                          <p className="text-[10px] text-text-dim">Définissez un horaire spécifique et activez l'exportation automatique pour chaque jour de la semaine.</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <Toggle enabled={scheduledExportEnabled} onToggle={() => setScheduledExportEnabled(!scheduledExportEnabled)} />
+                      </div>
+                    </div>
+
+                    {/* Per-day schedules with checkboxes and individual time pickers */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2">
+                           <Clock size={12} /> Planning Hebdomadaire (Case à cocher & Heure par Jour)
+                        </label>
+                        <button
+                          type="button"
+                          disabled={!scheduledExportEnabled}
+                          onClick={() => {
+                            const firstTime = Object.values(scheduledExportDayConfigs).find(c => c.time)?.time || '18:00';
+                            setScheduledExportDayConfigs(prev => {
+                              const updated = { ...prev };
+                              Object.keys(updated).forEach(k => {
+                                updated[k] = { ...updated[k], time: firstTime };
+                              });
+                              return updated;
+                            });
+                            setToast({ show: true, message: `Horaire ${firstTime} appliqué à tous les jours`, type: 'task' });
+                            setTimeout(() => setToast(p => ({ ...p, show: false })), 2500);
+                          }}
+                          className="text-[10px] font-bold uppercase tracking-wider text-accent-purple hover:text-white transition-colors disabled:opacity-40"
+                        >
+                          Harmoniser l'heure
+                        </button>
                       </div>
 
-                      <div className="flex-1 w-full space-y-4 flex flex-col md:flex-row gap-4">
-                        <div className="flex-[2_2_0%]">
-                          <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2 mb-2">
-                             <Calendar size={10} /> Jours de la semaine
-                          </label>
-                          <div className="flex flex-wrap gap-2">
-                            {[
-                              { value: '1', label: 'Lun' },
-                              { value: '2', label: 'Mar' },
-                              { value: '3', label: 'Mer' },
-                              { value: '4', label: 'Jeu' },
-                              { value: '5', label: 'Ven' },
-                              { value: '6', label: 'Sam' },
-                              { value: '0', label: 'Dim' }
-                            ].map(day => (
-                              <button
-                                key={day.value}
-                                onClick={() => {
-                                  if (scheduledExportDays.includes(day.value)) {
-                                    setScheduledExportDays(scheduledExportDays.filter(d => d !== day.value));
-                                  } else {
-                                    setScheduledExportDays([...scheduledExportDays, day.value]);
-                                  }
-                                }}
-                                disabled={!scheduledExportEnabled}
-                                className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${
-                                  scheduledExportDays.includes(day.value) && scheduledExportEnabled
-                                    ? 'bg-accent-purple text-white'
-                                    : 'bg-black/40 text-text-dim border border-white/10'
-                                } ${!scheduledExportEnabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-accent-purple/50'}`}
-                              >
-                                {day.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex-1">
-                          <label className="text-[10px] font-bold uppercase tracking-widest text-text-dim flex items-center gap-2 mb-2">
-                             <Clock size={10} /> Heure
-                          </label>
-                          <input
-                            type="time"
-                            value={scheduledExportTime}
-                            onChange={(e) => setScheduledExportTime(e.target.value)}
-                            disabled={!scheduledExportEnabled}
-                            className={`w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm font-bold tracking-wider outline-none focus:border-accent-purple/50 transition-colors ${scheduledExportEnabled ? 'text-white' : 'text-text-dim'} [color-scheme:dark]`}
-                          />
-                        </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                        {[
+                          { id: '1', label: 'Lundi', short: 'Lun' },
+                          { id: '2', label: 'Mardi', short: 'Mar' },
+                          { id: '3', label: 'Mercredi', short: 'Mer' },
+                          { id: '4', label: 'Jeudi', short: 'Jeu' },
+                          { id: '5', label: 'Vendredi', short: 'Ven' },
+                          { id: '6', label: 'Samedi', short: 'Sam' },
+                          { id: '0', label: 'Dimanche', short: 'Dim' }
+                        ].map((day) => {
+                          const config = scheduledExportDayConfigs[day.id] || { enabled: false, time: '18:00' };
+                          const isDayActive = config.enabled && scheduledExportEnabled;
+
+                          return (
+                            <div 
+                              key={day.id}
+                              className={`p-3 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
+                                isDayActive 
+                                  ? 'bg-accent-purple/15 border-accent-purple/40 shadow-[0_0_15px_rgba(189,0,255,0.15)]' 
+                                  : 'bg-black/40 border-white/10 opacity-70 hover:opacity-100'
+                              } ${!scheduledExportEnabled ? 'opacity-40 pointer-events-none' : ''}`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className={`text-xs font-black uppercase tracking-wider ${isDayActive ? 'text-accent-purple' : 'text-white/80'}`}>
+                                  {day.short}
+                                </span>
+                                <span className="text-[9px] text-text-dim font-mono">{day.label}</span>
+                              </div>
+
+                              {/* Checkbox below day name */}
+                              <label className="flex items-center gap-2 cursor-pointer select-none py-1 border-y border-white/5 my-0.5">
+                                <input 
+                                  type="checkbox"
+                                  checked={config.enabled}
+                                  onChange={(e) => {
+                                    setScheduledExportDayConfigs(prev => ({
+                                      ...prev,
+                                      [day.id]: {
+                                        ...(prev[day.id] || { time: '18:00' }),
+                                        enabled: e.target.checked
+                                      }
+                                    }));
+                                  }}
+                                  disabled={!scheduledExportEnabled}
+                                  className="w-4 h-4 accent-accent-purple rounded cursor-pointer"
+                                />
+                                <span className={`text-[10px] font-bold ${config.enabled ? 'text-white' : 'text-text-dim'}`}>
+                                  {config.enabled ? 'Actif' : 'Inactif'}
+                                </span>
+                              </label>
+
+                              {/* Time input */}
+                              <div>
+                                <label className="text-[8px] font-bold uppercase tracking-widest text-text-dim block mb-1">
+                                  Heure
+                                </label>
+                                <input
+                                  type="time"
+                                  value={config.time}
+                                  onChange={(e) => {
+                                    setScheduledExportDayConfigs(prev => ({
+                                      ...prev,
+                                      [day.id]: {
+                                        ...(prev[day.id] || { enabled: true }),
+                                        time: e.target.value
+                                      }
+                                    }));
+                                  }}
+                                  disabled={!scheduledExportEnabled || !config.enabled}
+                                  className={`w-full bg-black/60 border rounded-xl p-2 text-xs font-mono font-bold tracking-wider text-center outline-none focus:border-accent-purple transition-all ${
+                                    isDayActive ? 'border-accent-purple/40 text-white' : 'border-white/10 text-text-dim'
+                                  } [color-scheme:dark]`}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
+                    </div>
+
+                    {/* Window for selecting table types to export */}
+                    <div className="pt-4 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setIsExportTargetsModalOpen(true)}
+                          className="px-5 py-3 bg-accent-purple/20 border border-accent-purple/40 text-accent-purple hover:bg-accent-purple hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-lg"
+                        >
+                          <CheckSquare size={16} /> Choix des Tableaux & Graphiques à Exporter ({selectedExportTargets.length})
+                        </button>
+                        <p className="text-[10px] text-text-dim max-w-[280px]">
+                          Sélectionnez les tableaux, graphiques et mosaïques d'images à capturer au format JPEG.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={exportSelectedJpegsAndData}
+                        className="px-5 py-3 bg-accent-blue/20 border border-accent-blue/30 text-accent-blue hover:bg-accent-blue hover:text-black rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2"
+                      >
+                        <Download size={16} /> Exporter les JPEGs Maintenant (ZIP)
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -12770,12 +13275,15 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                     <button 
                       id="add-family-btn"
-                      onClick={() => setShowAddFamilyModal(true)}
+                      onClick={() => {
+                        setAddFamilyMode('family');
+                        setShowAddFamilyModal(true);
+                      }}
                       className="flex items-center gap-2 px-3 py-1.5 bg-accent-purple/10 border border-accent-purple/30 hover:border-accent-purple/60 text-accent-purple rounded-md text-[10px] font-black uppercase tracking-widest transition-all hover:bg-accent-purple/20 cursor-pointer h-[38px] sm:h-[40px]"
-                      title="Ajouter une nouvelle famille"
+                      title="Ajouter une nouvelle famille ou sous-famille"
                     >
                       <Plus size={12} />
-                      Ajouter Famille
+                      Ajouter Famille / Sous-Famille
                     </button>
                   </div>
                 </div>
@@ -13134,6 +13642,125 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
 
                   {missions.length > 0 && (
                     <>
+                      {viewMode === 'table' && selectedMissionIds.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className="bg-accent/10 border border-accent/30 p-3 rounded-xl mb-4 shadow-[0_0_20px_rgba(0,255,148,0.08)] flex flex-wrap items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-7 h-7 rounded-full bg-accent/20 text-accent flex items-center justify-center shrink-0">
+                              <CheckSquare size={14} />
+                            </div>
+                            <div>
+                              <span className="font-black uppercase text-white tracking-wider">
+                                {selectedMissionIds.length} mission(s) sélectionnée(s)
+                              </span>
+                              <span className="text-[10px] text-text-dim block font-mono">Édition groupée dans le tableau d'action</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Renommer le produit / sous-famille */}
+                            <div className="flex items-center gap-1 bg-black/50 border border-white/10 rounded-lg p-1">
+                              <input 
+                                type="text"
+                                placeholder="Nouveau nom sous-famille..."
+                                id="table-batch-product-input"
+                                className="bg-transparent border-none px-2 py-1 text-[10px] text-white outline-none w-36 font-mono"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const val = (e.target as HTMLInputElement).value;
+                                    if (val.trim()) {
+                                      setMissions(prev => prev.map(m => selectedMissionIds.includes(m.id) ? { ...m, product: val.trim() } : m));
+                                      setToast({ show: true, message: `Sous-famille renommée en "${val.trim()}"`, type: 'task' });
+                                      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                                      (e.target as HTMLInputElement).value = '';
+                                    }
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  const el = document.getElementById('table-batch-product-input') as HTMLInputElement;
+                                  if (el && el.value.trim()) {
+                                    const val = el.value.trim();
+                                    setMissions(prev => prev.map(m => selectedMissionIds.includes(m.id) ? { ...m, product: val } : m));
+                                    setToast({ show: true, message: `Sous-famille renommée en "${val}"`, type: 'task' });
+                                    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                                    el.value = '';
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-accent text-black font-black uppercase text-[8px] rounded hover:bg-accent/90 cursor-pointer"
+                              >
+                                Appliquer
+                              </button>
+                            </div>
+
+                            {/* Modifier la couleur */}
+                            <div className="flex items-center gap-1 bg-black/50 border border-white/10 rounded-lg p-1">
+                              <input 
+                                type="text"
+                                placeholder="Nouvelle couleur..."
+                                id="table-batch-color-input"
+                                className="bg-transparent border-none px-2 py-1 text-[10px] text-white outline-none w-28 font-mono"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const val = (e.target as HTMLInputElement).value;
+                                    if (val.trim()) {
+                                      setMissions(prev => prev.map(m => selectedMissionIds.includes(m.id) ? { ...m, color: val.trim() } : m));
+                                      setToast({ show: true, message: `Couleur modifiée en "${val.trim()}"`, type: 'task' });
+                                      setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                                      (e.target as HTMLInputElement).value = '';
+                                    }
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  const el = document.getElementById('table-batch-color-input') as HTMLInputElement;
+                                  if (el && el.value.trim()) {
+                                    const val = el.value.trim();
+                                    setMissions(prev => prev.map(m => selectedMissionIds.includes(m.id) ? { ...m, color: val } : m));
+                                    setToast({ show: true, message: `Couleur modifiée en "${val}"`, type: 'task' });
+                                    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+                                    el.value = '';
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-accent-blue text-black font-black uppercase text-[8px] rounded hover:bg-accent-blue/90 cursor-pointer"
+                              >
+                                Couleur
+                              </button>
+                            </div>
+
+                            {/* Déplacer vers une famille */}
+                            <select
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  moveMultipleMissionsToFamily(selectedMissionIds, e.target.value);
+                                  setSelectedMissionIds([]);
+                                  e.target.value = '';
+                                }
+                              }}
+                              className="bg-black/50 border border-white/10 px-2.5 py-1 rounded-lg text-[9px] text-accent-purple font-mono font-bold outline-none cursor-pointer uppercase"
+                            >
+                              <option value="" className="bg-[#1A1A1A] text-white">📂 Déplacer vers famille...</option>
+                              {availableFamiliesForModal.map(fam => (
+                                <option key={fam} value={fam} className="bg-[#1A1A1A] text-white">{fam}</option>
+                              ))}
+                            </select>
+
+                            {/* Deselect All */}
+                            <button
+                              onClick={() => setSelectedMissionIds([])}
+                              className="px-2.5 py-1.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500 text-[9px] uppercase font-bold rounded-lg transition-all cursor-pointer"
+                            >
+                              Tout désélectionner
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
                       {viewMode === 'table' && (
                       <div className="overflow-x-auto custom-scrollbar">
                         <table className="w-full border-collapse min-w-[1300px] border border-white/5 bg-white/[0.01]">
@@ -13709,6 +14336,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 isDeadlineApproaching={isDeadlineApproaching}
                 onRenameFamily={renameFamily}
                 onDeleteFamily={deleteFamily}
+                onOpenAddSubFamilyModal={(famName) => {
+                  setAddFamilyMode('subfamily');
+                  setSelectedFamilyCheckboxes([famName]);
+                  setShowAddFamilyModal(true);
+                }}
                 onToggleMissionEnabled={toggleMissionEnabled}
                 onToggleAllMissionsInFamily={toggleAllMissionsInFamily}
                 onToggleAllMissionsInSubFamily={toggleAllMissionsInSubFamily}
@@ -14904,7 +15536,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             </div>
           )}
 
-        {/* Modal for adding a new family */}
+        {/* Modal for adding a new family or sub-family */}
         {showAddFamilyModal && (
           <div key="add-family-modal-container" className="fixed inset-0 z-[750] flex items-center justify-center p-4">
             <motion.div 
@@ -14915,6 +15547,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               onClick={() => {
                 setShowAddFamilyModal(false);
                 setNewFamilyName('');
+                setNewSubFamilyName('');
+                setNewSubFamilyColor('STANDARD');
+                setSelectedFamilyCheckboxes([]);
               }}
               className="absolute inset-0 bg-black/80 backdrop-blur-md"
             />
@@ -14923,7 +15558,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-card-bg border border-white/10 p-6 rounded-3xl shadow-2xl max-w-md w-full"
+              className="relative bg-card-bg border border-white/10 p-6 rounded-3xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto custom-scrollbar"
             >
               <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
                 <div className="flex items-center gap-3">
@@ -14931,9 +15566,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     <Plus size={16} />
                   </div>
                   <div>
-                    <h2 className="text-sm font-bold font-serif italic text-white">Ajouter une Famille</h2>
+                    <h2 className="text-sm font-bold font-serif italic text-white">
+                      {addFamilyMode === 'family' ? 'Ajouter une Famille Principale' : 'Ajouter une Sous-Famille'}
+                    </h2>
                     <p className="text-[10px] text-text-dim uppercase tracking-wider">
-                      Créer une nouvelle catégorie de produit
+                      {addFamilyMode === 'family' ? 'Créer une nouvelle catégorie globale de produit' : 'Créer et rattacher une sous-famille à une famille existante'}
                     </p>
                   </div>
                 </div>
@@ -14941,6 +15578,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   onClick={() => {
                     setShowAddFamilyModal(false);
                     setNewFamilyName('');
+                    setNewSubFamilyName('');
+                    setNewSubFamilyColor('STANDARD');
+                    setSelectedFamilyCheckboxes([]);
                   }}
                   className="p-1 hover:bg-white/5 rounded-lg text-text-dim hover:text-white transition-all animate-none"
                   id="close-add-family-modal"
@@ -14949,54 +15589,218 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 </button>
               </div>
 
-              <div className="space-y-4 pt-2">
-                <div className="space-y-2">
-                  <label htmlFor="newFamilyInput" className="text-[10px] text-text-dim uppercase tracking-wider block">Nom de la famille :</label>
-                  <input
-                    id="newFamilyInput"
-                    type="text"
-                    value={newFamilyName}
-                    onChange={(e) => setNewFamilyName(e.target.value)}
-                    placeholder="Ex: AT, PUNT, PORTRAITS, etc."
-                    className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs text-white outline-none focus:border-accent-purple transition-all"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (newFamilyName.trim()) {
-                          addFamily(newFamilyName);
-                          setShowAddFamilyModal(false);
-                          setNewFamilyName('');
-                        }
-                      }
-                    }}
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-3 border-t border-white/5">
-                  <button 
-                    onClick={() => {
-                      setShowAddFamilyModal(false);
-                      setNewFamilyName('');
-                    }}
-                    className="flex-1 py-2 bg-white/5 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all border border-white/10"
-                  >
-                    Annuler
-                  </button>
-                  <button 
-                    onClick={() => {
-                      if (!newFamilyName.trim()) return;
-                      addFamily(newFamilyName);
-                      setShowAddFamilyModal(false);
-                      setNewFamilyName('');
-                    }}
-                    disabled={!newFamilyName.trim()}
-                    className="flex-1 py-2 bg-accent-purple text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-purple-600 transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50 disabled:pointer-events-none"
-                  >
-                    Ajouter
-                  </button>
-                </div>
+              {/* Mode Selector Tabs */}
+              <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 mb-5">
+                <button
+                  type="button"
+                  onClick={() => setAddFamilyMode('family')}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    addFamilyMode === 'family'
+                      ? 'bg-accent-purple text-white shadow-lg shadow-purple-500/20'
+                      : 'text-text-dim hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Layers size={12} />
+                  <span>Famille Principale</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddFamilyMode('subfamily');
+                    if (selectedFamilyCheckboxes.length === 0 && availableFamiliesForModal.length > 0) {
+                      setSelectedFamilyCheckboxes([availableFamiliesForModal[0]]);
+                    }
+                  }}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    addFamilyMode === 'subfamily'
+                      ? 'bg-accent-purple text-white shadow-lg shadow-purple-500/20'
+                      : 'text-text-dim hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Box size={12} />
+                  <span>Sous-Famille</span>
+                </button>
               </div>
+
+              {/* Form Content */}
+              {addFamilyMode === 'family' ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="newFamilyInput" className="text-[10px] text-text-dim uppercase tracking-wider block">Nom de la famille :</label>
+                    <input
+                      id="newFamilyInput"
+                      type="text"
+                      value={newFamilyName}
+                      onChange={(e) => setNewFamilyName(e.target.value)}
+                      placeholder="Ex: SIA, AT, PUNT, PORTRAITS, etc."
+                      className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs text-white outline-none focus:border-accent-purple transition-all"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (newFamilyName.trim()) {
+                            addFamily(newFamilyName);
+                            setShowAddFamilyModal(false);
+                            setNewFamilyName('');
+                          }
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-3 border-t border-white/5">
+                    <button 
+                      onClick={() => {
+                        setShowAddFamilyModal(false);
+                        setNewFamilyName('');
+                      }}
+                      className="flex-1 py-2 bg-white/5 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all border border-white/10"
+                    >
+                      Annuler
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (!newFamilyName.trim()) return;
+                        addFamily(newFamilyName);
+                        setShowAddFamilyModal(false);
+                        setNewFamilyName('');
+                      }}
+                      disabled={!newFamilyName.trim()}
+                      className="flex-1 py-2 bg-accent-purple text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-purple-600 transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+                    >
+                      Ajouter Famille
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Step 1: Checkbox list for existing families */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] text-text-dim uppercase tracking-wider block font-bold">
+                        1. Cochez la ou les famille(s) existante(s) :
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFamilyCheckboxes([...availableFamiliesForModal])}
+                          className="text-[8px] font-black uppercase tracking-wider text-accent-purple hover:underline cursor-pointer"
+                        >
+                          Tout cocher
+                        </button>
+                        <span className="text-white/20 text-[8px]">•</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFamilyCheckboxes([])}
+                          className="text-[8px] font-black uppercase tracking-wider text-text-dim hover:text-white cursor-pointer"
+                        >
+                          Tout décocher
+                        </button>
+                      </div>
+                    </div>
+
+                    {availableFamiliesForModal.length === 0 ? (
+                      <p className="text-xs text-text-dim italic p-3 bg-black/20 rounded-xl border border-white/5">
+                        Aucune famille disponible. Veuillez d'abord créer une famille principale.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto custom-scrollbar p-2 bg-black/40 border border-white/10 rounded-xl">
+                        {availableFamiliesForModal.map((fam) => {
+                          const isChecked = selectedFamilyCheckboxes.includes(fam);
+                          return (
+                            <label 
+                              key={fam} 
+                              className={`flex items-center gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${
+                                isChecked 
+                                  ? 'bg-accent-purple/20 border-accent-purple/60 text-white shadow-[0_0_10px_rgba(189,0,255,0.15)]' 
+                                  : 'bg-white/5 border-white/5 hover:border-white/20 text-white/70'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedFamilyCheckboxes(prev => [...prev, fam]);
+                                  } else {
+                                    setSelectedFamilyCheckboxes(prev => prev.filter(f => f !== fam));
+                                  }
+                                }}
+                                className="w-4 h-4 rounded border-white/20 bg-black/60 text-accent-purple focus:ring-accent-purple accent-purple-500 cursor-pointer"
+                              />
+                              <span className="text-xs font-mono font-bold truncate">{fam}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {selectedFamilyCheckboxes.length > 0 && (
+                      <p className="text-[9px] font-mono text-accent-purple tracking-wider font-bold">
+                        ✓ {selectedFamilyCheckboxes.length} famille(s) sélectionnée(s) : {selectedFamilyCheckboxes.join(', ')}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Step 2: Subfamily Name */}
+                  <div className="space-y-2">
+                    <label htmlFor="newSubFamilyInput" className="text-[10px] text-text-dim uppercase tracking-wider block font-bold">
+                      2. Nom de la sous-famille / produit :
+                    </label>
+                    <input
+                      id="newSubFamilyInput"
+                      type="text"
+                      value={newSubFamilyName}
+                      onChange={(e) => setNewSubFamilyName(e.target.value)}
+                      placeholder="Ex: SIA-1000, PACKSHOT 1, LIFESTYLE 5..."
+                      className="w-full bg-black/40 border border-white/10 p-3 rounded-xl text-xs text-white outline-none focus:border-accent-purple transition-all font-mono"
+                    />
+                  </div>
+
+                  {/* Step 3: Color / Option */}
+                  <div className="space-y-2">
+                    <label htmlFor="newSubFamilyColorInput" className="text-[10px] text-text-dim uppercase tracking-wider block">
+                      3. Couleur / Finition (optionnel) :
+                    </label>
+                    <input
+                      id="newSubFamilyColorInput"
+                      type="text"
+                      value={newSubFamilyColor}
+                      onChange={(e) => setNewSubFamilyColor(e.target.value)}
+                      placeholder="Ex: C/C/D.RED, BLACK, STANDARD..."
+                      className="w-full bg-black/40 border border-white/10 p-2.5 rounded-xl text-xs text-white outline-none focus:border-accent-purple transition-all font-mono"
+                    />
+                  </div>
+
+                  {/* Footer buttons */}
+                  <div className="flex gap-2 pt-3 border-t border-white/5">
+                    <button 
+                      onClick={() => {
+                        setShowAddFamilyModal(false);
+                        setNewSubFamilyName('');
+                        setNewSubFamilyColor('STANDARD');
+                        setSelectedFamilyCheckboxes([]);
+                      }}
+                      className="flex-1 py-2 bg-white/5 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all border border-white/10 cursor-pointer"
+                    >
+                      Annuler
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (!newSubFamilyName.trim() || selectedFamilyCheckboxes.length === 0) return;
+                        addSubFamily(selectedFamilyCheckboxes, newSubFamilyName, newSubFamilyColor);
+                        setShowAddFamilyModal(false);
+                        setNewSubFamilyName('');
+                        setNewSubFamilyColor('STANDARD');
+                        setSelectedFamilyCheckboxes([]);
+                      }}
+                      disabled={!newSubFamilyName.trim() || selectedFamilyCheckboxes.length === 0}
+                      className="flex-1 py-2 bg-accent-purple text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-purple-600 transition-all shadow-lg shadow-purple-500/20 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+                    >
+                      Ajouter Sous-Famille
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </div>
         )}
@@ -15063,6 +15867,131 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 >
                   Annuler l'opération
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal pour le Choix des Tableaux et Images à Exporter */}
+      <AnimatePresence>
+        {isExportTargetsModalOpen && (
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-4xl bg-[#121214] border border-white/20 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] text-white"
+            >
+              {/* Header */}
+              <div className="p-6 bg-white/5 border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-accent-purple/20 border border-accent-purple/40 text-accent-purple flex items-center justify-center shadow-lg">
+                    <CheckSquare size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black uppercase text-white tracking-wider">Choix des Tableaux & Graphiques à Exporter</h3>
+                    <p className="text-[11px] text-text-dim">Sélectionnez les éléments à capturer au format JPEG pour les exports automatiques et manuels.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsExportTargetsModalOpen(false)}
+                  className="p-2.5 bg-white/5 hover:bg-white/15 rounded-xl text-text-dim hover:text-white transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Body with Categorized Checkboxes */}
+              <div className="p-6 overflow-y-auto space-y-6 custom-scrollbar flex-1">
+                {(['Moniteur & Synthèse', 'Graphiques & Analytique', 'Tableaux de Données'] as const).map((catName) => {
+                  const targetsInCat = EXPORTABLE_TARGETS.filter(t => t.category === catName);
+                  return (
+                    <div key={catName} className="space-y-3 bg-black/40 p-5 border border-white/10 rounded-2xl">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                        <h4 className="text-xs font-black uppercase tracking-widest text-accent-purple flex items-center gap-2">
+                          <Layers size={14} /> {catName}
+                        </h4>
+                        <span className="text-[10px] text-text-dim font-mono font-bold">
+                          {targetsInCat.filter(t => selectedExportTargets.includes(t.id)).length} / {targetsInCat.length} sélectionnés
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                        {targetsInCat.map((target) => {
+                          const isChecked = selectedExportTargets.includes(target.id);
+                          return (
+                            <label 
+                              key={target.id}
+                              className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-start gap-3.5 ${
+                                isChecked 
+                                  ? 'bg-accent-purple/20 border-accent-purple/50 text-white shadow-[0_0_15px_rgba(189,0,255,0.12)]' 
+                                  : 'bg-white/[0.03] border-white/10 text-white/60 hover:bg-white/10'
+                              }`}
+                            >
+                              <input 
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedExportTargets([...selectedExportTargets, target.id]);
+                                  } else {
+                                    setSelectedExportTargets(selectedExportTargets.filter(id => id !== target.id));
+                                  }
+                                }}
+                                className="mt-1 w-4 h-4 accent-accent-purple rounded cursor-pointer"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-black text-white truncate">{target.name}</div>
+                                <div className="text-[10px] text-text-dim leading-snug mt-1">{target.description}</div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Footer */}
+              <div className="p-5 bg-black/60 border-t border-white/10 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <button 
+                    type="button"
+                    onClick={() => setSelectedExportTargets(EXPORTABLE_TARGETS.map(t => t.id))}
+                    className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
+                  >
+                    Tout Sélectionner
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setSelectedExportTargets([])}
+                    className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white/60 hover:text-white rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all"
+                  >
+                    Tout Désélectionner
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setIsExportTargetsModalOpen(false);
+                      exportSelectedJpegsAndData();
+                    }}
+                    className="px-5 py-2.5 bg-accent-blue/20 border border-accent-blue/40 text-accent-blue hover:bg-accent-blue hover:text-black rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-lg"
+                  >
+                    <Download size={15} /> Exporter Immédiatement (ZIP)
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setIsExportTargetsModalOpen(false)}
+                    className="px-6 py-2.5 bg-accent-purple text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all hover:bg-accent-purple/80 shadow-lg"
+                  >
+                    Valider ({selectedExportTargets.length})
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -17153,6 +18082,7 @@ interface FamilyGroupViewProps {
   isDeadlineApproaching: (deadlineStr?: string) => boolean;
   onRenameFamily: (oldName: string, newName: string) => void;
   onDeleteFamily?: (famName: string, definitive?: boolean) => void;
+  onOpenAddSubFamilyModal?: (famName: string) => void;
   onToggleMissionEnabled: (id: string, e: React.MouseEvent) => void;
   onToggleAllMissionsInFamily: (famName: string, enabled: boolean) => void;
   onToggleAllMissionsInSubFamily: (famName: string, productName: string, colorName: string, enabled: boolean) => void;
@@ -17187,6 +18117,7 @@ function FamilyGroupView({
   isDeadlineApproaching,
   onRenameFamily,
   onDeleteFamily,
+  onOpenAddSubFamilyModal,
   onToggleMissionEnabled,
   onToggleAllMissionsInFamily,
   onToggleAllMissionsInSubFamily,
@@ -17217,6 +18148,133 @@ function FamilyGroupView({
   const missionsByFamily: Record<string, Record<string, Mission[]>> = {};
 
   const [selectedSubFams, setSelectedSubFams] = useState<string[]>([]);
+
+  // Bulk subfamily editing states
+  const [bulkNewSubFamProduct, setBulkNewSubFamProduct] = useState('');
+  const [bulkNewSubFamColor, setBulkNewSubFamColor] = useState('');
+
+  // Custom subfamily order per family
+  const [customSubFamOrder, setCustomSubFamOrder] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem('customSubFamOrder');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Error loading customSubFamOrder', e);
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('customSubFamOrder', JSON.stringify(customSubFamOrder));
+    } catch (e) {}
+  }, [customSubFamOrder]);
+
+  const moveSubFamilyOrder = (famName: string, subFamKey: string, direction: 'up' | 'down') => {
+    const subFamsMap = missionsByFamily[famName] || {};
+    let currentSubFams = Object.keys(subFamsMap);
+    if (customSubFamOrder[famName]) {
+      currentSubFams.sort((a, b) => {
+        const indexA = customSubFamOrder[famName].indexOf(a);
+        const indexB = customSubFamOrder[famName].indexOf(b);
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return a.localeCompare(b);
+      });
+    }
+    const index = currentSubFams.indexOf(subFamKey);
+    if (index === -1) return;
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= currentSubFams.length) return;
+
+    const updated = [...currentSubFams];
+    const temp = updated[index];
+    updated[index] = updated[targetIndex];
+    updated[targetIndex] = temp;
+
+    setCustomSubFamOrder(prev => ({
+      ...prev,
+      [famName]: updated
+    }));
+  };
+
+  const handleBulkSubFamProductRename = () => {
+    const val = bulkNewSubFamProduct.trim();
+    if (!val) return;
+    const targetIds = getTargetMissionIds();
+    if (targetIds.length === 0) return;
+
+    setMissions(prev => prev.map(m => {
+      if (targetIds.includes(m.id)) {
+        return { ...m, product: val, updatedAt: Date.now() };
+      }
+      return m;
+    }));
+
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `EDITION GROUPÉE : Nom de sous-famille/produit renommé en "${val}" pour ${targetIds.length} élément(s).`,
+      type: 'manual'
+    }]);
+
+    setToast({ show: true, message: `Sous-famille renommée en "${val}" pour ${targetIds.length} élément(s) !`, type: 'task' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+    setSelectedSubFams([]);
+    setSelectedMissionIds([]);
+    setBulkNewSubFamProduct('');
+  };
+
+  const handleBulkSubFamColorChange = (presetColor?: string) => {
+    const val = (presetColor || bulkNewSubFamColor).trim();
+    if (!val) return;
+    const targetIds = getTargetMissionIds();
+    if (targetIds.length === 0) return;
+
+    setMissions(prev => prev.map(m => {
+      if (targetIds.includes(m.id)) {
+        return { ...m, color: val, updatedAt: Date.now() };
+      }
+      return m;
+    }));
+
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `EDITION GROUPÉE : Couleur de sous-famille modifiée à "${val}" pour ${targetIds.length} élément(s).`,
+      type: 'manual'
+    }]);
+
+    setToast({ show: true, message: `Couleur modifiée en "${val}" pour ${targetIds.length} élément(s) !`, type: 'task' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+    setSelectedSubFams([]);
+    setSelectedMissionIds([]);
+    setBulkNewSubFamColor('');
+  };
+
+  const handleBulkSubFamDelete = () => {
+    const targetIds = getTargetMissionIds();
+    if (targetIds.length === 0) return;
+    if (!window.confirm(`Voulez-vous vraiment supprimer les sous-familles / missions des ${targetIds.length} élément(s) sélectionné(s) ?`)) return;
+
+    setMissions(prev => prev.filter(m => !targetIds.includes(m.id)));
+
+    setGlobalLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: Date.now(),
+      message: `SUPPRESSION GROUPÉE : ${targetIds.length} élément(s) de sous-familles supprimé(s).`,
+      type: 'manual'
+    }]);
+
+    setToast({ show: true, message: `${targetIds.length} élément(s) supprimé(s) avec succès !`, type: 'task' });
+    setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+
+    setSelectedSubFams([]);
+    setSelectedMissionIds([]);
+  };
 
   // Selections are kept fully persistent. Deselection is manual via 'Tout désélectionner' to avoid accidental losses while scrolling or dragging.
 
@@ -17761,7 +18819,7 @@ function FamilyGroupView({
               </div>
 
               {/* Action grid / options */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
                 {/* Section 1: Déplacer */}
                 <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col gap-2">
                   <span className="text-[9px] font-black text-text-dim/80 uppercase tracking-widest block mb-1">
@@ -18034,6 +19092,90 @@ function FamilyGroupView({
                     Ajouter aux missions
                   </button>
                 </div>
+
+                {/* Section 7: Édition & Arrangement Groupé de Sous-Familles */}
+                <div className="bg-black/40 border border-white/5 p-3 rounded-xl flex flex-col justify-between gap-3">
+                  <div>
+                    <span className="text-[9px] font-black text-accent-purple uppercase tracking-widest block mb-1">
+                      🏷️ Édition Sous-Familles :
+                    </span>
+                    <p className="text-[8px] text-text-dim/60 leading-normal uppercase">
+                      Modifiez le nom ou la couleur pour toutes les sous-familles sélectionnées.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {/* Product rename */}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={bulkNewSubFamProduct}
+                        onChange={(e) => setBulkNewSubFamProduct(e.target.value)}
+                        placeholder="Nom produit..."
+                        className="flex-1 p-1.5 bg-white/5 border border-white/10 text-[9px] text-white placeholder:text-white/30 outline-none focus:border-accent-purple/50 font-mono rounded"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleBulkSubFamProductRename();
+                        }}
+                      />
+                      <button
+                        disabled={!bulkNewSubFamProduct.trim()}
+                        onClick={handleBulkSubFamProductRename}
+                        className={`px-2 py-1.5 text-[8px] font-black uppercase tracking-widest rounded transition-all ${
+                          bulkNewSubFamProduct.trim()
+                            ? 'bg-accent-purple text-white hover:bg-accent-purple/90 cursor-pointer'
+                            : 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed'
+                        }`}
+                      >
+                        Nom
+                      </button>
+                    </div>
+
+                    {/* Color edit */}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={bulkNewSubFamColor}
+                        onChange={(e) => setBulkNewSubFamColor(e.target.value)}
+                        placeholder="Couleur / Finition..."
+                        className="flex-1 p-1.5 bg-white/5 border border-white/10 text-[9px] text-white placeholder:text-white/30 outline-none focus:border-accent-pink/50 font-mono rounded"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleBulkSubFamColorChange();
+                        }}
+                      />
+                      <button
+                        disabled={!bulkNewSubFamColor.trim()}
+                        onClick={() => handleBulkSubFamColorChange()}
+                        className={`px-2 py-1.5 text-[8px] font-black uppercase tracking-widest rounded transition-all ${
+                          bulkNewSubFamColor.trim()
+                            ? 'bg-accent-pink text-white hover:bg-accent-pink/90 cursor-pointer'
+                            : 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed'
+                        }`}
+                      >
+                        Couleur
+                      </button>
+                    </div>
+
+                    {/* Color presets */}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {['STANDARD', 'BLACK', 'WHITE', 'C/C/D.RED', 'N/B'].map(preset => (
+                        <button
+                          key={preset}
+                          onClick={() => handleBulkSubFamColorChange(preset)}
+                          className="px-1.5 py-0.5 text-[7px] font-mono uppercase bg-white/5 hover:bg-accent-pink/20 text-text-dim hover:text-white border border-white/10 hover:border-accent-pink/40 rounded transition-all cursor-pointer"
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleBulkSubFamDelete}
+                    className="w-full py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border border-red-500/30 text-red-400 bg-red-500/10 hover:bg-red-500 hover:text-white transition-all cursor-pointer flex items-center justify-center gap-1"
+                  >
+                    <Trash2 size={10} /> Supprimer les sous-familles
+                  </button>
+                </div>
               </div>
             </div>
           </motion.div>
@@ -18148,7 +19290,17 @@ function FamilyGroupView({
             const subFamilies = missionsByFamily[fam];
             const isFamCollapsed = collapsedFams[fam];
             
-            const subFamKeys = Object.keys(subFamilies);
+            let subFamKeys = Object.keys(subFamilies);
+            if (customSubFamOrder[fam]) {
+              subFamKeys.sort((a, b) => {
+                const indexA = customSubFamOrder[fam].indexOf(a);
+                const indexB = customSubFamOrder[fam].indexOf(b);
+                if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+                if (indexA !== -1) return -1;
+                if (indexB !== -1) return 1;
+                return a.localeCompare(b);
+              });
+            }
             const familyMissionsList = subFamKeys.flatMap(k => subFamilies[k]);
             const totalFamilyMissions = familyMissionsList.length;
             const activeFamilyMissions = familyMissionsList.filter(m => m.enabled);
@@ -18324,6 +19476,19 @@ function FamilyGroupView({
                         <div className="px-2.5 py-1 rounded bg-accent-purple/20 border border-accent-purple/30 text-[9px] font-mono font-black text-accent-purple tracking-widest uppercase">
                           {fam}
                         </div>
+                        {onOpenAddSubFamilyModal && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenAddSubFamilyModal(fam);
+                            }}
+                            className="p-1 px-2 text-accent-purple hover:text-white bg-accent-purple/10 border border-accent-purple/30 hover:bg-accent-purple/20 rounded transition-all flex items-center gap-1 text-[8px] font-black uppercase tracking-wider cursor-pointer"
+                            title={`Ajouter une sous-famille à ${fam}`}
+                          >
+                            <Plus size={10} />
+                            <span>+ Sous-Famille</span>
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -18654,6 +19819,25 @@ function FamilyGroupView({
                               </div>
 
                               <div className="flex items-center gap-2">
+                                {/* Subfamily Reordering controls */}
+                                <div className="flex items-center gap-0.5 bg-black/40 border border-white/10 rounded p-0.5" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => moveSubFamilyOrder(fam, subFamKey, 'up')}
+                                    className="p-1 text-white/40 hover:text-accent hover:bg-white/10 rounded transition-colors cursor-pointer"
+                                    title="Monter la sous-famille dans la famille"
+                                  >
+                                    <ChevronUp size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => moveSubFamilyOrder(fam, subFamKey, 'down')}
+                                    className="p-1 text-white/40 hover:text-accent hover:bg-white/10 rounded transition-colors cursor-pointer"
+                                    title="Descendre la sous-famille dans la famille"
+                                  >
+                                    <ChevronDown size={12} />
+                                  </button>
+                                </div>
                                 {isSubFamCollapsed ? <ChevronDown size={14} className="text-text-dim/60" /> : <ChevronUp size={14} className="text-text-dim/60" />}
                               </div>
                             </div>
