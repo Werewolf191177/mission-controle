@@ -7,7 +7,6 @@ import * as XLSX from 'xlsx';
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { 
   Plus, 
-  Keyboard,
   HelpCircle,
   Trash2, 
   Settings, 
@@ -802,7 +801,7 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
                   </div>
 
                   <div className="space-y-2 pt-2">
-                    <p className="text-[9px] uppercase tracking-wider text-accent font-black">Raccourcis de Gestion Directe :</p>
+                    <p className="text-[9px] uppercase tracking-wider text-accent font-black">Actions Rapides de Gestion :</p>
                     
                     <button 
                       onClick={() => handleQuickAction("Fais-moi un audit complet de la charge de travail et de la répartition par famille de produits (AT, PUNT, HARD PRO, PWB, SBIN). Quels sont les goulots d'étranglement ?")}
@@ -894,28 +893,7 @@ const FloatingAIChat = ({ missions, googleToken }: { missions: any[], googleToke
   );
 };
 
-const defaultShortcuts = {
-  help: 'q',
-  tabTable: '1',
-  tabDashboard: '2',
-  tabInventory: '3',
-  tabJournal: '4',
-  tabSystem: '5',
-  viewTable: 'l',
-  viewMosaic: 'g',
-  viewTask: 't',
-  viewCalendar: 'c',
-  viewFamily: 'f',
-  focusSearch: 's',
-  toggleFilters: 'r',
-  toggleMiddle: 'h',
-  exportJpeg: 'p',
-  toggleWeekly: 'w',
-  toggleMonthly: 'm',
-  toggleSidebar: 'b',
-  exportJson: 'e',
-  importJson: 'i'
-};
+
 
 const getApiUrl = (endpoint: string) => {
   const isPreview = window.location.hostname === 'localhost' || window.location.hostname.includes('run.app');
@@ -1320,7 +1298,7 @@ export default function App() {
   // Computed categories with historical items dynamically populated from existing missions list
   const computedCategories = useMemo(() => {
     return rawCategories.map(cat => {
-      if (cat.id === 'family' || cat.id === 'product' || cat.id === 'color') {
+      if (['family', 'product', 'color', 'argument', 'univers', 'support'].includes(cat.id)) {
         const uniqueVals = Array.from(new Set(
           missions
             .map((m, idx) => {
@@ -1329,7 +1307,11 @@ export default function App() {
                 // Only keep the last product to maintain the addition history without bloating the dropdown selection
                 return idx === 0 ? m.product : '';
               }
-              return m.color || '';
+              if (cat.id === 'color') return m.color || '';
+              if (cat.id === 'argument') return m.argumentType || '';
+              if (cat.id === 'univers') return m.univers || '';
+              if (cat.id === 'support') return m.support || '';
+              return '';
             })
             .filter((val): val is string => typeof val === 'string' && val.trim() !== '')
         ));
@@ -1390,7 +1372,7 @@ export default function App() {
   const [selectedFamilyCheckboxes, setSelectedFamilyCheckboxes] = useState<string[]>([]);
   const [newSubFamilyName, setNewSubFamilyName] = useState('');
   const [newSubFamilyColor, setNewSubFamilyColor] = useState('STANDARD');
-  const [showShortcutsHelpModal, setShowShortcutsHelpModal] = useState(false);
+
   const [newFamilyName, setNewFamilyName] = useState('');
   const [missionCounter, setMissionCounter] = useState(1);
   const [refPrefix, setRefPrefix] = useState('NK');
@@ -1406,8 +1388,40 @@ export default function App() {
   const [selectedColor, setSelectedColor] = useState('');
   const [isColorDropdownOpen, setIsColorDropdownOpen] = useState(false);
   const [colorSearch, setColorSearch] = useState('');
-  const [selectedArgument, setSelectedArgument] = useState('');
-  const [selectedUnivers, setSelectedUnivers] = useState('');
+  const [selectedArgument, setSelectedArgument] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('selectedArgument');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed === 'string' && parsed.trim()) return [parsed.trim()];
+      }
+    } catch (e) {}
+    return [];
+  });
+  const [selectedUnivers, setSelectedUnivers] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('selectedUnivers');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed === 'string' && parsed.trim()) return [parsed.trim()];
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('selectedArgument', JSON.stringify(selectedArgument));
+    } catch (e) {}
+  }, [selectedArgument]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('selectedUnivers', JSON.stringify(selectedUnivers));
+    } catch (e) {}
+  }, [selectedUnivers]);
   const [selectedFormat, setSelectedFormat] = useState('');
   const [selectedPosition, setSelectedPosition] = useState('');
   const [selectedSupport, setSelectedSupport] = useState<string[]>([]);
@@ -1517,8 +1531,8 @@ export default function App() {
       setQuickAddInputs(prev => ({ ...prev, [catId]: '' }));
 
       // Also set the newly created item as selected for convenience!
-      if (catId === 'argument') setSelectedArgument(trimmed);
-      if (catId === 'univers') setSelectedUnivers(trimmed);
+      if (catId === 'argument') setSelectedArgument(prev => (prev || []).includes(trimmed) ? prev : [...(prev || []), trimmed]);
+      if (catId === 'univers') setSelectedUnivers(prev => (prev || []).includes(trimmed) ? prev : [...(prev || []), trimmed]);
 
       return updatedCategories;
     });
@@ -1719,49 +1733,7 @@ export default function App() {
   const [isPriorityFilterOpen, setIsPriorityFilterOpen] = useState(false);
   const [isEnabledFilterOpen, setIsEnabledFilterOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isSidebarHovered, setIsSidebarHovered] = useState(false);
-  const isSidebarVisuallyOpen = isSidebarOpen || isSidebarHovered;
-  
-  const sidebarTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const handleSidebarEnter = useCallback(() => {
-    if (sidebarTimeoutRef.current) {
-      clearTimeout(sidebarTimeoutRef.current);
-      sidebarTimeoutRef.current = null;
-    }
-    if (!isSidebarOpen) {
-      setIsSidebarHovered(true);
-    }
-  }, [isSidebarOpen]);
-
-  const handleSidebarLeave = useCallback((delay = 400) => {
-    if (sidebarTimeoutRef.current) {
-      clearTimeout(sidebarTimeoutRef.current);
-    }
-    sidebarTimeoutRef.current = setTimeout(() => {
-      if (!isSidebarOpen) {
-        setIsSidebarHovered(false);
-      }
-    }, delay);
-  }, [isSidebarOpen]);
-
-  useEffect(() => {
-    if (isSidebarOpen) {
-      if (sidebarTimeoutRef.current) {
-        clearTimeout(sidebarTimeoutRef.current);
-        sidebarTimeoutRef.current = null;
-      }
-      setIsSidebarHovered(false);
-    }
-  }, [isSidebarOpen]);
-
-  useEffect(() => {
-    return () => {
-      if (sidebarTimeoutRef.current) {
-        clearTimeout(sidebarTimeoutRef.current);
-      }
-    };
-  }, []);
+  const isSidebarVisuallyOpen = isSidebarOpen;
   
   const [collapsedCategories, setCollapsedCategories] = useState<string[]>(() => {
     try {
@@ -1868,19 +1840,7 @@ LISTE DES COMMANDES :
 @Google Tasks : Sync Tâches.
 /help : Aide efficace.`;
   const [aiInstructions, setAiInstructions] = useState(defaultAiInstructions);
-  const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display' | 'shortcuts'>('branding');
-  const [customShortcuts, setCustomShortcuts] = useState(() => {
-    const saved = localStorage.getItem('customShortcuts');
-    if (saved) {
-      try {
-        return { ...defaultShortcuts, ...JSON.parse(saved) };
-      } catch (e) {
-        return defaultShortcuts;
-      }
-    }
-    return defaultShortcuts;
-  });
-  const [recordingShortcut, setRecordingShortcut] = useState<string | null>(null);
+  const [systemSubTab, setSystemSubTab] = useState<'branding' | 'data' | 'ai' | 'display'>('branding');
   const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('gemini_custom_api_key') || '');
   const [isSynchroFluxExpanded, setIsSynchroFluxExpanded] = useState<boolean>(() => {
     const stored = localStorage.getItem('isSynchroFluxExpanded') || localStorage.getItem('synchro_flux_expanded');
@@ -2272,10 +2232,7 @@ LISTE DES COMMANDES :
       customFamilyOrder,
       
       // Custom categories definitions
-      categories: categories.map(({ icon, ...rest }) => rest),
-
-      // Custom Keyboard Shortcuts
-      customShortcuts
+      categories: categories.map(({ icon, ...rest }) => rest)
     };
     return JSON.stringify(data, null, 2);
   }, [
@@ -2332,8 +2289,7 @@ LISTE DES COMMANDES :
     scheduledExportDays,
     scheduledExportTime,
     customFamilyOrder,
-    categories,
-    customShortcuts
+    categories
   ]);
 
   const copySystemJson = () => {
@@ -2690,15 +2646,6 @@ LISTE DES COMMANDES :
         const savedSystemSubTab = localStorage.getItem('systemSubTab');
         if (savedSystemSubTab) setSystemSubTab(savedSystemSubTab as any);
 
-        const savedShortcuts = localStorage.getItem('customShortcuts');
-        if (savedShortcuts) {
-          try {
-            setCustomShortcuts(prev => ({ ...defaultShortcuts, ...JSON.parse(savedShortcuts) }));
-          } catch (e) {
-            // fallback
-          }
-        }
-
         const savedShowDuplicateIndicators = localStorage.getItem('showDuplicateIndicators');
         if (savedShowDuplicateIndicators !== null) setShowDuplicateIndicators(savedShowDuplicateIndicators === 'true');
 
@@ -2947,185 +2894,6 @@ LISTE DES COMMANDES :
   useEffect(() => {
     downloadSystemJsonRef.current = downloadSystemJson;
   }, [downloadSystemJson]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (recordingShortcut !== null) {
-        return;
-      }
-
-      // Ignore shortcuts if typing inside an editable field, EXCEPT for Ctrl/Cmd+Number tab navigation
-      const target = e.target as HTMLElement;
-      const isEditable = target && (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable ||
-        target.closest('[contenteditable]')
-      );
-
-      // Check if we pressed Ctrl/Cmd + number key
-      const isControlOrMeta = e.ctrlKey || e.metaKey;
-      const isTabKeyNum = ['1', '2', '3', '4', '5'].includes(e.key) || 
-                          (e.code && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].includes(e.code));
-      const isTabShortcut = isControlOrMeta && isTabKeyNum;
-
-      if (isEditable && !isTabShortcut) {
-        return;
-      }
-
-      // 0. Shortcuts Help Modal trigger (Ctrl+Q) - ignore if focused on editable fields
-      if (!isEditable && e.key.toLowerCase() === customShortcuts.help && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        setShowShortcutsHelpModal(prev => !prev);
-        return;
-      }
-
-      // 1. Tab navigation shortcuts (Ctrl+1 to Ctrl+5, or Alt+1 to Alt+5, or Cmd+1 to Cmd+5)
-      // Allow Alt navigation only when NOT editing, and Ctrl/Cmd navigation even when editing.
-      // Also supports layout-independent check (using e.code for AZERTY keyboards)
-      if (isControlOrMeta || (e.altKey && !isEditable)) {
-        let targetTab: 'table' | 'dashboard' | 'inventory' | 'journal' | 'system' | null = null;
-        
-        const key = e.key;
-        const code = e.code;
-        
-        const isTab1 = key === customShortcuts.tabTable || code === 'Digit1';
-        const isTab2 = key === customShortcuts.tabDashboard || code === 'Digit2';
-        const isTab3 = key === customShortcuts.tabInventory || code === 'Digit3';
-        const isTab4 = key === customShortcuts.tabJournal || code === 'Digit4';
-        const isTab5 = key === customShortcuts.tabSystem || code === 'Digit5';
-
-        if (isTab1) targetTab = 'table';
-        else if (isTab2) targetTab = 'dashboard';
-        else if (isTab3) targetTab = 'inventory';
-        else if (isTab4) targetTab = 'journal';
-        else if (isTab5) targetTab = 'system';
-
-        if (targetTab) {
-          e.preventDefault();
-          setActiveTab(targetTab);
-          return;
-        }
-      }
-
-      // 2. Alt/Option + key shortcuts for specific view modes & actions
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !isEditable) {
-        const keyLower = e.key.toLowerCase();
-        
-        // Mode views (Table tab must be active or will be set active)
-        if (keyLower === customShortcuts.viewTable) {
-          e.preventDefault();
-          setActiveTab('table');
-          setViewMode('table');
-        } else if (keyLower === customShortcuts.viewMosaic) {
-          e.preventDefault();
-          setActiveTab('table');
-          setViewMode('mosaic');
-        } else if (keyLower === customShortcuts.viewTask) {
-          e.preventDefault();
-          setActiveTab('table');
-          setViewMode('task');
-        } else if (keyLower === customShortcuts.viewCalendar) {
-          e.preventDefault();
-          setActiveTab('table');
-          setViewMode('calendar');
-        } else if (keyLower === customShortcuts.viewFamily) {
-          e.preventDefault();
-          setActiveTab('table');
-          setViewMode('family');
-        }
-        
-        // Quick Actions & Toggles
-        else if (keyLower === customShortcuts.focusSearch) {
-          e.preventDefault();
-          setActiveTab('table');
-          setIsFilterVisible(true);
-          setTimeout(() => {
-            const searchInput = document.getElementById('search-input');
-            if (searchInput) {
-              searchInput.focus();
-              (searchInput as HTMLInputElement).select();
-            }
-          }, 100);
-        } else if (keyLower === customShortcuts.toggleFilters) {
-          e.preventDefault();
-          setActiveTab('table');
-          setIsFilterVisible(prev => !prev);
-        } else if (keyLower === customShortcuts.toggleMiddle) {
-          e.preventDefault();
-          setIsMiddleTierVisible(prev => !prev);
-        } else if (keyLower === customShortcuts.exportJpeg) {
-          e.preventDefault();
-          captureAsJPEGRef.current();
-        } else if (keyLower === customShortcuts.toggleWeekly) {
-          e.preventDefault();
-          setActiveTab('dashboard');
-          setIsWeeklyChartCollapsed(prev => !prev);
-        } else if (keyLower === customShortcuts.toggleMonthly) {
-          e.preventDefault();
-          setActiveTab('dashboard');
-          setIsMonthlyChartCollapsed(prev => !prev);
-        } else if (keyLower === customShortcuts.toggleSidebar) {
-          e.preventDefault();
-          setIsSidebarOpen(prev => {
-            const next = !prev;
-            if (next) {
-              setIsSidebarHovered(false);
-            }
-            return next;
-          });
-        } else if (keyLower === customShortcuts.exportJson) {
-          e.preventDefault();
-          downloadSystemJsonRef.current();
-        } else if (keyLower === customShortcuts.importJson) {
-          e.preventDefault();
-          jsonFileInputRef.current?.click();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown, { capture: true });
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown, { capture: true });
-    };
-  }, [customShortcuts, recordingShortcut]);
-
-  // Effect to capture keyboard shortcuts when in recording mode
-  useEffect(() => {
-    if (!recordingShortcut) return;
-
-    const handleGlobalCapture = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.key === 'Escape') {
-        setRecordingShortcut(null);
-        return;
-      }
-
-      // Ignore modifier key presses on their own
-      if (['Control', 'Shift', 'Alt', 'Meta', 'CapsLock', 'Tab'].includes(e.key)) {
-        return;
-      }
-
-      const keyToSet = e.key.toLowerCase();
-      
-      setCustomShortcuts(prev => {
-        const next = { ...prev, [recordingShortcut]: keyToSet };
-        localStorage.setItem('customShortcuts', JSON.stringify(next));
-        return next;
-      });
-
-      setToast({ show: true, message: `Raccourci mis à jour : ${keyToSet.toUpperCase()}`, type: 'task' });
-      setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 2000);
-      setRecordingShortcut(null);
-    };
-
-    window.addEventListener('keydown', handleGlobalCapture, true);
-    return () => {
-      window.removeEventListener('keydown', handleGlobalCapture, true);
-    };
-  }, [recordingShortcut]);
 
   // Helper function for capturing an element to JPEG
   const captureElementToJpeg = async (id: string, fileName: string, options: { pixelRatio?: number; quality?: number; skipDownload?: boolean } = {}) => {
@@ -3393,7 +3161,6 @@ LISTE DES COMMANDES :
       if (data.refCounter !== undefined) setRefCounter(data.refCounter);
       if (data.deadlineAlertThreshold !== undefined) setDeadlineAlertThreshold(data.deadlineAlertThreshold);
       if (data.globalDeadline !== undefined) setGlobalDeadline(data.globalDeadline);
-      if (data.customShortcuts !== undefined) setCustomShortcuts(prev => ({ ...prev, ...data.customShortcuts }));
       
       if (data.appLogo !== undefined) setAppLogo(data.appLogo);
       if (data.headerBgColor) setHeaderBgColor(data.headerBgColor);
@@ -3521,7 +3288,6 @@ LISTE DES COMMANDES :
       
       if (data.globalLogs !== undefined) localStorage.setItem('globalLogs', JSON.stringify(data.globalLogs));
       if (data.customFamilyOrder !== undefined) localStorage.setItem('customFamilyOrder', JSON.stringify(data.customFamilyOrder));
-      if (data.customShortcuts !== undefined) localStorage.setItem('customShortcuts', JSON.stringify(data.customShortcuts));
       if (data.categories !== undefined) {
         const catsToSave = data.categories.map(({ icon, ...rest }: any) => rest);
         localStorage.setItem('categories', JSON.stringify(catsToSave));
@@ -3626,7 +3392,6 @@ LISTE DES COMMANDES :
       localStorage.setItem('retractedIndicators', retractedIndicators.toString());
       localStorage.setItem('systemDataJson', systemDataJson);
       localStorage.setItem('customFamilyOrder', JSON.stringify(customFamilyOrder));
-      localStorage.setItem('customShortcuts', JSON.stringify(customShortcuts));
     } catch (e) {
       if (e instanceof Error && e.name === 'QuotaExceededError') {
         console.error('[STORAGE] Quota exceeded. Attempting to prune logs...');
@@ -3660,7 +3425,7 @@ LISTE DES COMMANDES :
     retractedMosaics, aiInstructions, deadlineAlertThreshold, globalDeadline,
     isSynchroFluxExpanded, autoExportCalendarOnCreate, autoExportTasksOnCreate,
     autoExportMainCalendarOnCreate, autoExportMainTasksOnCreate, activeTab, systemSubTab,
-    showDuplicateIndicators, filterDuplicates, showSecondaryInReport, retractedActionBar, retractedIndicators, systemDataJson, customFamilyOrder, customShortcuts
+    showDuplicateIndicators, filterDuplicates, showSecondaryInReport, retractedActionBar, retractedIndicators, systemDataJson, customFamilyOrder
   ]);
 
   const saveToLocalStorage = () => {
@@ -4140,7 +3905,7 @@ Formatté via Mission Contrôle V3`;
     autoExportCalendarOnCreate, autoExportTasksOnCreate, autoExportMainCalendarOnCreate,
     autoExportMainTasksOnCreate, activeTab, systemSubTab, showDuplicateIndicators,
     filterDuplicates, showSecondaryInReport, retractedActionBar, retractedIndicators,
-    systemDataJson, customFamilyOrder, customShortcuts
+    systemDataJson, customFamilyOrder
   ]);
 
   // Initialize selections with first items if available
@@ -4162,8 +3927,8 @@ Formatté via Mission Contrôle V3`;
     if (!selectedFamily && famItems && famItems.length > 0) setSelectedFamily(famItems[0]);
     if (!selectedProduct && prodItems && prodItems.length > 0) setSelectedProduct(prodItems[0]);
     if (!selectedColor && colItems && colItems.length > 0) setSelectedColor(colItems[0]);
-    if (!selectedArgument && argItems && argItems.length > 0) setSelectedArgument(argItems[0]);
-    if (!selectedUnivers && univItems && univItems.length > 0) setSelectedUnivers(univItems[0]);
+    if ((!selectedArgument || selectedArgument.length === 0) && argItems && argItems.length > 0) setSelectedArgument([argItems[0]]);
+    if ((!selectedUnivers || selectedUnivers.length === 0) && univItems && univItems.length > 0) setSelectedUnivers([univItems[0]]);
     if (!selectedFormat && fmtItems && fmtItems.length > 0) setSelectedFormat(fmtItems[0]);
     if (!selectedPosition && posItems && posItems.length > 0) setSelectedPosition(posItems[0]);
     if (selectedSupport.length === 0 && suppItems && suppItems.length > 0) setSelectedSupport([suppItems[0]]);
@@ -4503,8 +4268,8 @@ Formatté via Mission Contrôle V3`;
       family: selectedFamily || deduceFamily(selectedProduct) || 'Autre',
       product: selectedProduct,
       color: selectedColor,
-      argumentType: selectedArgument,
-      univers: selectedUnivers,
+      argumentType: Array.isArray(selectedArgument) ? selectedArgument.join(', ') : (selectedArgument || ''),
+      univers: Array.isArray(selectedUnivers) ? selectedUnivers.join(', ') : (selectedUnivers || ''),
       format: selectedFormat,
       position: selectedPosition,
       support: (selectedSupport || []).join(', '),
@@ -5497,11 +5262,11 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           if (catId === 'color' && selectedColor.toLowerCase().trim() === deletedLower) {
             setSelectedColor('');
           }
-          if (catId === 'argument' && selectedArgument.toLowerCase().trim() === deletedLower) {
-            setSelectedArgument('');
+          if (catId === 'argument') {
+            setSelectedArgument(prev => (prev || []).filter(item => item.toLowerCase().trim() !== deletedLower));
           }
-          if (catId === 'univers' && selectedUnivers.toLowerCase().trim() === deletedLower) {
-            setSelectedUnivers('');
+          if (catId === 'univers') {
+            setSelectedUnivers(prev => (prev || []).filter(item => item.toLowerCase().trim() !== deletedLower));
           }
           if (catId === 'format' && selectedFormat.toLowerCase().trim() === deletedLower) {
             setSelectedFormat('');
@@ -8556,8 +8321,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             { id: 'branding', label: 'Identité Visuelle', icon: Palette },
             { id: 'display', label: 'Configuration Affichage', icon: Layout },
             { id: 'data', label: 'Structure & Data', icon: Database },
-            { id: 'ai', label: 'Agent IA Gemini', icon: Cpu },
-            { id: 'shortcuts', label: 'Raccourcis Clavier', icon: Keyboard }
+            { id: 'ai', label: 'Agent IA Gemini', icon: Cpu }
           ].map(tab => {
             const Icon = tab.icon;
             return (
@@ -9664,219 +9428,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             </motion.div>
           )}
 
-          {systemSubTab === 'shortcuts' && (
-            <motion.div
-              key="shortcuts"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="space-y-8"
-            >
-              {/* Header card with global reset & search */}
-              <div className="p-10 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl relative overflow-hidden group">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-                  <div className="flex items-center gap-5">
-                    <div className="w-14 h-14 bg-accent/10 flex items-center justify-center text-accent border border-accent/20 rounded-2xl shadow-lg">
-                      <Keyboard size={24} />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-black uppercase tracking-wider text-white leading-tight">Configuration des Raccourcis</h3>
-                      <p className="text-[11px] text-text-dim uppercase font-bold tracking-[3px] mt-1">Personnalisez vos commandes clavier</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-4">
-                    <button
-                      onClick={() => {
-                        if (window.confirm('Êtes-vous sûr de vouloir réinitialiser TOUS les raccourcis aux valeurs par défaut ?')) {
-                          setCustomShortcuts(defaultShortcuts);
-                          localStorage.setItem('customShortcuts', JSON.stringify(defaultShortcuts));
-                          setToast({ show: true, message: 'Tous les raccourcis ont été réinitialisés.', type: 'task' });
-                          setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 3000);
-                        }
-                      }}
-                      className="px-6 py-3 bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-[2px] transition-all flex items-center gap-2"
-                    >
-                      <RotateCcw size={14} /> Réinitialiser Tout
-                    </button>
-                  </div>
-                </div>
 
-                <div className="p-6 bg-yellow-500/5 border border-yellow-500/10 rounded-2xl mb-6">
-                  <div className="flex items-start gap-4">
-                    <div className="p-2 bg-yellow-500/10 rounded text-accent-yellow flex-shrink-0">
-                      <AlertTriangle size={18} />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black uppercase tracking-wider text-white mb-2">Instructions d'enregistrement</h4>
-                      <p className="text-[11px] text-text-dim leading-relaxed">
-                        Pour attribuer une nouvelle touche, cliquez sur le bouton de raccourci d'un élément (il commencera à pulser en orange), puis <span className="text-accent font-bold">appuyez sur la touche souhaitée</span> de votre clavier. Appuyez sur <span className="text-red-400 font-bold">Échap</span> pour annuler. Les raccourcis de navigation des onglets utilisent automatiquement la touche de modification <kbd className="bg-white/10 px-1 py-0.5 rounded text-[10px] text-white">Ctrl</kbd>, les modes de vue et outils utilisent la touche <kbd className="bg-white/10 px-1 py-0.5 rounded text-[10px] text-white">Alt</kbd>.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Conflict indicator / banner */}
-                {(() => {
-                  const conflictKeys = Object.entries(
-                    Object.entries(customShortcuts).reduce<Record<string, string[]>>((acc, [id, key]) => {
-                      const k = String(key).toLowerCase();
-                      if (!acc[k]) acc[k] = [];
-                      acc[k].push(id);
-                      return acc;
-                    }, {})
-                  ).filter(([_, ids]) => ids.length > 1);
-
-                  if (conflictKeys.length > 0) {
-                    return (
-                      <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400">
-                        <AlertTriangle size={16} />
-                        <span className="text-xs font-bold uppercase tracking-wider">
-                          ⚠️ Conflit détecté : {conflictKeys.map(([k, ids]) => `"${k.toUpperCase()}" (${ids.length} actions)`).join(', ')}
-                        </span>
-                      </div>
-                    )
-                  }
-                  return null;
-                })()}
-              </div>
-
-              {/* Grid of categories */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {[
-                  {
-                    category: 'Aide & Général',
-                    items: [
-                      { id: 'help', label: "Ouvrir / Fermer l'Aide", prefix: 'Ctrl / Shift + ', desc: "Affiche le Centre de productivité et d'aide" }
-                    ]
-                  },
-                  {
-                    category: 'Navigation des Onglets',
-                    items: [
-                      { id: 'tabTable', label: "Onglet Production", prefix: 'Ctrl + ', desc: "Bascule vers le tableau de production principal" },
-                      { id: 'tabDashboard', label: "Onglet Dashboard", prefix: 'Ctrl + ', desc: "Bascule vers le tableau de bord analytique" },
-                      { id: 'tabInventory', label: "Onglet Inventaire", prefix: 'Ctrl + ', desc: "Bascule vers l'inventaire des produits" },
-                      { id: 'tabJournal', label: "Onglet Journal de bord", prefix: 'Ctrl + ', desc: "Bascule vers le flux de télémétrie et logs" },
-                      { id: 'tabSystem', label: "Onglet Configuration", prefix: 'Ctrl + ', desc: "Bascule vers la configuration système" }
-                    ]
-                  },
-                  {
-                    category: 'Vues de Production',
-                    items: [
-                      { id: 'viewTable', label: "Vue Ligne Classique", prefix: 'Alt + ', desc: "Active la vue en liste classique" },
-                      { id: 'viewMosaic', label: "Vue Mosaïque", prefix: 'Alt + ', desc: "Active la vue grille d'images de production" },
-                      { id: 'viewTask', label: "Vue Task", prefix: 'Alt + ', desc: "Active la vue Kanban / Tâches" },
-                      { id: 'viewCalendar', label: "Vue Calendrier", prefix: 'Alt + ', desc: "Active le planning des échéances" },
-                      { id: 'viewFamily', label: "Vue Familles", prefix: 'Alt + ', desc: "Active l'organisation par familles de produits" }
-                    ]
-                  },
-                  {
-                    category: 'Outils & Filtres rapides',
-                    items: [
-                      { id: 'focusSearch', label: "Focus Barre de Recherche", prefix: 'Alt + ', desc: "Place immédiatement le curseur dans le champ de recherche" },
-                      { id: 'toggleFilters', label: "Afficher/Masquer les Filtres", prefix: 'Alt + ', desc: "Active ou désactive le volet latéral de filtrage" },
-                      { id: 'toggleMiddle', label: "Afficher/Masquer Graphiques", prefix: 'Alt + ', desc: "Bascule l'affichage des graphiques hebdomadaires/mensuels" },
-                      { id: 'exportJpeg', label: "Exporter en JPEG", prefix: 'Alt + ', desc: "Télécharge le rapport de production sous forme d'image" },
-                      { id: 'toggleWeekly', label: "Plier/Déplier Graphique Hebdo", prefix: 'Alt + ', desc: "Bascule le panneau d'analyse hebdomadaire dans le Dashboard" },
-                      { id: 'toggleMonthly', label: "Plier/Déplier Graphique Mensuel", prefix: 'Alt + ', desc: "Bascule le panneau d'analyse mensuelle dans le Dashboard" },
-                      { id: 'toggleSidebar', label: "Ancrer/Désancrer le Volet", prefix: 'Alt + ', desc: "Bascule l'ancrage permanent du volet de configuration de mission" },
-                      { id: 'exportJson', label: "Sauvegarder / Exporter JSON", prefix: 'Alt + ', desc: "Télécharge la sauvegarde intégrale de la base de données (.json)" },
-                      { id: 'importJson', label: "Charger / Importer JSON", prefix: 'Alt + ', desc: "Sélectionne un fichier de sauvegarde (.json) pour restaurer les données" }
-                    ]
-                  }
-                ].map((cat, catIdx) => (
-                  <div key={catIdx} className="p-8 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl space-y-6">
-                    <h3 className="text-base font-black uppercase tracking-wider text-white border-b border-white/5 pb-3">
-                      {cat.category}
-                    </h3>
-
-                    <div className="space-y-4">
-                      {cat.items.map((item) => {
-                        const isRecording = recordingShortcut === item.id;
-                        const currentKey = customShortcuts[item.id] || defaultShortcuts[item.id as keyof typeof defaultShortcuts];
-                        const isModified = currentKey !== defaultShortcuts[item.id as keyof typeof defaultShortcuts];
-
-                        // Conflict check
-                        const conflictIds = Object.entries(customShortcuts)
-                          .filter(([id, key]) => String(key).toLowerCase() === String(currentKey).toLowerCase() && id !== item.id)
-                          .map(([id]) => id);
-
-                        return (
-                          <div 
-                            key={item.id} 
-                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white/[0.02] border border-white/5 rounded-xl hover:bg-white/[0.04] transition-all"
-                          >
-                            <div className="space-y-1 max-w-[280px]">
-                              <span className="text-xs font-bold text-white uppercase tracking-wider block">
-                                {item.label}
-                              </span>
-                              <span className="text-[10px] text-text-dim block leading-normal">
-                                {item.desc}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-3 self-end sm:self-auto">
-                              {conflictIds.length > 0 && (
-                                <span className="text-[9px] font-bold bg-red-500/10 border border-red-500/20 text-red-400 px-2.5 py-1 rounded-md uppercase tracking-wider animate-pulse">
-                                  ⚠️ Conflit
-                                </span>
-                              )}
-
-                              <button
-                                onClick={() => {
-                                  if (isRecording) {
-                                    setRecordingShortcut(null);
-                                  } else {
-                                    setRecordingShortcut(item.id);
-                                  }
-                                }}
-                                className={`h-11 px-4 rounded-xl border flex items-center justify-center font-mono text-xs font-bold tracking-widest uppercase transition-all ${
-                                  isRecording
-                                    ? 'bg-accent-orange/20 border-accent-orange text-accent-orange animate-pulse scale-[1.05]'
-                                    : 'bg-black/60 border-white/10 hover:border-accent text-white hover:text-accent'
-                                }`}
-                                title="Cliquer pour réassigner la touche"
-                              >
-                                {isRecording ? (
-                                  'Appuyez...'
-                                ) : (
-                                  <span>
-                                    <span className="opacity-50">{item.prefix}</span>
-                                    <span className="text-accent">{String(currentKey).toUpperCase()}</span>
-                                  </span>
-                                )}
-                              </button>
-
-                              <button
-                                onClick={() => {
-                                  setCustomShortcuts((prev: any) => {
-                                    const next = { ...prev, [item.id]: defaultShortcuts[item.id as keyof typeof defaultShortcuts] };
-                                    localStorage.setItem('customShortcuts', JSON.stringify(next));
-                                    return next;
-                                  });
-                                  setToast({ show: true, message: 'Raccourci réinitialisé', type: 'task' });
-                                  setTimeout(() => setToast({ show: false, message: '', type: 'task' }), 2000);
-                                }}
-                                disabled={!isModified}
-                                className={`p-2.5 rounded-lg border flex items-center justify-center transition-all ${
-                                  isModified
-                                    ? 'bg-white/5 border-white/10 text-white hover:bg-white/10'
-                                    : 'bg-white/[0.01] border-white/5 text-white/10 cursor-not-allowed'
-                                }`}
-                                title="Réinitialiser à la valeur par défaut"
-                              >
-                                <RotateCcw size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          )}
         </AnimatePresence>
 
         {/* Global Save Trigger */}
@@ -11374,13 +10926,13 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
     const matchesStatus = filterStatuses.length === 0 || filterStatuses.includes(m.status);
     const matchesProduct = filterProducts.length === 0 || filterProducts.includes(m.product);
     const matchesFamily = filterFamilies.length === 0 || filterFamilies.includes(m.family || deduceFamily(m.product));
-    const matchesUniverse = filterUniverses.length === 0 || filterUniverses.includes(m.univers);
+    const matchesUniverse = filterUniverses.length === 0 || filterUniverses.some(fu => fu.toLowerCase().trim() === (m.univers || '').toLowerCase().trim() || filterUniverses.includes(m.univers));
     const matchesSupport = filterSupports.length === 0 || (() => {
       const missionSupports = (m.support || '').split(', ').map(s => s === 'video' ? 'vidéo' : s);
       return filterSupports.some(fs => missionSupports.includes(fs));
     })();
     const matchesColor = filterColors.length === 0 || filterColors.includes(m.color);
-    const matchesArgument = filterArguments.length === 0 || filterArguments.includes(m.argumentType);
+    const matchesArgument = filterArguments.length === 0 || filterArguments.some(fa => fa.toLowerCase().trim() === (m.argumentType || '').toLowerCase().trim() || filterArguments.includes(m.argumentType));
     const matchesPriority = filterPriorities.length === 0 || filterPriorities.includes(m.priority);
     const matchesEnabled = filterEnabled.length === 0 || (
       (filterEnabled.includes('Actif') && m.enabled) ||
@@ -11710,17 +11262,9 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             </div>
             
             <button 
-              onClick={() => {
-                setIsSidebarOpen(prev => {
-                  const next = !prev;
-                  if (!next) {
-                    setIsSidebarHovered(false);
-                  }
-                  return next;
-                });
-              }}
+              onClick={() => setIsSidebarOpen(prev => !prev)}
               className={`w-12 h-12 border rounded-lg flex items-center justify-center transition-all active:scale-95 group relative shadow-2xl ${isSidebarOpen ? 'bg-accent/15 border-accent/40 text-accent shadow-[0_0_15px_rgba(0,255,148,0.25)]' : 'bg-white/5 border-white/10 hover:bg-accent/10 hover:border-accent hover:text-accent'}`}
-              title={`${isSidebarOpen ? "Désancrer (Rendre flottant / auto-rétractable)" : "Ancrer (Garder toujours ouvert)"} le volet [Alt + ${customShortcuts.toggleSidebar.toUpperCase()}]`}
+              title={isSidebarOpen ? "Rétracter le volet" : "Afficher / Ancrer le volet"}
             >
               <Pin size={18} className={`transition-all duration-300 ${isSidebarOpen ? 'rotate-45 text-accent scale-110' : 'text-white/60 group-hover:text-accent group-hover:scale-110'}`} />
               {isSidebarOpen && (
@@ -11746,14 +11290,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
             >
               <Settings size={20} className={activeTab === 'system' ? 'rotate-90' : 'group-hover:rotate-90 transition-transform duration-500'} />
             </button>
-
-            <button 
-              onClick={() => setShowShortcutsHelpModal(true)}
-              className={`w-12 h-12 border rounded-lg flex items-center justify-center transition-all active:scale-95 group relative shadow-2xl ${showShortcutsHelpModal ? 'bg-accent border-accent text-black shadow-[0_0_20px_rgba(0,255,148,0.3)]' : 'bg-white/5 border-white/10 hover:bg-accent/10 hover:border-accent hover:text-accent'}`}
-              title={`Raccourcis Clavier & Productivité [Ctrl + ${customShortcuts.help.toUpperCase()}]`}
-            >
-              <Keyboard size={20} className={showShortcutsHelpModal ? 'scale-110' : 'group-hover:scale-110 transition-transform duration-300'} />
-            </button>
           </div>
         </header>
 
@@ -11764,66 +11300,45 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                onClick={() => {
-                  setIsSidebarOpen(false);
-                  setIsSidebarHovered(false);
-                }}
+                onClick={() => setIsSidebarOpen(false)}
                 className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] lg:hidden"
               />
             )}
           </AnimatePresence>
 
           <div className="flex h-full overflow-hidden">
-            {activeTab !== 'system' && !isSidebarVisuallyOpen && (
-              <div 
-                onMouseEnter={handleSidebarEnter}
-                className="fixed inset-y-0 left-0 w-3 z-[109] bg-gradient-to-r from-accent/5 to-transparent hover:from-accent/15 hover:w-5 transition-all duration-300 cursor-w-resize flex items-center justify-center group"
-                title={`Approcher le curseur pour déplier [Alt + ${customShortcuts.toggleSidebar.toUpperCase()}]`}
-              >
-                <div className="w-1.5 h-24 rounded-full bg-accent/25 group-hover:bg-accent/60 shadow-[0_0_10px_rgba(0,255,148,0.25)] group-hover:scale-y-125 transition-all duration-300" />
-              </div>
-            )}
-
-            {activeTab !== 'system' && isSidebarVisuallyOpen && !isSidebarOpen && (
-              <div 
-                onMouseEnter={() => {
-                  if (sidebarTimeoutRef.current) {
-                    clearTimeout(sidebarTimeoutRef.current);
-                    sidebarTimeoutRef.current = null;
-                  }
-                  setIsSidebarHovered(false);
-                }}
-                className="fixed inset-y-0 right-0 w-3 z-[120] bg-gradient-to-l from-white/[0.02] to-transparent hover:from-white/10 hover:w-5 transition-all duration-300 cursor-e-resize flex items-center justify-center group"
-                title="Passer la souris ici pour refermer le volet"
-              >
-                <div className="w-1 h-24 rounded-full bg-white/10 group-hover:bg-white/40 shadow-[0_0_10px_rgba(255,255,255,0.1)] group-hover:scale-y-125 transition-all duration-300" />
-              </div>
-            )}
-
             {/* Main Input Form - Responsive Volet */}
             {activeTab !== 'system' && (
               <aside 
-                onMouseEnter={handleSidebarEnter}
-                onMouseLeave={() => handleSidebarLeave(400)}
                 className={`
                   fixed lg:relative inset-y-0 left-0 bg-[#0A0A0A] border-r border-border space-y-8 overflow-y-auto overflow-x-hidden custom-scrollbar z-[110] transition-all duration-500 ease-in-out
                   ${isSidebarVisuallyOpen ? 'w-full max-w-[450px] translate-x-0 p-10 opacity-100' : 'w-0 translate-x-[-100%] p-0 opacity-0 border-none'}
                 `}
               >
-                <div className="flex bg-white/5 border border-white/10 p-1 rounded-xl mb-6">
+                <div className="flex items-center gap-2 mb-6">
+                  <div className="flex-1 flex bg-white/5 border border-white/10 p-1 rounded-xl">
+                    <button 
+                      onClick={() => setSidebarTab('production')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sidebarTab === 'production' ? 'bg-accent text-black shadow-[0_0_15px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
+                    >
+                      <Layout size={14} />
+                      Production
+                    </button>
+                    <button 
+                      onClick={() => setSidebarTab('secondary')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sidebarTab === 'secondary' ? 'bg-accent-blue text-black shadow-[0_0_15px_rgba(0,209,255,0.3)]' : 'text-text-dim hover:text-white'}`}
+                    >
+                      <List size={14} />
+                      Secondaires
+                    </button>
+                  </div>
+
                   <button 
-                    onClick={() => setSidebarTab('production')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sidebarTab === 'production' ? 'bg-accent text-black shadow-[0_0_15px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
+                    onClick={() => setIsSidebarOpen(prev => !prev)}
+                    className={`p-3 border rounded-xl flex items-center justify-center transition-all active:scale-95 group relative shadow-lg shrink-0 ${isSidebarOpen ? 'bg-accent/15 border-accent/40 text-accent shadow-[0_0_15px_rgba(0,255,148,0.25)]' : 'bg-white/5 border-white/10 hover:bg-accent/10 hover:border-accent hover:text-accent'}`}
+                    title={isSidebarOpen ? "Rétracter le volet" : "Déployer / Ancrer le volet"}
                   >
-                    <Layout size={14} />
-                    Production
-                  </button>
-                  <button 
-                    onClick={() => setSidebarTab('secondary')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${sidebarTab === 'secondary' ? 'bg-accent-blue text-black shadow-[0_0_15px_rgba(0,209,255,0.3)]' : 'text-text-dim hover:text-white'}`}
-                  >
-                    <List size={14} />
-                    Secondaires
+                    <Pin size={18} className={`transition-all duration-300 ${isSidebarOpen ? 'rotate-45 text-accent scale-110' : 'text-white/60 group-hover:text-accent group-hover:scale-110'}`} />
                   </button>
                 </div>
 
@@ -11935,7 +11450,22 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                   >
                     <label className="text-[11px] font-bold uppercase tracking-[1px] text-text-dim flex items-center gap-2 group-hover:text-white transition-colors cursor-pointer">
                       {cat.icon && <cat.icon size={12} className={iconColor} style={iconStyle} />}
-                      {cat.name}
+                      <span>{cat.name}</span>
+                      {cat.id === 'argument' && (selectedArgument || []).length > 0 && (
+                        <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-accent-blue/20 text-accent-blue border border-accent-blue/40">
+                          {(selectedArgument || []).length}
+                        </span>
+                      )}
+                      {cat.id === 'univers' && (selectedUnivers || []).length > 0 && (
+                        <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-accent-purple/20 text-accent-purple border border-accent-purple/40">
+                          {(selectedUnivers || []).length}
+                        </span>
+                      )}
+                      {cat.id === 'support' && (selectedSupport || []).length > 0 && (
+                        <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/40">
+                          {(selectedSupport || []).length}
+                        </span>
+                      )}
                     </label>
                     <motion.div
                       animate={{ rotate: isCollapsed ? -90 : 0 }}
@@ -12204,8 +11734,8 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                     <div className={`grid gap-2 grid-cols-2`}>
                       {(cat.items || []).map((item) => {
                         const isSelected = 
-                          (cat.id === 'argument' && selectedArgument === item) ||
-                          (cat.id === 'univers' && selectedUnivers === item) ||
+                          (cat.id === 'argument' && (selectedArgument || []).includes(item)) ||
+                          (cat.id === 'univers' && (selectedUnivers || []).includes(item)) ||
                           (cat.id === 'format' && selectedFormat === item) ||
                           (cat.id === 'position' && selectedPosition === item) ||
                           (cat.id === 'support' && (selectedSupport || []).includes(item)) ||
@@ -12216,8 +11746,18 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             <button
                               key={item}
                               onClick={() => {
-                                if (cat.id === 'argument') setSelectedArgument(item);
-                                if (cat.id === 'univers') setSelectedUnivers(item);
+                                if (cat.id === 'argument') {
+                                  setSelectedArgument(prev => {
+                                    const current = prev || [];
+                                    return current.includes(item) ? current.filter(x => x !== item) : [...current, item];
+                                  });
+                                }
+                                if (cat.id === 'univers') {
+                                  setSelectedUnivers(prev => {
+                                    const current = prev || [];
+                                    return current.includes(item) ? current.filter(x => x !== item) : [...current, item];
+                                  });
+                                }
                                 if (cat.id === 'format') setSelectedFormat(item);
                                 if (cat.id === 'position') setSelectedPosition(item);
                                 if (cat.id === 'support') {
@@ -12765,7 +12305,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               >
                                 <tab.icon size={12} className={activeTab === tab.id ? 'text-accent' : ''} />
                                 <span style={activeTab === tab.id ? { color: navActiveColor } : {}}>{tab.label}</span>
-                                <span className="text-[8px] font-mono px-1 py-0.5 rounded bg-white/5 text-white/30 ml-auto">Ctrl+{idx + 1}</span>
                                 {activeTab === tab.id && <Check size={12} className="ml-1 text-accent" />}
                               </button>
                             ))}
@@ -12789,13 +12328,6 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                       >
                         <tab.icon size={12} />
                         <span>{tab.label}</span>
-                        <kbd className={`text-[8px] font-mono px-1 py-0.5 rounded ${
-                          activeTab === tab.id 
-                            ? 'bg-black/15 text-black/60 border-black/10' 
-                            : 'bg-white/5 text-white/30 border-white/5'
-                        } border`}>
-                          Ctrl+{idx + 1}
-                        </kbd>
                       </button>
                     ))}
                   </div>
@@ -12880,10 +12412,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                             onClick={captureAsJPEG}
                             disabled={isCapturing}
                             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-accent-blue/10 border border-accent-blue/30 rounded text-accent-blue text-[9px] font-black uppercase tracking-widest hover:bg-accent-blue/20 transition-all border-dashed disabled:opacity-50"
-                            title="Sauvegarder toutes les données en JPEG [Alt+P]"
+                            title="Sauvegarder toutes les données en JPEG"
                           >
                             {isCapturing ? <Loader2 size={10} className="animate-spin" /> : <ImageIcon size={10} />}
-                            {isCapturing ? 'Capture...' : 'EXP. JPEG [Alt+P]'}
+                            {isCapturing ? 'Capture...' : 'EXP. JPEG'}
                           </button>
 
                           <button 
@@ -12990,10 +12522,10 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                           ? 'bg-accent-blue text-black border-accent-blue' 
                           : 'bg-white/5 border-white/10 text-white hover:bg-white/10'
                       }`}
-                      title="Afficher/Masquer Filtres [Alt+R]"
+                      title="Afficher/Masquer Filtres"
                     >
                       <Filter size={12} />
-                      {isFilterVisible ? 'Masquer Filtres' : 'Filtres [Alt+R]'}
+                      {isFilterVisible ? 'Masquer Filtres' : 'Filtres'}
                     </button>
 
                     <div className="relative">
@@ -13206,35 +12738,35 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                        <button 
                          onClick={() => setViewMode('table')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'table' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Ligne (Table) [Alt+L]"
+                         title="Mode Ligne (Table)"
                        >
                          <List size={14} />
                        </button>
                        <button 
                          onClick={() => setViewMode('mosaic')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'mosaic' || viewMode === 'grid' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Mosaïque (Grille) [Alt+G]"
+                         title="Mode Mosaïque (Grille)"
                        >
                          <LayoutGrid size={14} />
                        </button>
                        <button 
                          onClick={() => setViewMode('task')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'task' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Task [Alt+T]"
+                         title="Mode Task"
                        >
                          <CheckSquare size={14} />
                        </button>
                        <button 
                          onClick={() => setViewMode('calendar')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'calendar' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Calendrier [Alt+C]"
+                         title="Mode Calendrier"
                        >
                          <Calendar size={14} />
                        </button>
                        <button 
                          onClick={() => setViewMode('family')}
                          className={`p-1.5 rounded transition-all ${viewMode === 'family' ? 'bg-accent text-black shadow-[0_0_10px_rgba(0,255,148,0.3)]' : 'text-text-dim hover:text-white'}`}
-                         title="Mode Familles & Sous-Familles [Alt+F]"
+                         title="Mode Familles & Sous-Familles"
                        >
                          <Layers size={14} />
                        </button>
@@ -13373,7 +12905,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
                               type="text" 
                               value={filterQuery}
                               onChange={(e) => setFilterQuery(e.target.value)}
-                              placeholder="Rechercher produit, ref... [Alt+S]"
+                              placeholder="Rechercher produit, ref..."
                               className="w-full bg-black/40 border border-white/10 p-2.5 rounded text-sm text-white outline-none focus:border-accent-blue transition-all h-[42px]"
                             />
                           </div>
@@ -15310,135 +14842,7 @@ Veuillez générer un rapport synthétique avec 3 indicateurs clés (KPI) et une
           </div>
         )}
 
-        {/* Shortcuts Help Modal */}
-        {showShortcutsHelpModal && (
-          <div key="shortcuts-help-modal-container" className="fixed inset-0 z-[700] flex items-center justify-center p-4">
-            <motion.div 
-              key="shortcuts-help-backdrop"
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              exit={{ opacity: 0 }}
-              onClick={() => setShowShortcutsHelpModal(false)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-md"
-            />
-            <motion.div
-              key="shortcuts-help-content"
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative bg-card-bg border border-white/10 p-6 md:p-8 rounded-3xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-y-auto custom-scrollbar"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-accent/20 flex items-center justify-center text-accent shadow-[0_0_15px_rgba(0,255,148,0.15)]">
-                    <Keyboard size={24} />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold font-serif italic text-white">Centre de Productivité</h2>
-                    <p className="text-[10px] text-text-dim uppercase tracking-widest mt-0.5">
-                      Raccourcis clavier globaux & Navigation rapide
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowShortcutsHelpModal(false)}
-                  className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all active:scale-95"
-                >
-                  <X size={16} />
-                </button>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                {/* Navigation Section */}
-                <div className="bg-black/20 rounded-2xl border border-white/5 p-4 flex flex-col">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-accent mb-4 flex items-center gap-2 pb-2 border-b border-white/5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                    Navigation Principale
-                  </h3>
-                  <div className="space-y-3">
-                    {[
-                      { key: `Ctrl + ${customShortcuts.tabTable.toUpperCase()}`, desc: "Basculer vers l'onglet Production (Tableau)" },
-                      { key: `Ctrl + ${customShortcuts.tabDashboard.toUpperCase()}`, desc: "Basculer vers l'onglet Dashboard (Analytique)" },
-                      { key: `Ctrl + ${customShortcuts.tabInventory.toUpperCase()}`, desc: "Basculer vers l'onglet Inventaire" },
-                      { key: `Ctrl + ${customShortcuts.tabJournal.toUpperCase()}`, desc: "Basculer vers l'onglet Journal de bord (Logs)" },
-                      { key: `Ctrl + ${customShortcuts.tabSystem.toUpperCase()}`, desc: "Basculer vers l'onglet Configuration Système" }
-                    ].map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between py-1.5 border-b border-white/[0.02]">
-                        <span className="text-xs text-white/70">{item.desc}</span>
-                        <kbd className="text-[10px] font-mono px-2 py-1 rounded bg-white/5 text-accent border border-white/10 shadow-inner">
-                          {item.key}
-                        </kbd>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* View Modes Section */}
-                <div className="bg-black/20 rounded-2xl border border-white/5 p-4 flex flex-col">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-accent-blue mb-4 flex items-center gap-2 pb-2 border-b border-white/5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-accent-blue" />
-                    Modes d'Affichage (Table)
-                  </h3>
-                  <div className="space-y-3">
-                    {[
-                      { key: `Alt + ${customShortcuts.viewTable.toUpperCase()}`, desc: "Mode Ligne classique (Tableau principal)" },
-                      { key: `Alt + ${customShortcuts.viewMosaic.toUpperCase()}`, desc: "Mode Mosaïque (Vue Grille d'images)" },
-                      { key: `Alt + ${customShortcuts.viewTask.toUpperCase()}`, desc: "Mode Task (Vue Tâches)" },
-                      { key: `Alt + ${customShortcuts.viewCalendar.toUpperCase()}`, desc: "Mode Calendrier (Planning & Échéances)" },
-                      { key: `Alt + ${customShortcuts.viewFamily.toUpperCase()}`, desc: "Mode Familles & Sous-Familles" }
-                    ].map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between py-1.5 border-b border-white/[0.02]">
-                        <span className="text-xs text-white/70">{item.desc}</span>
-                        <kbd className="text-[10px] font-mono px-2 py-1 rounded bg-white/5 text-accent-blue border border-white/10 shadow-inner">
-                          {item.key}
-                        </kbd>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Actions & Toggles Section */}
-                <div className="bg-black/20 rounded-2xl border border-white/5 p-4 md:col-span-2 flex flex-col">
-                  <h3 className="text-xs font-black uppercase tracking-widest text-accent-purple mb-4 flex items-center gap-2 pb-2 border-b border-white/5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-accent-purple" />
-                    Actions Rapides & Toggles
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
-                    {[
-                      { key: `Alt + ${customShortcuts.focusSearch.toUpperCase()}`, desc: "Focus immédiat sur la barre de recherche" },
-                      { key: `Alt + ${customShortcuts.toggleFilters.toUpperCase()}`, desc: "Afficher ou Masquer le panneau de filtres" },
-                      { key: `Alt + ${customShortcuts.toggleMiddle.toUpperCase()}`, desc: "Afficher ou Masquer les graphiques hebdomadaires/mensuels" },
-                      { key: `Alt + ${customShortcuts.exportJpeg.toUpperCase()}`, desc: "Exporter l'ensemble du rapport de production en JPEG" },
-                      { key: `Alt + ${customShortcuts.toggleWeekly.toUpperCase()}`, desc: "Déplier/Replier l'évolution hebdomadaire (dans Dashboard)" },
-                      { key: `Alt + ${customShortcuts.toggleMonthly.toUpperCase()}`, desc: "Déplier/Replier l'évolution mensuelle (dans Dashboard)" },
-                      { key: `Alt + ${customShortcuts.toggleSidebar.toUpperCase()}`, desc: "Ancrer / Désancrer le volet de configuration de mission" },
-                      { key: `Alt + ${customShortcuts.exportJson.toUpperCase()}`, desc: "Sauvegarder / Exporter les données au format .json" },
-                      { key: `Alt + ${customShortcuts.importJson.toUpperCase()}`, desc: "Charger / Importer un fichier de sauvegarde .json" },
-                      { key: `Ctrl + ${customShortcuts.help.toUpperCase()}`, desc: "Afficher / Masquer ce Centre de productivité" }
-                    ].map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between py-1.5 border-b border-white/[0.02] last:border-0">
-                        <span className="text-xs text-white/70 mr-4">{item.desc}</span>
-                        <kbd className="text-[10px] font-mono px-2 py-1 rounded bg-white/5 text-accent-purple border border-white/10 shadow-inner whitespace-nowrap">
-                          {item.key}
-                        </kbd>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between bg-accent/5 border border-accent/20 p-4 rounded-2xl">
-                <div className="flex items-center gap-3 flex-1">
-                  <HelpCircle size={18} className="text-accent shrink-0" />
-                  <p className="text-xs text-white/80 leading-relaxed">
-                    Utilisez ces raccourcis clavier à tout moment pour naviguer à vitesse grand V. 
-                    Appuyez sur <kbd className="text-[10px] font-mono px-1 py-0.5 rounded bg-white/10 border border-white/15 text-accent">Ctrl + {customShortcuts.help.toUpperCase()}</kbd> pour fermer cette aide.
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
 
         {/* Confirmation Modal for Cleaning Duplicates */}
         {showCleanDuplicatesModal && (
@@ -19396,7 +18800,7 @@ function FamilyGroupView({
                     }
                   }
                 }}
-                className={`border border-white/5 rounded-2xl overflow-hidden shadow-xl transition-all duration-200 ${
+                className={`border border-white/5 rounded-2xl shadow-xl transition-all duration-200 ${
                   draggedOverFamName === fam 
                     ? 'bg-accent/15 border-accent/40 scale-[1.01] shadow-[0_0_20px_rgba(0,255,148,0.15)] relative z-30' 
                     : 'bg-white/[0.02]'
@@ -19681,7 +19085,7 @@ function FamilyGroupView({
                                 }
                               }
                             }}
-                            className={`border rounded-xl bg-black/40 overflow-hidden transition-all duration-200 ${
+                            className={`border rounded-xl bg-black/40 transition-all duration-200 ${
                               isDraggedOver 
                                 ? 'border-accent bg-accent/5 shadow-[0_0_15px_rgba(0,255,148,0.2)] scale-[1.01]' 
                                 : 'border-white/5'
@@ -19885,7 +19289,7 @@ function FamilyGroupView({
                                           e.dataTransfer.setData("text/plain", `MISSION|${fam}|${m.id}`);
                                         }}
                                         onDoubleClick={() => setSelectedMissionId(m.id)}
-                                        className={`p-3 relative flex items-center justify-between gap-4 group transition-colors border-l-2 ${itemBorderClass} ${itemBgClass} cursor-grab active:cursor-grabbing ${m.enabled ? '' : 'opacity-40 grayscale-[0.5]'}`}
+                                        className={`p-3 relative hover:z-50 focus-within:z-50 flex items-center justify-between gap-4 group transition-colors border-l-2 ${itemBorderClass} ${itemBgClass} cursor-grab active:cursor-grabbing ${m.enabled ? '' : 'opacity-40 grayscale-[0.5]'}`}
                                       >
                                         <div className="flex items-center gap-3 flex-1 min-w-0">
                                           {/* Mission Drag Grip Handle */}
@@ -20002,7 +19406,7 @@ function FamilyGroupView({
                                                   >
                                                     <Globe size={13} className="hover:rotate-12 transition-transform duration-200 text-accent-blue" />
                                                   </button>
-                                                  <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/globe-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/globe-tooltip:opacity-100 group-hover/globe-tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-2.5 rounded-xl shadow-2xl z-50 min-w-[200px] backdrop-blur-md flex flex-col gap-1.5">
+                                                  <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/globe-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/globe-tooltip:opacity-100 group-hover/globe-tooltip:scale-100 transition-all duration-200 bg-[#121214]/98 border border-white/20 p-2.5 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] z-[200] min-w-[200px] backdrop-blur-xl flex flex-col gap-1.5">
                                                     <div className="text-[8px] font-black uppercase text-accent-blue tracking-widest mb-1 font-mono">Liens détectés ({extractUrls(m.info).length}) :</div>
                                                     {extractUrls(m.info).map((url, i) => (
                                                       <a
@@ -20054,7 +19458,7 @@ function FamilyGroupView({
                                                 size={14} 
                                                 className="text-red-500 hover:text-red-400 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all pointer-events-none hover:scale-110 animate-pulse" 
                                               />
-                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/prob-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/prob-tooltip:opacity-100 group-hover/prob-tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-[80] whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/prob-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/prob-tooltip:opacity-100 group-hover/prob-tooltip:scale-100 transition-all duration-200 bg-[#121214]/98 border border-red-500/30 p-3 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-[200] whitespace-pre-wrap leading-relaxed backdrop-blur-xl">
                                                 <div className="text-[9px] font-black uppercase text-red-500 tracking-widest mb-1.5 font-mono flex items-center gap-1">
                                                   <AlertTriangle size={10} /> Problématiques ({m.problems.length}) :
                                                 </div>
@@ -20076,7 +19480,7 @@ function FamilyGroupView({
                                                 size={14} 
                                                 className="text-accent-yellow hover:text-yellow-300 drop-shadow-[0_0_8px_rgba(235,255,0,0.4)] transition-all pointer-events-none hover:scale-110" 
                                               />
-                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/tooltip:pointer-events-auto opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-50 whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/tooltip:pointer-events-auto opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/98 border border-accent-yellow/40 p-3.5 rounded-xl shadow-[0_10px_35px_rgba(0,0,0,0.9)] text-[11px] text-white/90 font-sans tracking-wide min-w-[240px] max-w-xs sm:max-w-sm z-[200] whitespace-pre-wrap leading-relaxed backdrop-blur-xl">
                                                 <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest mb-1 font-mono">Note / Instruction :</div>
                                                 <div className="font-medium text-white">{renderTextWithLinks(m.info)}</div>
                                               </div>
@@ -20349,7 +19753,7 @@ function FamilyGroupView({
                                 }
                               }
                             }}
-                            className={`border rounded-2xl bg-black/40 overflow-hidden transition-all duration-300 ${
+                            className={`border rounded-2xl bg-black/40 transition-all duration-300 ${
                               isDraggedOver 
                                 ? 'border-accent bg-accent/5 shadow-[0_0_20px_rgba(0,255,148,0.25)]' 
                                 : 'border-white/10'
@@ -20510,7 +19914,7 @@ function FamilyGroupView({
                                       <div 
                                         key={m.id} 
                                         onDoubleClick={() => setSelectedMissionId(m.id)}
-                                        className={`p-4 relative flex flex-col md:flex-row md:items-center justify-between gap-4 group transition-colors border-l-4 ${itemBorderClass} ${itemBgClass} ${m.enabled ? '' : 'opacity-40 grayscale-[0.5]'}`}
+                                        className={`p-4 relative hover:z-50 focus-within:z-50 flex flex-col md:flex-row md:items-center justify-between gap-4 group transition-colors border-l-4 ${itemBorderClass} ${itemBgClass} ${m.enabled ? '' : 'opacity-40 grayscale-[0.5]'}`}
                                       >
                                         <div className="flex items-center gap-3 flex-1 min-w-0">
                                           {/* Mission Selection Checkbox */}
@@ -20627,7 +20031,7 @@ function FamilyGroupView({
                                                 size={15} 
                                                 className="text-red-500 hover:text-red-400 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)] transition-all pointer-events-none hover:scale-110 animate-pulse" 
                                               />
-                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/prob-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/prob-tooltip:opacity-100 group-hover/prob-tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-[80] whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/prob-tooltip:pointer-events-auto opacity-0 scale-95 group-hover/prob-tooltip:opacity-100 group-hover/prob-tooltip:scale-100 transition-all duration-200 bg-[#121214]/98 border border-red-500/30 p-3 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.8)] text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-[200] whitespace-pre-wrap leading-relaxed backdrop-blur-xl">
                                                 <div className="text-[9px] font-black uppercase text-red-500 tracking-widest mb-1.5 font-mono flex items-center gap-1">
                                                   <AlertTriangle size={10} /> Problématiques ({m.problems.length}) :
                                                 </div>
@@ -20649,7 +20053,7 @@ function FamilyGroupView({
                                                 size={15} 
                                                 className="text-accent-yellow hover:text-yellow-300 drop-shadow-[0_0_8px_rgba(235,255,0,0.4)] transition-all pointer-events-none hover:scale-110" 
                                               />
-                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/tooltip:pointer-events-auto opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/95 border border-white/10 p-3 rounded-xl shadow-2xl text-[11px] text-white/90 font-sans tracking-wide min-w-[220px] max-w-xs z-50 whitespace-pre-wrap leading-relaxed backdrop-blur-md">
+                                              <div className="absolute right-0 bottom-full mb-2 pointer-events-none group-hover/tooltip:pointer-events-auto opacity-0 scale-95 group-hover/tooltip:opacity-100 group-hover/tooltip:scale-100 transition-all duration-200 bg-[#121214]/98 border border-accent-yellow/40 p-3.5 rounded-xl shadow-[0_10px_35px_rgba(0,0,0,0.9)] text-[11px] text-white/90 font-sans tracking-wide min-w-[240px] max-w-xs sm:max-w-sm z-[200] whitespace-pre-wrap leading-relaxed backdrop-blur-xl">
                                                 <div className="text-[9px] font-black uppercase text-accent-yellow tracking-widest mb-1 font-mono">Note / Instruction :</div>
                                                 <div className="font-medium text-white">{renderTextWithLinks(m.info)}</div>
                                               </div>
